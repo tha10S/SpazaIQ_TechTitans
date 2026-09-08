@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # SpazalIQ (Thabo's Mini Mart) — React Native Prototype
 
 This is a working React Native (Expo) implementation of the SpazalIQ Figma prototype, covering:
@@ -45,3 +46,16 @@ You'll need [Node.js](https://nodejs.org/) and the **Expo Go** app on your phone
 - All data is currently **mock data** at the top of each screen file (`stats`, `suppliers`, `orders` arrays). Replace these with real state/API calls when the backend is ready.
 - Colors, spacing, and font sizes are centralized in `theme.js` — update there to keep the whole app consistent if the design changes.
 - To add a new screen: create it in `screens/`, then register it in `App.js`.
+=======
+# SpazaIQ_TechTitans
+DSW2B Semester 2 Project
+>>>>>>> e92d48d23296c3ae43b3f9cf2301f5a7a297ed1a
+# SpazalIQ (Thabo's Mini Mart) — React Native Prototype
+
+This is a working React Native (Expo) implementation of the SpazalIQ Figma prototype, covering:
+
+- **Home** — dashboard with sales/profit/stock/credit stats, quick actions, weekly sales chart, low stock alert
+- **Suppliers** — searchable supplier list with preset products
+- **Orders** — order history with status badges and "Reorder Same" action
+
+## Project structure
