@@ -18,7 +18,7 @@ const INITIAL_MESSAGES = [
   {
     id: 'welcome',
     role: 'assistant',
-    text: 'Hi Thabo! I am your SpazaIQ Assistant. Ask me about your sales, stock, or customers.',
+    text: 'Hi Thabo! I am your Khaka Chat Bot. Ask me about your sales, stock, or customers.',
     time: '09:41 AM',
   },
   {
@@ -101,7 +101,7 @@ export default function ChatbotScreen({ storeId }) {
             <Ionicons name="chatbubble-outline" size={26} color="#FFFFFF" />
           </View>
           <View style={styles.headerCopy}>
-            <Text style={styles.title}>SpazaIQ Assistant</Text>
+            <Text style={styles.title}>Khaka Chat Bot</Text>
             <View style={styles.statusRow}>
               <View style={styles.statusDot} />
               <Text style={styles.status}>Always Online</Text>
