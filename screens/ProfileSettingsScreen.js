@@ -15,18 +15,30 @@ import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../ThemeContext';
 
 const DEFAULT_PROFILE = {
-  name: 'Thabo Dlamini',
+  name: 'Thabo Nkosi',
   shopName: "Thabo's Mini Mart",
-  phone: '+268 7612 3456',
-  email: 'thabo@spazaliq.co.sz',
+  phone: '+27 72 555 1234',
+  email: 'thabo@minimart.co.za',
+  location: 'Soweto, Johannesburg',
+  shopRegistration: 'REG-2024-0847',
 };
 
 const FIELDS = [
-  { key: 'name', label: 'Full Name', icon: 'person-outline' },
-  { key: 'shopName', label: 'Shop Name', icon: 'storefront-outline' },
-  { key: 'phone', label: 'Phone Number', icon: 'call-outline', keyboardType: 'phone-pad' },
-  { key: 'email', label: 'Email', icon: 'mail-outline', keyboardType: 'email-address' },
+  { key: 'name', label: 'Full Name', keyboardType: 'default' },
+  { key: 'shopName', label: 'Shop Name', keyboardType: 'default' },
+  { key: 'phone', label: 'Phone', keyboardType: 'phone-pad' },
+  { key: 'email', label: 'Email', keyboardType: 'email-address' },
+  { key: 'location', label: 'Location', keyboardType: 'default' },
+  { key: 'shopRegistration', label: 'Shop Registration', keyboardType: 'default' },
 ];
+
+const getInitials = (name) =>
+  name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((n) => n[0].toUpperCase())
+    .join('');
 
 export default function ProfileSettingsScreen() {
   const navigation = useNavigation();
@@ -37,6 +49,7 @@ export default function ProfileSettingsScreen() {
   const [draft, setDraft] = useState(DEFAULT_PROFILE);
   const [isEditing, setIsEditing] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
 
   const startEditing = () => {
     setDraft(profile);
@@ -53,7 +66,7 @@ export default function ProfileSettingsScreen() {
       Alert.alert('Missing info', 'Name and shop name cannot be empty.');
       return;
     }
-    setProfile(draft); 
+    setProfile(draft);
     setIsEditing(false);
   };
 
@@ -69,7 +82,7 @@ export default function ProfileSettingsScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: () => {
-            setProfile(DEFAULT_PROFILE); 
+            setProfile(DEFAULT_PROFILE);
             setDraft(DEFAULT_PROFILE);
             setIsEditing(false);
             Alert.alert('Account deleted', 'Your profile has been reset.');
@@ -93,48 +106,71 @@ export default function ProfileSettingsScreen() {
           <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Profile & Settings</Text>
-        <View style={{ width: 24 }} />
+        <TouchableOpacity
+          onPress={() => Alert.alert('Help', "Support isn't wired up in this prototype yet.")}
+        >
+          <Text style={styles.helpText}>Help</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Profile card — Read/Update */}
-        <View style={styles.profileCard}>
-          <View style={styles.avatarWrap}>
-            <Ionicons name="person-circle" size={72} color={colors.primary} />
-            <TouchableOpacity
-              style={styles.avatarEditBadge}
-              onPress={() =>
-                Alert.alert('Change photo', "Photo upload isn't wired up in this prototype yet.")
-              }
-            >
-              <Ionicons name="camera" size={14} color={colors.card} />
-            </TouchableOpacity>
+        {/* Identity row */}
+        <View style={styles.identityRow}>
+          <View style={styles.avatarCircle}>
+            <Text style={styles.avatarInitials}>{getInitials(profile.name)}</Text>
           </View>
+          <View style={styles.identityText}>
+            <Text style={styles.identityName}>{profile.name}</Text>
+            <Text style={styles.identitySub}>{profile.shopName}</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.avatarEditBadge}
+            onPress={() =>
+              Alert.alert('Change photo', "Photo upload isn't wired up in this prototype yet.")
+            }
+          >
+            <Ionicons name="pencil" size={14} color={colors.card} />
+          </TouchableOpacity>
+        </View>
 
-          {FIELDS.map((field) => (
-            <View key={field.key} style={styles.fieldRow}>
-              <View style={styles.fieldIconWrap}>
-                <Ionicons name={field.icon} size={16} color={colors.textMuted} />
+        {/* Shop Information */}
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>SHOP INFORMATION</Text>
+          {isEditing ? null : (
+            <TouchableOpacity style={styles.sectionEditLink} onPress={startEditing}>
+              <Text style={styles.sectionEditLinkText}>Edit</Text>
+              <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+            </TouchableOpacity>
+          )}
+        </View>
+        <View style={styles.settingsCard}>
+          {FIELDS.map((field, idx) => (
+            <View key={field.key}>
+              <View style={styles.fieldRow}>
+                {isEditing ? (
+                  <View style={styles.fieldValueWrap}>
+                    <Text style={styles.fieldLabel}>{field.label}</Text>
+                    <TextInput
+                      style={styles.fieldInput}
+                      value={draft[field.key]}
+                      onChangeText={(v) => updateDraft(field.key, v)}
+                      placeholder={field.label}
+                      placeholderTextColor={colors.textMuted}
+                      keyboardType={field.keyboardType}
+                    />
+                  </View>
+                ) : (
+                  <View style={styles.fieldValueWrap}>
+                    <Text style={styles.fieldLabel}>{field.label}</Text>
+                    <Text style={styles.fieldValue}>{profile[field.key]}</Text>
+                  </View>
+                )}
               </View>
-              {isEditing ? (
-                <TextInput
-                  style={styles.fieldInput}
-                  value={draft[field.key]}
-                  onChangeText={(v) => updateDraft(field.key, v)}
-                  placeholder={field.label}
-                  placeholderTextColor={colors.textMuted}
-                  keyboardType={field.keyboardType}
-                />
-              ) : (
-                <View style={styles.fieldValueWrap}>
-                  <Text style={styles.fieldLabel}>{field.label}</Text>
-                  <Text style={styles.fieldValue}>{profile[field.key]}</Text>
-                </View>
-              )}
+              {idx < FIELDS.length - 1 && <View style={styles.settingDivider} />}
             </View>
           ))}
 
-          {isEditing ? (
+          {isEditing && (
             <View style={styles.editActionsRow}>
               <TouchableOpacity style={[styles.editActionBtn, styles.cancelBtn]} onPress={cancelEditing}>
                 <Text style={styles.cancelBtnText}>Cancel</Text>
@@ -143,21 +179,18 @@ export default function ProfileSettingsScreen() {
                 <Text style={styles.saveBtnText}>Save</Text>
               </TouchableOpacity>
             </View>
-          ) : (
-            <TouchableOpacity style={styles.editBtn} onPress={startEditing}>
-              <Ionicons name="create-outline" size={16} color={colors.primaryDark} />
-              <Text style={styles.editBtnText}>Edit Profile</Text>
-            </TouchableOpacity>
           )}
         </View>
 
-        {/* Preferences — includes the dark mode toggle */}
-        <Text style={styles.sectionTitle}>Preferences</Text>
+        {/* App Preferences */}
+        <Text style={styles.sectionTitle}>APP PREFERENCES</Text>
         <View style={styles.settingsCard}>
           <View style={styles.settingRow}>
             <View style={styles.settingLeft}>
-              <Ionicons name="moon-outline" size={18} color={colors.textPrimary} />
-              <Text style={styles.settingLabel}>Dark Mode</Text>
+              <View style={styles.settingTextCol}>
+                <Text style={styles.settingLabel}>Dark Mode</Text>
+                <Text style={styles.settingSubLabel}>Switch to dark theme</Text>
+              </View>
             </View>
             <Switch
               value={isDark}
@@ -169,8 +202,10 @@ export default function ProfileSettingsScreen() {
           <View style={styles.settingDivider} />
           <View style={styles.settingRow}>
             <View style={styles.settingLeft}>
-              <Ionicons name="notifications-outline" size={18} color={colors.textPrimary} />
-              <Text style={styles.settingLabel}>Notifications</Text>
+              <View style={styles.settingTextCol}>
+                <Text style={styles.settingLabel}>Notifications</Text>
+                <Text style={styles.settingSubLabel}>Order and stock alerts</Text>
+              </View>
             </View>
             <Switch
               value={notificationsEnabled}
@@ -179,28 +214,57 @@ export default function ProfileSettingsScreen() {
               thumbColor={notificationsEnabled ? colors.primary : colors.card}
             />
           </View>
+          <View style={styles.settingDivider} />
+          <TouchableOpacity
+            style={styles.settingRow}
+            onPress={() => Alert.alert('Language', "Language selection isn't wired up in this prototype yet.")}
+          >
+            <View style={styles.settingLeft}>
+              <Text style={styles.settingLabel}>Language</Text>
+            </View>
+            <View style={styles.settingRight}>
+              <Text style={styles.settingValueText}>English</Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+            </View>
+          </TouchableOpacity>
         </View>
 
-        {/* Account — Delete rounds out the CRUD set */}
-        <Text style={styles.sectionTitle}>Account</Text>
+        {/* Security */}
+        <Text style={styles.sectionTitle}>SECURITY</Text>
         <View style={styles.settingsCard}>
-          <TouchableOpacity style={styles.settingRow} onPress={handleLogout}>
+          <TouchableOpacity
+            style={styles.settingRow}
+            onPress={() => Alert.alert('Change PIN', "PIN management isn't wired up in this prototype yet.")}
+          >
             <View style={styles.settingLeft}>
-              <Ionicons name="log-out-outline" size={18} color={colors.textPrimary} />
-              <Text style={styles.settingLabel}>Log Out</Text>
+              <Text style={styles.settingLabel}>Change PIN</Text>
             </View>
             <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
           </TouchableOpacity>
           <View style={styles.settingDivider} />
-          <TouchableOpacity style={styles.settingRow} onPress={handleDeleteAccount}>
+          <View style={styles.settingRow}>
             <View style={styles.settingLeft}>
-              <Ionicons name="trash-outline" size={18} color={colors.danger} />
-              <Text style={[styles.settingLabel, { color: colors.danger }]}>Delete Account</Text>
+              <Text style={styles.settingLabel}>Biometric Login</Text>
             </View>
-          </TouchableOpacity>
+            <Switch
+              value={biometricEnabled}
+              onValueChange={setBiometricEnabled}
+              trackColor={{ false: colors.border, true: colors.primaryLight }}
+              thumbColor={biometricEnabled ? colors.primary : colors.card}
+            />
+          </View>
         </View>
 
-        <Text style={styles.versionText}>SpazalIQ v1.0.0</Text>
+        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+          <Ionicons name="log-out-outline" size={18} color={colors.danger} />
+          <Text style={styles.logoutBtnText}>Log Out</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={handleDeleteAccount}>
+          <Text style={styles.deleteAccountText}>Delete Account</Text>
+        </TouchableOpacity>
+
+        <Text style={styles.versionText}>SpazalIQ v1.0.2</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -218,59 +282,59 @@ function makeStyles(colors, typography, spacing, radius) {
     },
     backButton: { padding: spacing.xs },
     headerTitle: { ...typography.h2 },
+    helpText: { ...typography.body, color: colors.primary, fontWeight: '600' },
     scrollContent: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl * 2 },
-    profileCard: {
-      backgroundColor: colors.card,
-      borderRadius: radius.md,
-      borderWidth: 1,
-      borderColor: colors.border,
-      padding: spacing.lg,
+
+    identityRow: {
+      flexDirection: 'row',
       alignItems: 'center',
+      gap: spacing.md,
       marginBottom: spacing.lg,
     },
-    avatarWrap: { marginBottom: spacing.md, position: 'relative' },
-    avatarEditBadge: {
-      position: 'absolute',
-      right: -2,
-      bottom: -2,
-      width: 22,
-      height: 22,
-      borderRadius: 11,
+    avatarCircle: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
       backgroundColor: colors.primary,
       alignItems: 'center',
       justifyContent: 'center',
-      borderWidth: 2,
-      borderColor: colors.card,
     },
-    fieldRow: {
-      flexDirection: 'row',
+    avatarInitials: { color: colors.card, fontSize: 20, fontWeight: '700' },
+    identityText: { flex: 1 },
+    identityName: { ...typography.h2 },
+    identitySub: { ...typography.small, marginTop: 2 },
+    avatarEditBadge: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
       alignItems: 'center',
-      width: '100%',
-      paddingVertical: spacing.sm,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
-      gap: spacing.sm,
-    },
-    fieldIconWrap: { width: 24, alignItems: 'center' },
-    fieldValueWrap: { flex: 1 },
-    fieldLabel: { ...typography.small },
-    fieldValue: { ...typography.body, marginTop: 2 },
-    fieldInput: {
-      flex: 1,
-      ...typography.body,
-      paddingVertical: 4,
-    },
-    editBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.xs,
-      marginTop: spacing.md,
-      paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.md,
-      borderRadius: radius.pill,
+      justifyContent: 'center',
       backgroundColor: colors.primaryLight,
     },
-    editBtnText: { ...typography.body, color: colors.primaryDark, fontWeight: '700' },
+
+    sectionHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: spacing.sm,
+    },
+    sectionEditLink: { flexDirection: 'row', alignItems: 'center' },
+    sectionEditLinkText: { ...typography.small, color: colors.primary, fontWeight: '700' },
+
+    fieldRow: {
+      width: '100%',
+      paddingVertical: spacing.sm,
+    },
+    fieldValueWrap: { flex: 1 },
+    fieldLabel: { ...typography.small },
+    fieldValue: { ...typography.body, marginTop: 2, fontWeight: '600' },
+    fieldInput: {
+      ...typography.body,
+      marginTop: 2,
+      paddingVertical: 4,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
     editActionsRow: {
       flexDirection: 'row',
       gap: spacing.sm,
@@ -287,7 +351,15 @@ function makeStyles(colors, typography, spacing, radius) {
     cancelBtnText: { ...typography.body, fontWeight: '600', color: colors.textSecondary },
     saveBtn: { backgroundColor: colors.primary },
     saveBtnText: { ...typography.body, fontWeight: '700', color: colors.card },
-    sectionTitle: { ...typography.h2, fontSize: 16, marginBottom: spacing.sm },
+
+    sectionTitle: {
+      ...typography.small,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+      color: colors.textMuted,
+      marginBottom: spacing.sm,
+      marginTop: spacing.md,
+    },
     settingsCard: {
       backgroundColor: colors.card,
       borderRadius: radius.md,
@@ -302,9 +374,32 @@ function makeStyles(colors, typography, spacing, radius) {
       justifyContent: 'space-between',
       paddingVertical: spacing.md,
     },
-    settingLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-    settingLabel: { ...typography.body },
+    settingLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flex: 1 },
+    settingTextCol: {},
+    settingLabel: { ...typography.body, fontWeight: '600' },
+    settingSubLabel: { ...typography.small, marginTop: 2 },
+    settingRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+    settingValueText: { ...typography.body, color: colors.textMuted },
     settingDivider: { height: 1, backgroundColor: colors.border },
+
+    logoutBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.xs,
+      borderWidth: 1.5,
+      borderColor: colors.danger,
+      borderRadius: radius.pill,
+      paddingVertical: spacing.md,
+      marginBottom: spacing.md,
+    },
+    logoutBtnText: { ...typography.body, color: colors.danger, fontWeight: '700' },
+    deleteAccountText: {
+      ...typography.small,
+      color: colors.danger,
+      textAlign: 'center',
+      marginBottom: spacing.md,
+    },
     versionText: {
       ...typography.small,
       textAlign: 'center',
