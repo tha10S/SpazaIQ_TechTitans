@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import NewSaleScreen from './screens/NewSaleScreen';
 import CreditLedgerScreen from './screens/CreditLedgerScreen';
+import ChatbotScreen from './screens/ChatbotScreen';
 
 // While there's no auth/Supabase yet, the mock backend ignores this —
 // it's just here so the screens already expect a real storeId later.
@@ -12,6 +13,7 @@ const STORE_ID = 'mock-store-1';
 const TABS = [
   { key: 'sale', label: 'New Sale', icon: 'cart-outline', Component: NewSaleScreen },
   { key: 'credit', label: 'Credit Ledger', icon: 'wallet-outline', Component: CreditLedgerScreen },
+  { key: 'assistant', label: 'Assistant', icon: 'chatbubble-ellipses-outline', Component: ChatbotScreen },
 ];
 
 export default function App() {

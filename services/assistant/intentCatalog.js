@@ -75,7 +75,7 @@ export const INTENT_KEYWORDS = {
   LARGEST_BALANCE: ['owes the most', 'largest balance', 'highest balance'],
   CREDIT_GIVEN: ['credit did i give', 'credit this month'],
   SALES_SUMMARY: ['sales today', 'sold today', 'sales this week', 'made this week'],
-  TOP_SELLERS: ['best-selling', 'best selling', 'best sellers', 'best seller', 'top sellers', 'top seller', 'sells the most', 'top 5'],
+  TOP_SELLERS: ['best-selling', 'best selling', 'best sellers', 'best seller', 'best sales', 'best products', 'top sellers', 'top seller', 'top products', 'most sales', 'sells the most', 'top 5'],
   BOTTOM_SELLERS: ['selling poorly', 'worst-selling', 'worst selling'],
   PROFIT_SUMMARY: ['profit today', 'profit this week', 'profit this month'],
   RESTOCK_RECOMMENDATION: ['restock', 'order more', 'buy tomorrow', 'buy more'],

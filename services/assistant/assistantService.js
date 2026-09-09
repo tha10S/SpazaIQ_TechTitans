@@ -4,7 +4,14 @@ import { INTENT_CATALOG, INTENT_KEYWORDS } from './intentCatalog';
 const money = (value) => `R${Number(value || 0).toLocaleString('en-ZA', { maximumFractionDigits: 2 })}`;
 
 function detectIntent(message) {
-  const text = message.toLowerCase();
+  const text = message.toLowerCase().replace(/[?!.,]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  if (
+    /\b(best sales|best products|best selling|best-selling|top products|top sellers|most sales|sells the most)\b/.test(text)
+  ) {
+    return { intent: 'TOP_SELLERS', confidence: 0.98, matches: 1 };
+  }
+
   let best = { intent: 'BUSINESS_ADVICE', confidence: 0.25, matches: 0 };
 
   for (const [intent, phrases] of Object.entries(INTENT_KEYWORDS)) {
