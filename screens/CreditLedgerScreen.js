@@ -261,7 +261,7 @@ export default function CreditLedgerScreen({ storeId }) {
           <View style={styles.chatCard}>
             <View style={styles.chatHeader}>
               <View>
-                <Text style={styles.chatTitle}>Credit assistant</Text>
+                <Text style={styles.chatTitle}>Khaka Chat Bot</Text>
                 <Text style={styles.chatSubtitle}>SpazaIQ business assistant</Text>
               </View>
               <View style={styles.chatHeaderActions}>
