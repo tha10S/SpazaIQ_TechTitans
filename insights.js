@@ -1,5 +1,5 @@
 import {useState} from "react";
-import {Pressable, ScrollView, StyleSheet, Text, View} from "react-native";
+import {Pressable, ScrollView, StyleSheet, Text, View,} from "react-native";
 
 // Each period has its own dataset — swapped based on the toggle
 const periodData = {

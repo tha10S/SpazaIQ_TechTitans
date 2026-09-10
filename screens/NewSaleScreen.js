@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import {
-  View,
+import {View,
   Text,
   TextInput,
   TouchableOpacity,
@@ -15,7 +14,7 @@ import { useCart } from '../hooks/useCart';
 import { fetchProducts } from '../services/salesService';
 import QRScannerScreen from './QRScannerScreen';
 
-const PAYMENT_METHODS = ['Cash', 'Card'];
+const PAYMENT_METHODS = ['Cash', 'Card', "Credit"];
 const formatR = (n) => `R${Number(n).toFixed(2).replace(/\.00$/, '')}`;
 
 // storeId would normally come from auth context / a store-selection screen

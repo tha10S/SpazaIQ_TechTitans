@@ -15,17 +15,17 @@ export default function LoginScreen({ navigation }) {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
-  const login = () => {
-    if (!username || !password) {
-      Alert.alert(
-        "Missing Information",
-        "Please enter your username/email and password."
-      );
-      return;
-    }
+const login = () => {
+  if (!username || !password) {
+    Alert.alert(
+      "Missing Information",
+      "Please enter your username/email and password."
+    );
+    return;
+  }
 
-    Alert.alert("Success", "Login successful!");
-  };
+  navigation.navigate("MainTabs");
+};
 
   return (
     <KeyboardAvoidingView
