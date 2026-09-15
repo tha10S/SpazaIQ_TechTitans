@@ -177,23 +177,29 @@ export async function answerSpazaIQQuestion({ message, storeId, userName, shopNa
   if (!proxyUrl) {
     throw new Error('The assistant service is not configured. Add EXPO_PUBLIC_ASSISTANT_API_URL to .env.');
   }
+  if (proxyUrl.includes('your-deployed-project.vercel.app')) {
+    throw new Error('The assistant proxy is still using the example URL. Deploy api/assistant.js and set EXPO_PUBLIC_ASSISTANT_API_URL to its real URL.');
+  }
 
-  const response = await fetch(proxyUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      question,
-      userName,
-      shopName,
-      businessContext,
-      image: image?.base64 ? {
-        mimeType: image.mimeType || 'image/jpeg',
-        base64: image.base64,
-      } : null,
-    }),
-  });
+  let response;
+  try {
+    response = await fetch(proxyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question,
+        userName,
+        shopName,
+        businessContext,
+        image: image?.base64 ? {
+          mimeType: image.mimeType || 'image/jpeg',
+          base64: image.base64,
+        } : null,
+      }),
+    });
+  } catch (error) {
+    throw new Error(`Cannot reach the assistant proxy at ${proxyUrl}. Deploy it or start the local proxy, then try again.`);
+  }
 
   const payload = await response.json();
   if (!response.ok) {
