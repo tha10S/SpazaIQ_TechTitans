@@ -173,40 +173,49 @@ export async function answerSpazaIQQuestion({ message, storeId, userName, shopNa
 
   const data = await fetchSpazaIQData(storeId);
   const businessContext = buildBusinessContext(data, userName, shopName);
-  const proxyUrl = (process.env.EXPO_PUBLIC_ASSISTANT_API_URL || 'https://spaza-iq-tech-titans.vercel.app/api/assistant').trim();
-  if (!proxyUrl) {
-    throw new Error('The assistant service is not configured. Add EXPO_PUBLIC_ASSISTANT_API_URL to .env.');
-  }
-  if (proxyUrl.includes('your-deployed-project.vercel.app')) {
-    throw new Error('The assistant proxy is still using the example URL. Deploy api/assistant.js and set EXPO_PUBLIC_ASSISTANT_API_URL to its real URL.');
+  const apiKey = (process.env.EXPO_PUBLIC_AI_API_KEY || '').trim();
+  const endpoint = process.env.EXPO_PUBLIC_AI_API_URL || 'https://generativelanguage.googleapis.com/v1beta';
+  const model = process.env.EXPO_PUBLIC_AI_MODEL || 'gemini-3.5-flash-lite';
+
+  if (!apiKey || ['your_actual_key_here', 'your_openai_api_key', 'your_groq_key_here', 'your_gemini_api_key'].includes(apiKey)) {
+    throw new Error('Add your Gemini API key to EXPO_PUBLIC_AI_API_KEY in .env to enable the Tech Titans Chat Bot.');
   }
 
-  let response;
-  try {
-    response = await fetch(proxyUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        question,
-        userName,
-        shopName,
-        businessContext,
-        image: image?.base64 ? {
-          mimeType: image.mimeType || 'image/jpeg',
-          base64: image.base64,
-        } : null,
-      }),
-    });
-  } catch (error) {
-    throw new Error(`Cannot reach the assistant proxy at ${proxyUrl}. Deploy it or start the local proxy, then try again.`);
-  }
+  const response = await fetch(`${endpoint}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      generationConfig: { temperature: 0.2 },
+      contents: [{
+        role: 'user',
+        parts: [
+          {
+            text: [
+              'You are Tech Titans Chat Bot, the business assistant inside SpazaIQ, a South African spaza shop management app.',
+              `The signed-in owner is ${userName || 'the shop owner'} and the connected shop is ${shopName || "Thabo's Mini Mart"}.`,
+              'Answer questions about sales, stock, products, suppliers, selling, customer credit, cash flow, trends, and dashboard insights.',
+              'Use the supplied shop data for calculations. Never invent figures, customers, products, transactions, expenses, or supplier payments.',
+              'Cash flow requires recorded sales, expenses, and supplier payments. State exactly which parts are unavailable.',
+              'Trend or forecast questions require sales history. If there are zero recorded sales, explain what data must be recorded.',
+              'For app actions, guide the user to the relevant tab but do not claim chat changed records.',
+              'For unrelated questions, politely say you can help only with SpazaIQ shop management.',
+              'Keep answers concise, useful, and use South African rand (R) for money.',
+              `Current SpazaIQ business context: ${JSON.stringify(businessContext)}`,
+              `User question: ${question}`,
+            ].join('\n'),
+          },
+          ...(image?.base64 ? [{ inlineData: { mimeType: image.mimeType || 'image/jpeg', data: image.base64 } }] : []),
+        ],
+      }],
+    }),
+  });
 
   const payload = await response.json();
   if (!response.ok) {
     throw new Error(payload.error?.message || 'The AI assistant could not answer right now.');
   }
 
-  const answer = payload.response?.trim();
+  const answer = payload.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('').trim();
   if (!answer) throw new Error('The AI assistant returned an empty answer.');
 
   return {

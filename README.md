@@ -53,16 +53,7 @@ DSW2B Semester 2 Project
 
 ## AI assistant setup
 
-The Tech Titans Chat Bot supports text questions and screenshot analysis through Gemini's free tier. The Expo app calls the serverless endpoint in `api/assistant.js`; the Gemini key must be stored only on the deployment platform as `GEMINI_API_KEY`.
-
-To deploy the secure assistant with Vercel:
-
-1. Deploy this repository with Vercel.
-2. Add `GEMINI_API_KEY` and `GEMINI_MODEL=gemini-3.5-flash-lite` as server environment variables.
-3. Copy `.env.example` to `.env` and set `EXPO_PUBLIC_ASSISTANT_API_URL` to the deployed `/api/assistant` URL.
-4. Restart Expo. Other users only need the app and the shared assistant URL; they do not need their own Gemini key.
-
-Never put `GEMINI_API_KEY` or `EXPO_PUBLIC_AI_API_KEY` in the Expo app or commit `.env`.
+The Tech Titans Chat Bot supports text questions and screenshot analysis through Gemini's free tier. Copy `.env.example` to `.env`, add your own Gemini API key as `EXPO_PUBLIC_AI_API_KEY`, and restart Expo. Never commit `.env` or share your key.
 
 The assistant is available from Home, Stock, Sell, Credit, Suppliers, and Insights. Use the image button in the chat to attach a screenshot, then ask for trend or improvement analysis.
 # SpazalIQ (Thabo's Mini Mart) — React Native Prototype
