@@ -173,48 +173,25 @@ export async function answerSpazaIQQuestion({ message, storeId, userName, shopNa
 
   const data = await fetchSpazaIQData(storeId);
   const businessContext = buildBusinessContext(data, userName, shopName);
-  const apiKey = (process.env.EXPO_PUBLIC_AI_API_KEY || '').trim();
-  const endpoint = process.env.EXPO_PUBLIC_AI_API_URL || 'https://generativelanguage.googleapis.com/v1beta';
-  const model = process.env.EXPO_PUBLIC_AI_MODEL || 'gemini-3.5-flash-lite';
-
-  if (!apiKey || apiKey.startsWith('gsk_') || ['your_actual_key_here', 'your_openai_api_key', 'your_groq_key_here', 'your_gemini_api_key'].includes(apiKey.trim())) {
-    throw new Error('Replace the old Groq key with a Gemini API key in EXPO_PUBLIC_AI_API_KEY.');
+  const proxyUrl = (process.env.EXPO_PUBLIC_ASSISTANT_API_URL || '').trim();
+  if (!proxyUrl) {
+    throw new Error('The assistant service is not configured. Add EXPO_PUBLIC_ASSISTANT_API_URL to .env.');
   }
 
-  const response = await fetch(`${endpoint}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+  const response = await fetch(proxyUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      generationConfig: { temperature: 0.2 },
-      contents: [{
-        role: 'user',
-        parts: [
-          {
-            text: [
-            'You are Tech Titans Chat Bot, the business assistant inside SpazaIQ, a South African spaza shop management app.',
-            `The signed-in owner is ${userName || 'the shop owner'} and the connected shop is ${shopName || "Thabo's Mini Mart"}. Treat requests to check this shop by name as requests about the connected shop.`,
-            'Answer questions about sales, stock, products, suppliers, selling, customer credit, cash flow, trends, and dashboard insights.',
-            'Use the supplied shop data for calculations. Never invent figures, customers, products, transactions, expenses, or supplier payments.',
-            'Cash flow requires recorded sales, expenses, and supplier payments. State exactly which parts are unavailable instead of claiming there are no sales when the data is simply not connected.',
-            'Trend or forecast questions require sales history. If there are zero recorded sales, say a trend cannot yet be calculated and explain what data must be recorded.',
-            'For a greeting or wellbeing question, respond naturally and briefly, then offer SpazaIQ help.',
-            'For an app action such as recording a sale, adding stock, or logging credit, explain that you can guide the user and direct them to the relevant tab, but cannot change records from chat unless an action tool is connected.',
-            'For unrelated questions, politely say you can help only with SpazaIQ shop management.',
-            'Keep answers concise, useful, and use South African rand (R) when discussing money.',
-            `Current SpazaIQ business context: ${JSON.stringify(businessContext)}`,
-            `User question: ${question}`,
-            ].join('\n'),
-          },
-          ...(image?.base64 ? [{
-            inlineData: {
-              mimeType: image.mimeType || 'image/jpeg',
-              data: image.base64,
-            },
-          }] : []),
-        ],
-      }],
+      question,
+      userName,
+      shopName,
+      businessContext,
+      image: image?.base64 ? {
+        mimeType: image.mimeType || 'image/jpeg',
+        base64: image.base64,
+      } : null,
     }),
   });
 
@@ -223,7 +200,7 @@ export async function answerSpazaIQQuestion({ message, storeId, userName, shopNa
     throw new Error(payload.error?.message || 'The AI assistant could not answer right now.');
   }
 
-  const answer = payload.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('').trim();
+  const answer = payload.response?.trim();
   if (!answer) throw new Error('The AI assistant returned an empty answer.');
 
   return {
