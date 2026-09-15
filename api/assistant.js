@@ -28,7 +28,16 @@ export default async function handler(request, response) {
   if (request.method === 'OPTIONS') return response.status(204).end();
   if (request.method !== 'POST') return response.status(405).json({ error: 'Use POST.' });
 
-  const { question, userName, shopName, businessContext, image } = request.body || {};
+  let requestBody = request.body || {};
+  if (typeof requestBody === 'string') {
+    try {
+      requestBody = JSON.parse(requestBody);
+    } catch (error) {
+      return response.status(400).json({ error: 'Request body must be valid JSON.' });
+    }
+  }
+
+  const { question, userName, shopName, businessContext, image } = requestBody;
   if (!question || typeof question !== 'string') return response.status(400).json({ error: 'A question is required.' });
 
   const apiKey = (process.env.GEMINI_API_KEY || '').trim();
