@@ -173,7 +173,7 @@ export async function answerSpazaIQQuestion({ message, storeId, userName, shopNa
 
   const data = await fetchSpazaIQData(storeId);
   const businessContext = buildBusinessContext(data, userName, shopName);
-  const proxyUrl = (process.env.EXPO_PUBLIC_ASSISTANT_API_URL || '').trim();
+  const proxyUrl = (process.env.EXPO_PUBLIC_ASSISTANT_API_URL || 'https://spaza-iq-tech-titans.vercel.app/api/assistant').trim();
   if (!proxyUrl) {
     throw new Error('The assistant service is not configured. Add EXPO_PUBLIC_ASSISTANT_API_URL to .env.');
   }
