@@ -27,7 +27,7 @@ const lowStockItems = [
   { key: '3', name: 'White Bread', remaining: 4 },
 ];
 
-export default function HomeScreen({ navigation }) {
+export default function HomeScreen({ navigation, route }) {
   const { colors, spacing, radius, typography } = useTheme();
   const styles = makeStyles(colors, typography, spacing, radius);
   const maxSale = Math.max(...weeklySales.map((d) => d.value));
@@ -36,8 +36,10 @@ export default function HomeScreen({ navigation }) {
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View>
-          <Text style={styles.greeting}>Thabo's Mini Mart</Text>
-          <Text style={styles.subGreeting}>Here's how your shop is doing today</Text>
+          <Text style={styles.greeting}>{route?.params?.shopName || "Thabo's Mini Mart"}</Text>
+          <Text style={styles.subGreeting}>
+            Welcome {route?.params?.userName || 'shop owner'} · Here's how your shop is doing today
+          </Text>
         </View>
 
         {/* Stats grid */}

@@ -10,6 +10,7 @@ import {
   Platform,
   ScrollView,
 } from "react-native";
+import { createLocalAccount } from "./services/auth/localAuth";
 
 export default function SignupScreen({ navigation }) {
   const [fullName, setFullName] = useState("");
@@ -22,7 +23,7 @@ export default function SignupScreen({ navigation }) {
   const [showPin, setShowPin] = useState(false);
   const [showConfirmPin, setShowConfirmPin] = useState(false);
 
-  const createAccount = () => {
+  const createAccount = async () => {
     if (
       !fullName ||
       !mobile ||
@@ -45,7 +46,8 @@ export default function SignupScreen({ navigation }) {
       return;
     }
 
-    Alert.alert("Success", "Your account has been created!");
+    await createLocalAccount({ fullName, mobile, email, shopName, pin });
+    navigation.navigate("MainTabs", { userName: fullName, shopName });
   };
 
   return (

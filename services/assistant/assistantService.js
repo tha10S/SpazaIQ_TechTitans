@@ -142,19 +142,94 @@ function generateAnswer(intent, data, question) {
   return catalogExample?.exampleResponse || 'I do not have enough connected data to answer that yet.';
 }
 
-export async function answerSpazaIQQuestion({ message, storeId }) {
+function buildBusinessContext(data, userName, shopName) {
+  const balances = positiveBalances(data);
+  const totalOutstanding = balances.reduce((sum, customer) => sum + customer.balance, 0);
+  const salesTotalValue = salesTotal(data.sales);
+  const productNames = data.products.slice(0, 12).map((product) => product.name);
+
+  return {
+    shopName: shopName || "Thabo's Mini Mart",
+    ownerName: userName || 'shop owner',
+    currency: 'ZAR (South African rand)',
+    recordedSales: { count: data.sales.length, total: salesTotalValue },
+    recordedExpenses: data.expenses ? data.expenses : { available: false },
+    recordedSupplierPayments: data.suppliers ? data.suppliers : { available: false },
+    outstandingCredit: {
+      customerCount: balances.length,
+      total: totalOutstanding,
+      customers: balances.map((customer) => ({ name: customer.name, balance: customer.balance, dueDate: customer.dueDate })),
+    },
+    productCount: data.products.length,
+    sampleProducts: productNames,
+    inventoryDataAvailable: Boolean(data.inventory),
+    salesHistoryAvailable: data.sales.length > 0,
+  };
+}
+
+export async function answerSpazaIQQuestion({ message, storeId, userName, shopName, image }) {
   const question = message.trim();
   if (!question) throw new Error('Enter a question first.');
 
-  const detected = detectIntent(question);
   const data = await fetchSpazaIQData(storeId);
-  const response = generateAnswer(detected.intent, data, question);
-  const catalogExample = findCatalogExample(detected.intent);
+  const businessContext = buildBusinessContext(data, userName, shopName);
+  const apiKey = (process.env.EXPO_PUBLIC_AI_API_KEY || '').trim();
+  const endpoint = process.env.EXPO_PUBLIC_AI_API_URL || 'https://generativelanguage.googleapis.com/v1beta';
+  const model = process.env.EXPO_PUBLIC_AI_MODEL || 'gemini-3.5-flash-lite';
+
+  if (!apiKey || apiKey.startsWith('gsk_') || ['your_actual_key_here', 'your_openai_api_key', 'your_groq_key_here', 'your_gemini_api_key'].includes(apiKey.trim())) {
+    throw new Error('Replace the old Groq key with a Gemini API key in EXPO_PUBLIC_AI_API_KEY.');
+  }
+
+  const response = await fetch(`${endpoint}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      generationConfig: { temperature: 0.2 },
+      contents: [{
+        role: 'user',
+        parts: [
+          {
+            text: [
+            'You are Tech Titans Chat Bot, the business assistant inside SpazaIQ, a South African spaza shop management app.',
+            `The signed-in owner is ${userName || 'the shop owner'} and the connected shop is ${shopName || "Thabo's Mini Mart"}. Treat requests to check this shop by name as requests about the connected shop.`,
+            'Answer questions about sales, stock, products, suppliers, selling, customer credit, cash flow, trends, and dashboard insights.',
+            'Use the supplied shop data for calculations. Never invent figures, customers, products, transactions, expenses, or supplier payments.',
+            'Cash flow requires recorded sales, expenses, and supplier payments. State exactly which parts are unavailable instead of claiming there are no sales when the data is simply not connected.',
+            'Trend or forecast questions require sales history. If there are zero recorded sales, say a trend cannot yet be calculated and explain what data must be recorded.',
+            'For a greeting or wellbeing question, respond naturally and briefly, then offer SpazaIQ help.',
+            'For an app action such as recording a sale, adding stock, or logging credit, explain that you can guide the user and direct them to the relevant tab, but cannot change records from chat unless an action tool is connected.',
+            'For unrelated questions, politely say you can help only with SpazaIQ shop management.',
+            'Keep answers concise, useful, and use South African rand (R) when discussing money.',
+            `Current SpazaIQ business context: ${JSON.stringify(businessContext)}`,
+            `User question: ${question}`,
+            ].join('\n'),
+          },
+          ...(image?.base64 ? [{
+            inlineData: {
+              mimeType: image.mimeType || 'image/jpeg',
+              data: image.base64,
+            },
+          }] : []),
+        ],
+      }],
+    }),
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error?.message || 'The AI assistant could not answer right now.');
+  }
+
+  const answer = payload.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('').trim();
+  if (!answer) throw new Error('The AI assistant returned an empty answer.');
 
   return {
-    intent: detected.intent,
-    response,
-    dataUsed: catalogExample?.requiredData ?? [],
-    confidence: detected.confidence,
+    intent: 'AI_ASSISTANT',
+    response: answer,
+    dataUsed: Object.keys(data),
+    confidence: 1,
   };
 }

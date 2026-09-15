@@ -13,8 +13,6 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useCustomerBalances } from '../hooks/useCustomerBalances';
-import { answerSpazaIQQuestion } from '../services/assistant/assistantService';
-import { SUGGESTED_QUESTIONS } from '../services/assistant/intentCatalog';
 
 const STATUS_CONFIG = {
   good: { label: 'Good', color: '#0F9D58', bg: '#E7F6ED' },
@@ -34,13 +32,6 @@ export default function CreditLedgerScreen({ storeId }) {
   const [pendingAmount, setPendingAmount] = useState('');
   const [pendingDueDate, setPendingDueDate] = useState('');
   const [saving, setSaving] = useState(false);
-  const [chatVisible, setChatVisible] = useState(false);
-  const [chatInput, setChatInput] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
-  const [chatError, setChatError] = useState('');
-  const [chatMessages, setChatMessages] = useState([
-    { id: 'welcome', role: 'assistant', text: 'Hi. Ask me about customer balances, overdue credit, or recording a credit sale.' },
-  ]);
 
   const totalOutstanding = customers.reduce((sum, c) => sum + c.balance, 0);
 
@@ -81,24 +72,6 @@ export default function CreditLedgerScreen({ storeId }) {
       Alert.alert('Could not log credit', err.message);
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleChatSubmit = async (suggestedQuestion = chatInput) => {
-    const question = suggestedQuestion.trim();
-    if (!question) return;
-
-    setChatError('');
-    setChatInput('');
-    setChatMessages((messages) => [...messages, { id: `question-${Date.now()}`, role: 'user', text: question }]);
-    setChatLoading(true);
-    try {
-      const result = await answerSpazaIQQuestion({ message: question, storeId });
-      setChatMessages((messages) => [...messages, { id: `answer-${Date.now()}`, role: 'assistant', text: result.response }]);
-    } catch (err) {
-      setChatError(err.message || 'The assistant could not answer that question.');
-    } finally {
-      setChatLoading(false);
     }
   };
 
@@ -185,15 +158,6 @@ export default function CreditLedgerScreen({ storeId }) {
         </View>
       </ScrollView>
 
-      <TouchableOpacity
-        style={styles.fab}
-        activeOpacity={0.85}
-        onPress={() => setChatVisible(true)}
-        accessibilityLabel="Open credit assistant"
-      >
-        <Ionicons name="chatbubble-ellipses-outline" size={22} color="#FFFFFF" />
-      </TouchableOpacity>
-
       <Modal visible={idModalVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
@@ -256,71 +220,6 @@ export default function CreditLedgerScreen({ storeId }) {
         </View>
       </Modal>
 
-      <Modal visible={chatVisible} transparent animationType="slide" onRequestClose={() => setChatVisible(false)}>
-        <View style={styles.chatOverlay}>
-          <View style={styles.chatCard}>
-            <View style={styles.chatHeader}>
-              <View>
-                <Text style={styles.chatTitle}>Khaka Chat Bot</Text>
-                <Text style={styles.chatSubtitle}>SpazaIQ business assistant</Text>
-              </View>
-              <View style={styles.chatHeaderActions}>
-                <TouchableOpacity onPress={() => setChatMessages([])} accessibilityLabel="Clear conversation">
-                  <Ionicons name="trash-outline" size={21} color="#6B7280" />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => setChatVisible(false)} accessibilityLabel="Close credit assistant">
-                  <Ionicons name="close" size={24} color="#6B7280" />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <ScrollView style={styles.chatMessages} contentContainerStyle={styles.chatMessagesContent}>
-              {chatMessages.map((message) => (
-                <View
-                  key={message.id}
-                  style={[styles.chatBubble, message.role === 'user' && styles.chatBubbleUser]}
-                >
-                  <Text style={[styles.chatText, message.role === 'user' && styles.chatTextUser]}>
-                    {message.text}
-                  </Text>
-                </View>
-              ))}
-              {chatLoading && <ActivityIndicator color={GREEN} style={styles.chatLoading} />}
-            </ScrollView>
-
-            {!!chatError && <Text style={styles.chatError}>{chatError}</Text>}
-
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsRow}>
-              {SUGGESTED_QUESTIONS.map((question) => (
-                <TouchableOpacity
-                  key={question}
-                  style={styles.suggestionButton}
-                  onPress={() => handleChatSubmit(question)}
-                  disabled={chatLoading}
-                >
-                  <Text style={styles.suggestionText}>{question}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            <View style={styles.chatInputRow}>
-              <TextInput
-                style={styles.chatInput}
-                placeholder="Ask about the ledger..."
-                placeholderTextColor="#9CA3AF"
-                value={chatInput}
-                onChangeText={setChatInput}
-                onSubmitEditing={() => handleChatSubmit()}
-                returnKeyType="send"
-                editable={!chatLoading}
-              />
-              <TouchableOpacity style={styles.chatSendButton} onPress={() => handleChatSubmit()} disabled={chatLoading} accessibilityLabel="Send message">
-                <Ionicons name="send" size={18} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }

@@ -3,7 +3,8 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { ThemeProvider } from './ThemeContext';
-import { TouchableOpacity } from 'react-native';
+import { TouchableOpacity, View } from 'react-native';
+import { TechTitansAssistant } from './components/TechTitansAssistant';
 
 // User authentication
 import LoginScreen from './LoginScreen';
@@ -17,7 +18,6 @@ import HomeScreen from './screens/HomeScreen';
 import StockScreen from './screens/StockScreen';
 import NewSaleScreen from './screens/NewSaleScreen';
 import CreditLedgerScreen from './screens/CreditLedgerScreen';
-import ChatbotScreen from './screens/ChatbotScreen';
 import ProfileSettingsScreen from './screens/ProfileSettingsScreen';
 import QRScannerScreen from './screens/QRScannerScreen';
 import PlaceholderScreen from './screens/PlaceholderScreen';
@@ -33,14 +33,37 @@ const icons = {
   Sell: 'cart',
   Credit: 'card',
   Insights: 'stats-chart',
-  Chatbot: 'chatbubble-ellipses',
   Profile: 'person',
   Scanner: 'scan',
   Notifications: 'notifications',
   Suppliers: 'people',
 };
 
-function MainTabs() {
+function withAssistant(ScreenComponent) {
+  return function AssistantTab(props) {
+    return (
+      <View style={{ flex: 1 }}>
+        <ScreenComponent {...props} />
+        <TechTitansAssistant
+          storeId={props.route?.params?.storeId}
+          userName={props.route?.params?.userName}
+          shopName={props.route?.params?.shopName}
+        />
+      </View>
+    );
+  };
+}
+
+const HomeWithAssistant = withAssistant(HomeScreen);
+const StockWithAssistant = withAssistant(StockScreen);
+const SellWithAssistant = withAssistant(NewSaleScreen);
+const CreditWithAssistant = withAssistant(CreditLedgerScreen);
+const SuppliersWithAssistant = withAssistant(SuppliersOrders);
+const InsightsWithAssistant = withAssistant(Insights);
+
+function MainTabs({ route }) {
+  const account = route?.params || {};
+
   return (
     <Tab.Navigator
       screenOptions={({ route, navigation }) => ({
@@ -61,13 +84,12 @@ function MainTabs() {
         ),
       })}
     >
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Stock" component={StockScreen} />
-      <Tab.Screen name="Sell" component={NewSaleScreen} />
-      <Tab.Screen name="Credit" component={CreditLedgerScreen} />
-      <Tab.Screen name="Suppliers" component={SuppliersOrders} />
-      <Tab.Screen name="Insights" component={Insights} />
-      <Tab.Screen name="Chatbot" component={ChatbotScreen} />
+      <Tab.Screen name="Home" component={HomeWithAssistant} initialParams={account} />
+      <Tab.Screen name="Stock" component={StockWithAssistant} initialParams={account} />
+      <Tab.Screen name="Sell" component={SellWithAssistant} initialParams={account} />
+      <Tab.Screen name="Credit" component={CreditWithAssistant} initialParams={account} />
+      <Tab.Screen name="Suppliers" component={SuppliersWithAssistant} initialParams={account} />
+      <Tab.Screen name="Insights" component={InsightsWithAssistant} initialParams={account} />
     </Tab.Navigator>
   );
 }

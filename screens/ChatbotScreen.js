@@ -18,20 +18,8 @@ const INITIAL_MESSAGES = [
   {
     id: 'welcome',
     role: 'assistant',
-    text: 'Hi Thabo! I am your Khaka Chat Bot. Ask me about your sales, stock, or customers.',
-    time: '09:41 AM',
-  },
-  {
-    id: 'question',
-    role: 'user',
-    text: 'What are my best-selling products?',
-    time: '09:42 AM',
-  },
-  {
-    id: 'answer',
-    role: 'assistant',
-    text: 'Hi Thabo! Your best-selling products this week are:\n\n1. Simba Chips 120g (84 sold)\n2. Coca-Cola 500ml (72 sold)\n3. Albany White Bread (55 sold)',
-    time: '09:42 AM',
+    text: 'Hi, I am the Tech Titans Chat Bot. Ask me about your sales, stock, suppliers, credit, or insights.',
+    time: '',
   },
 ];
 
@@ -101,7 +89,7 @@ export default function ChatbotScreen({ storeId }) {
             <Ionicons name="chatbubble-outline" size={26} color="#FFFFFF" />
           </View>
           <View style={styles.headerCopy}>
-            <Text style={styles.title}>Khaka Chat Bot</Text>
+            <Text style={styles.title}>Tech Titans Chat Bot</Text>
             <View style={styles.statusRow}>
               <View style={styles.statusDot} />
               <Text style={styles.status}>Always Online</Text>
