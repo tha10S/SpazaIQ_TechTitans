@@ -1,85 +1,113 @@
-import React from 'react';
-import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
+import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import { StatusBar } from 'expo-status-bar';
+import { ThemeProvider } from './ThemeContext';
+import { TouchableOpacity, View } from 'react-native';
+import { TechTitansAssistant } from './components/TechTitansAssistant';
 
+// User authentication
+import LoginScreen from './LoginScreen';
+import SignupScreen from './SignupScreen';
+
+import Insights from './insights';
+import SuppliersOrders from './suppliers_reorders';
+
+// team member files
 import HomeScreen from './screens/HomeScreen';
-import SuppliersOrdersScreen from './screens/SuppliersOrdersScreen';
+import StockScreen from './screens/StockScreen';
+import NewSaleScreen from './screens/NewSaleScreen';
+import CreditLedgerScreen from './screens/CreditLedgerScreen';
 import ProfileSettingsScreen from './screens/ProfileSettingsScreen';
+import QRScannerScreen from './screens/QRScannerScreen';
 import PlaceholderScreen from './screens/PlaceholderScreen';
-import { ThemeProvider, useTheme } from './ThemeContext';
+import NotificationsScreen from './screens/NotificationsScreen';
 
+const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
-const HomeStack = createNativeStackNavigator();
+const GREEN = '#06ad40';
 
-function HomeStackNavigator() {
-  return (
-    <HomeStack.Navigator screenOptions={{ headerShown: false }}>
-      <HomeStack.Screen name="HomeMain" component={HomeScreen} />
-      <HomeStack.Screen name="SuppliersOrders" component={SuppliersOrdersScreen} />
-      <HomeStack.Screen name="ProfileSettings" component={ProfileSettingsScreen} />
-    </HomeStack.Navigator>
-  );
-}
-
-const TAB_ICONS = {
+const icons = {
   Home: 'home',
   Stock: 'cube',
-  Sell: 'pricetag',
-  Credit: 'people',
-  Insights: 'trending-up',
+  Sell: 'cart',
+  Credit: 'card',
+  Insights: 'stats-chart',
+  Profile: 'person',
+  Scanner: 'scan',
+  Notifications: 'notifications',
+  Suppliers: 'people',
 };
 
-function AppNavigator() {
-  const { colors, isDark } = useTheme();
-
-
-  const navTheme = {
-    ...(isDark ? DarkTheme : DefaultTheme),
-    colors: {
-      ...(isDark ? DarkTheme.colors : DefaultTheme.colors),
-      background: colors.background,
-      card: colors.card,
-      border: colors.border,
-      text: colors.textPrimary,
-      primary: colors.primary,
-    },
+function withAssistant(ScreenComponent) {
+  return function AssistantTab(props) {
+    return (
+      <View style={{ flex: 1 }}>
+        <ScreenComponent {...props} />
+        <TechTitansAssistant
+          storeId={props.route?.params?.storeId}
+          userName={props.route?.params?.userName}
+          shopName={props.route?.params?.shopName}
+        />
+      </View>
+    );
   };
+}
+
+const HomeWithAssistant = withAssistant(HomeScreen);
+const StockWithAssistant = withAssistant(StockScreen);
+const SellWithAssistant = withAssistant(NewSaleScreen);
+const CreditWithAssistant = withAssistant(CreditLedgerScreen);
+const SuppliersWithAssistant = withAssistant(SuppliersOrders);
+const InsightsWithAssistant = withAssistant(Insights);
+
+function MainTabs({ route }) {
+  const account = route?.params || {};
 
   return (
-    <NavigationContainer theme={navTheme}>
-      <StatusBar style={isDark ? 'light' : 'dark'} />
-      <Tab.Navigator
-        screenOptions={({ route }) => ({
-          headerShown: false,
-          tabBarActiveTintColor: colors.primary,
-          tabBarInactiveTintColor: colors.textMuted,
-          tabBarStyle: { backgroundColor: colors.card, borderTopColor: colors.border },
-          tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons
-              name={focused ? TAB_ICONS[route.name] : `${TAB_ICONS[route.name]}-outline`}
-              size={size}
-              color={color}
-            />
-          ),
-        })}
-      >
-        <Tab.Screen name="Home" component={HomeStackNavigator} />
-        <Tab.Screen name="Stock" component={PlaceholderScreen} />
-        <Tab.Screen name="Sell" component={PlaceholderScreen} />
-        <Tab.Screen name="Credit" component={PlaceholderScreen} />
-        <Tab.Screen name="Insights" component={PlaceholderScreen} />
-      </Tab.Navigator>
-    </NavigationContainer>
+    <Tab.Navigator
+      screenOptions={({ route, navigation }) => ({
+        headerShown: true,
+        headerRight: () => (
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Profile')}
+            style={{ marginRight: 16 }}
+          >
+            <Ionicons name="person-circle" size={32} color={GREEN} />
+          </TouchableOpacity>
+        ),
+        tabBarActiveTintColor: GREEN,
+        tabBarInactiveTintColor: '#888',
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        tabBarIcon: ({ color, size }) => (
+          <Ionicons name={icons[route.name]} size={size} color={color} />
+        ),
+      })}
+    >
+      <Tab.Screen name="Home" component={HomeWithAssistant} initialParams={account} />
+      <Tab.Screen name="Stock" component={StockWithAssistant} initialParams={account} />
+      <Tab.Screen name="Sell" component={SellWithAssistant} initialParams={account} />
+      <Tab.Screen name="Credit" component={CreditWithAssistant} initialParams={account} />
+      <Tab.Screen name="Suppliers" component={SuppliersWithAssistant} initialParams={account} />
+      <Tab.Screen name="Insights" component={InsightsWithAssistant} initialParams={account} />
+    </Tab.Navigator>
   );
 }
 
 export default function App() {
   return (
     <ThemeProvider>
-      <AppNavigator />
+      <NavigationContainer>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="Signup" component={SignupScreen} />
+          <Stack.Screen name="MainTabs" component={MainTabs} />
+          <Stack.Screen name="Scanner" component={QRScannerScreen} />
+          <Stack.Screen name="Notifications" component={NotificationsScreen} />
+          <Stack.Screen name="Placeholder" component={PlaceholderScreen} />
+          <Stack.Screen name="Profile" component={ProfileSettingsScreen} />
+        </Stack.Navigator>
+      </NavigationContainer>
     </ThemeProvider>
   );
 }

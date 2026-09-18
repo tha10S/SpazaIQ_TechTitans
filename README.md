@@ -50,6 +50,12 @@ You'll need [Node.js](https://nodejs.org/) and the **Expo Go** app on your phone
 # SpazaIQ_TechTitans
 DSW2B Semester 2 Project
 >>>>>>> e92d48d23296c3ae43b3f9cf2301f5a7a297ed1a
+
+## AI assistant setup
+
+The Tech Titans Chat Bot supports text questions and screenshot analysis through Gemini's free tier. Copy `.env.example` to `.env`, add your own Gemini API key as `EXPO_PUBLIC_AI_API_KEY`, and restart Expo. Never commit `.env` or share your key.
+
+The assistant is available from Home, Stock, Sell, Credit, Suppliers, and Insights. Use the image button in the chat to attach a screenshot, then ask for trend or improvement analysis.
 # SpazalIQ (Thabo's Mini Mart) — React Native Prototype
 
 This is a working React Native (Expo) implementation of the SpazalIQ Figma prototype, covering:

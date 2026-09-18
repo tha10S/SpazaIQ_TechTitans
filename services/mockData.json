@@ -1,0 +1,322 @@
+{
+  "periodData": {
+    "Today": {
+      "stats": {
+        "revenue": "R420",
+        "profit": "R109",
+        "itemsSold": 28
+      },
+      "salesByDay": [],
+      "topProducts": [
+        {
+          "name": "Coca-Cola 500ml",
+          "sold": 1,
+          "fill": 1.0
+        },
+        {
+          "name": "Simba Chips 120g",
+          "sold": 1,
+          "fill": 1.0
+        },
+        {
+          "name": "Albany White Bread",
+          "sold": 1,
+          "fill": 1.0
+        }
+      ]
+    },
+    "Week": {
+      "stats": {
+        "revenue": "R2,446",
+        "profit": "R636",
+        "itemsSold": 163
+      },
+      "salesByDay": [
+        {
+          "day": "Mon",
+          "value": 58
+        },
+        {
+          "day": "Tue",
+          "value": 71
+        },
+        {
+          "day": "Wed",
+          "value": 75
+        },
+        {
+          "day": "Thu",
+          "value": 75
+        },
+        {
+          "day": "Fri",
+          "value": 88
+        },
+        {
+          "day": "Sat",
+          "value": 92
+        },
+        {
+          "day": "Sun",
+          "value": 95
+        }
+      ],
+      "topProducts": [
+        {
+          "name": "Coca-Cola 500ml",
+          "sold": 7,
+          "fill": 1.0
+        },
+        {
+          "name": "Albany White Bread",
+          "sold": 7,
+          "fill": 1.0
+        },
+        {
+          "name": "Simba Chips 120g",
+          "sold": 6,
+          "fill": 0.86
+        }
+      ]
+    },
+    "Month": {
+      "stats": {
+        "revenue": "R10,483",
+        "profit": "R2,726",
+        "itemsSold": 699
+      },
+      "salesByDay": [
+        {
+          "day": "Week 1",
+          "value": 66
+        },
+        {
+          "day": "Week 2",
+          "value": 72
+        },
+        {
+          "day": "Week 3",
+          "value": 70
+        },
+        {
+          "day": "Week 4",
+          "value": 95
+        }
+      ],
+      "topProducts": [
+        {
+          "name": "Coca-Cola 500ml",
+          "sold": 30,
+          "fill": 1.0
+        },
+        {
+          "name": "Simba Chips 120g",
+          "sold": 29,
+          "fill": 0.97
+        },
+        {
+          "name": "Albany White Bread",
+          "sold": 29,
+          "fill": 0.97
+        }
+      ]
+    }
+  },
+  "recentlyPurchased": [
+    {
+      "name": "Coca-Cola 500ml",
+      "qty": 2,
+      "time": "10 min ago"
+    },
+    {
+      "name": "Simba Chips 120g",
+      "qty": 1,
+      "time": "32 min ago"
+    },
+    {
+      "name": "Albany White Bread",
+      "qty": 3,
+      "time": "1 hr ago"
+    },
+    {
+      "name": "Long Life Milk 1L",
+      "qty": 1,
+      "time": "2 hr ago"
+    }
+  ],
+  "aiForecastMessage": "Based on 5 years of real store sales data, Sunday is consistently your busiest day (19% above the daily average), with Monday the quietest. Consider ordering extra Coca-Cola, Simba Chips, and White Bread ahead of the weekend to avoid running out.",
+  "stock": [
+    {
+      "id": "88-977-0175",
+      "name": "Chocolate Biscuit",
+      "category": "Bakery",
+      "quantity": 100,
+      "unit": "unit",
+      "costPrice": 3.75,
+      "sellPrice": 5.0,
+      "expiryDate": "2024-07-19",
+      "atRisk": false,
+      "supplier": "Yodo"
+    },
+    {
+      "id": "27-442-3654",
+      "name": "Herbal Tea",
+      "category": "Drinks",
+      "quantity": 59,
+      "unit": "unit",
+      "costPrice": 22.5,
+      "sellPrice": 30.0,
+      "expiryDate": "2024-12-03",
+      "atRisk": false,
+      "supplier": "Yoveo"
+    },
+    {
+      "id": "65-674-6076",
+      "name": "Egg (Quail)",
+      "category": "Groceries",
+      "quantity": 78,
+      "unit": "unit",
+      "costPrice": 0.6,
+      "sellPrice": 0.8,
+      "expiryDate": "2024-12-18",
+      "atRisk": false,
+      "supplier": "Ntags"
+    },
+    {
+      "id": "13-888-0149",
+      "name": "Lime",
+      "category": "Groceries",
+      "quantity": 75,
+      "unit": "unit",
+      "costPrice": 1.5,
+      "sellPrice": 2.0,
+      "expiryDate": "2024-03-15",
+      "atRisk": false,
+      "supplier": "Shufflebeat"
+    },
+    {
+      "id": "07-617-6934",
+      "name": "Coconut Sugar",
+      "category": "Groceries",
+      "quantity": 91,
+      "unit": "unit",
+      "costPrice": 3.75,
+      "sellPrice": 5.0,
+      "expiryDate": "2024-11-16",
+      "atRisk": false,
+      "supplier": "Feedfire"
+    },
+    {
+      "id": "65-718-0492",
+      "name": "Olive Oil",
+      "category": "Groceries",
+      "quantity": 100,
+      "unit": "unit",
+      "costPrice": 4.5,
+      "sellPrice": 6.0,
+      "expiryDate": "2025-02-16",
+      "atRisk": false,
+      "supplier": "Midel"
+    },
+    {
+      "id": "24-579-6500",
+      "name": "Anchovies",
+      "category": "Groceries",
+      "quantity": 93,
+      "unit": "unit",
+      "costPrice": 7.5,
+      "sellPrice": 10.0,
+      "expiryDate": "2024-09-04",
+      "atRisk": false,
+      "supplier": "Zoovu"
+    },
+    {
+      "id": "93-813-2419",
+      "name": "Digestive Biscuit",
+      "category": "Bakery",
+      "quantity": 39,
+      "unit": "unit",
+      "costPrice": 3.0,
+      "sellPrice": 4.0,
+      "expiryDate": "2024-06-22",
+      "atRisk": false,
+      "supplier": "Dynabox"
+    },
+    {
+      "id": "74-234-0628",
+      "name": "Almond Flour",
+      "category": "Groceries",
+      "quantity": 12,
+      "unit": "unit",
+      "costPrice": 7.12,
+      "sellPrice": 9.5,
+      "expiryDate": "2024-05-13",
+      "atRisk": true,
+      "supplier": "Shuffledrive",
+      "riskReason": "low-stock"
+    },
+    {
+      "id": "26-134-9069",
+      "name": "Whipped Cream",
+      "category": "Groceries",
+      "quantity": 14,
+      "unit": "unit",
+      "costPrice": 3.0,
+      "sellPrice": 4.0,
+      "expiryDate": "2025-01-30",
+      "atRisk": true,
+      "supplier": "Devcast",
+      "riskReason": "low-stock"
+    }
+  ],
+  "debtors": [
+    {
+      "id": "DBT001",
+      "name": "Thabo Nkosi",
+      "phone": "+27821234567",
+      "amountOwed": 145.0,
+      "flag": "green"
+    },
+    {
+      "id": "DBT002",
+      "name": "Nomvula Dlamini",
+      "phone": "+27837654321",
+      "amountOwed": 620.5,
+      "flag": "red"
+    },
+    {
+      "id": "DBT003",
+      "name": "Sipho Khumalo",
+      "phone": "+27649988776",
+      "amountOwed": 300.0,
+      "flag": "yellow"
+    },
+    {
+      "id": "DBT004",
+      "name": "Ayanda Mokoena",
+      "phone": "+27711223344",
+      "amountOwed": 80.0,
+      "flag": "green"
+    },
+    {
+      "id": "DBT005",
+      "name": "Precious Zulu",
+      "phone": "+27795566778",
+      "amountOwed": 510.0,
+      "flag": "red"
+    }
+  ],
+  "forecastSource": {
+    "dataset": "Store Item Demand Forecasting Challenge (Kaggle)",
+    "basis": "5 years of real daily sales (2013-2017), store 1",
+    "dayOfWeekAverages": {
+      "Sunday": 56.3,
+      "Saturday": 53.1,
+      "Friday": 49.8,
+      "Thursday": 46.7,
+      "Wednesday": 43.8,
+      "Tuesday": 43.6,
+      "Monday": 37.5
+    }
+  }
+}

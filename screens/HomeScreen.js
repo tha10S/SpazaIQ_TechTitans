@@ -1,22 +1,14 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../ThemeContext';
 
-
 const STAT_DEFS = [
-  { key: 'sales', label: "Today's Sales", value: 'E 2,450', icon: 'cash-outline', tintKey: 'primary' },
-  { key: 'profit', label: 'Profit', value: 'E 680', icon: 'trending-up-outline', tintKey: 'success' },
-  { key: 'stock', label: 'Stock Value', value: 'E 18,300', icon: 'cube-outline', tintKey: 'warning' },
-  { key: 'credit', label: 'Credit Out', value: 'E 1,120', icon: 'people-outline', tintKey: 'danger' },
-];
-
-const quickActions = [
-  { key: 'suppliers', label: 'Suppliers', icon: 'business-outline', target: 'SuppliersOrders', params: { initialTab: 'suppliers' } },
-  { key: 'reorders', label: 'Reorders', icon: 'repeat-outline', target: 'SuppliersOrders', params: { initialTab: 'orders' } },
-  { key: 'addSale', label: 'Add Sale', icon: 'add-circle-outline' },
-  { key: 'addStock', label: 'Add Stock', icon: 'archive-outline' },
+  { key: 'sales', label: "Today's Sales", value: 'R 2,450', icon: 'cash-outline', tintKey: 'primary' },
+  { key: 'profit', label: 'Profit', value: 'R 680', icon: 'trending-up-outline', tintKey: 'success' },
+  { key: 'stock', label: 'Stock Value', value: 'R 18,300', icon: 'cube-outline', tintKey: 'warning' },
+  { key: 'credit', label: 'Credit Out', value: 'R 1,120', icon: 'people-outline', tintKey: 'danger' },
 ];
 
 const weeklySales = [
@@ -35,7 +27,7 @@ const lowStockItems = [
   { key: '3', name: 'White Bread', remaining: 4 },
 ];
 
-export default function HomeScreen({ navigation }) {
+export default function HomeScreen({ navigation, route }) {
   const { colors, spacing, radius, typography } = useTheme();
   const styles = makeStyles(colors, typography, spacing, radius);
   const maxSale = Math.max(...weeklySales.map((d) => d.value));
@@ -43,17 +35,11 @@ export default function HomeScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.headerRow}>
-          <View>
-            <Text style={styles.greeting}>Thabo's Mini Mart</Text>
-            <Text style={styles.subGreeting}>Here's how your shop is doing today</Text>
-          </View>
-          <TouchableOpacity
-            onPress={() => navigation.navigate('ProfileSettings')}
-            style={styles.profileButton}
-          >
-            <Ionicons name="person-circle" size={36} color={colors.primary} />
-          </TouchableOpacity>
+        <View>
+          <Text style={styles.greeting}>{route?.params?.shopName || "Thabo's Mini Mart"}</Text>
+          <Text style={styles.subGreeting}>
+            Welcome {route?.params?.userName || 'shop owner'} · Here's how your shop is doing today
+          </Text>
         </View>
 
         {/* Stats grid */}
@@ -70,24 +56,6 @@ export default function HomeScreen({ navigation }) {
               </View>
             );
           })}
-        </View>
-
-        {/* Quick actions */}
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <View style={styles.quickActionsRow}>
-          {quickActions.map((action) => (
-            <TouchableOpacity
-              key={action.key}
-              style={styles.quickActionPill}
-              activeOpacity={0.7}
-              onPress={() => action.target && navigation.navigate(action.target, action.params)}
-            >
-              <View style={styles.quickActionIconWrap}>
-                <Ionicons name={action.icon} size={20} color={colors.primary} />
-              </View>
-              <Text style={styles.quickActionLabel}>{action.label}</Text>
-            </TouchableOpacity>
-          ))}
         </View>
 
         {/* Weekly sales chart */}
@@ -136,15 +104,8 @@ function makeStyles(colors, typography, spacing, radius) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
     scrollContent: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
-    headerRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'flex-start',
-      marginBottom: spacing.lg,
-    },
-    greeting: { ...typography.h1 },
-    subGreeting: { ...typography.label, marginTop: spacing.xs },
-    profileButton: { padding: 2 },
+    greeting: { ...typography.h1, marginBottom: spacing.xs },
+    subGreeting: { ...typography.label, marginBottom: spacing.lg },
     statsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
     statCard: {
       width: '48%',
@@ -166,18 +127,6 @@ function makeStyles(colors, typography, spacing, radius) {
     statValue: { ...typography.statValue },
     statLabel: { ...typography.label, marginTop: spacing.xs },
     sectionTitle: { ...typography.h2, marginTop: spacing.sm, marginBottom: spacing.md },
-    quickActionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.lg },
-    quickActionPill: {
-      flexBasis: '47%',
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: colors.primaryLight,
-      borderRadius: radius.pill,
-      paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.md,
-    },
-    quickActionIconWrap: { marginRight: spacing.sm },
-    quickActionLabel: { ...typography.body, fontWeight: '600', color: colors.primaryDark },
     chartCard: {
       backgroundColor: colors.card,
       borderRadius: radius.md,
