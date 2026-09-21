@@ -13,7 +13,6 @@ const periodData = {
     ],
   },
   Week: {
-    // last 7 days, excluding today
     stats: { revenue: "R12,400", profit: "R3,200", itemsSold: 186 },
     salesByDay: [
       { day: "Mon", value: 30 },
@@ -31,7 +30,6 @@ const periodData = {
     ],
   },
   Month: {
-    // last 30 days, excluding today
     stats: { revenue: "R48,900", profit: "R12,100", itemsSold: 742 },
     salesByDay: [
       { day: "Week 1", value: 60 },
@@ -142,7 +140,7 @@ export default function Insights() {
 
 
       <View style={styles.forecastCard}>
-        <Text style={styles.forecastTitle}>✨ AI Demand Forecast</Text>
+        <Text style={styles.forecastTitle}>Demand forecast</Text>
         <Text style={styles.forecastText}>
           &ldquo;Based on previous week trends, consider ordering more{" "}
           <Text style={styles.bold}>white bread</Text> and{" "}
@@ -169,12 +167,12 @@ export default function Insights() {
   );
 }
 
-const GREEN = "#06ad40";
+const GREEN = "#004B49";
 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#F2F2F2",
+    backgroundColor: "#F9FAFB",
   },
   content: {
     padding: 20,
@@ -182,8 +180,9 @@ const styles = StyleSheet.create({
   },
   header: {
     fontSize: 24,
-    fontWeight: "700",
+    fontWeight: "800",
     marginBottom: 16,
+    color: "#111827",
   },
   segmentWrap: {
     flexDirection: "row",
@@ -191,6 +190,8 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     padding: 4,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
   segment: {
     flex: 1,
@@ -202,7 +203,7 @@ const styles = StyleSheet.create({
     backgroundColor: GREEN,
   },
   segmentText: {
-    color: "#888",
+    color: "#6B7280",
     fontWeight: "600",
   },
   segmentTextActive: {
@@ -216,28 +217,35 @@ const styles = StyleSheet.create({
   statCard: {
     flex: 1,
     backgroundColor: "#fff",
-    borderRadius: 12,
+    borderRadius: 14,
     padding: 12,
     marginRight: 8,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
   statLabel: {
     fontSize: 10,
-    color: "#999",
+    color: "#6B7280",
     marginBottom: 4,
+    fontWeight: "600",
   },
   statValue: {
     fontSize: 16,
-    fontWeight: "700",
+    fontWeight: "800",
+    color: "#111827",
   },
   card: {
     backgroundColor: "#fff",
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 16,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
   cardTitle: {
-    fontWeight: "700",
+    fontWeight: "800",
     marginBottom: 16,
+    color: "#111827",
   },
   chartRow: {
     flexDirection: "row",
@@ -258,7 +266,8 @@ const styles = StyleSheet.create({
   barLabel: {
     marginTop: 6,
     fontSize: 12,
-    color: "#888",
+    color: "#6B7280",
+    fontWeight: "600",
   },
   recentRow: {
     flexDirection: "row",
@@ -272,9 +281,10 @@ const styles = StyleSheet.create({
   recentName: {
     fontWeight: "700",
     fontSize: 13,
+    color: "#111827",
   },
   recentTime: {
-    color: "#999",
+    color: "#6B7280",
     fontSize: 11,
     marginTop: 2,
   },
@@ -284,18 +294,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   forecastCard: {
-    backgroundColor: "#E6F6ED",
-    borderRadius: 12,
+    backgroundColor: "#E6F4F1",
+    borderRadius: 16,
     padding: 16,
     marginBottom: 16,
   },
   forecastTitle: {
     color: GREEN,
-    fontWeight: "700",
+    fontWeight: "800",
     marginBottom: 8,
   },
   forecastText: {
-    color: "#333",
+    color: "#374151",
     lineHeight: 20,
   },
   bold: {
@@ -303,28 +313,31 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     fontSize: 12,
-    color: "#888",
+    color: "#6B7280",
     marginBottom: 10,
-    fontWeight: "600",
+    fontWeight: "700",
   },
   productCard: {
     backgroundColor: "#fff",
-    borderRadius: 12,
+    borderRadius: 14,
     padding: 14,
     marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
   productName: {
     fontWeight: "700",
     marginBottom: 2,
+    color: "#111827",
   },
   productSold: {
-    color: "#888",
+    color: "#6B7280",
     fontSize: 12,
     marginBottom: 10,
   },
   progressTrack: {
     height: 6,
-    backgroundColor: "#E5F5EC",
+    backgroundColor: "#E6F4F1",
     borderRadius: 3,
     overflow: "hidden",
   },
@@ -339,13 +352,13 @@ const styles = StyleSheet.create({
 },
 reverseBtn: {
   borderWidth: 1,
-  borderColor: "#E5533D",
+  borderColor: "#DC2626",
   borderRadius: 8,
   paddingVertical: 4,
   paddingHorizontal: 10,
 },
 reverseBtnText: {
-  color: "#E5533D",
+  color: "#DC2626",
   fontSize: 11,
   fontWeight: "700",
 },

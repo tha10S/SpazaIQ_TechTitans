@@ -15,17 +15,17 @@ export default function LoginScreen({ navigation }) {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
-const login = () => {
-  if (!username || !password) {
-    Alert.alert(
-      "Missing Information",
-      "Please enter your username/email and password."
-    );
-    return;
-  }
+  const login = () => {
+    if (!username || !password) {
+      Alert.alert(
+        "Missing Information",
+        "Please enter your username/email and password."
+      );
+      return;
+    }
 
-  navigation.navigate("MainTabs");
-};
+    navigation.navigate("MainTabs");
+  };
 
   return (
     <KeyboardAvoidingView
@@ -61,7 +61,7 @@ const login = () => {
             <TextInput
               style={styles.input}
               placeholder="thabomart@gmail.com"
-              placeholderTextColor="#303846"
+              placeholderTextColor="#9CA3AF"
               value={username}
               onChangeText={setUsername}
               autoCapitalize="none"
@@ -80,7 +80,7 @@ const login = () => {
             <TextInput
               style={styles.input}
               placeholder="Enter your password"
-              placeholderTextColor="#202733"
+              placeholderTextColor="#9CA3AF"
               value={password}
               onChangeText={setPassword}
               secureTextEntry={!showPassword}
@@ -141,7 +141,7 @@ const login = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#ffffff",
+    backgroundColor: "#F9FAFB",
   },
 
   content: {
@@ -156,14 +156,14 @@ const styles = StyleSheet.create({
     width: 57,
     height: 57,
     borderRadius: 13,
-    backgroundColor: "#E7F7F1",
+    backgroundColor: "#E6F4F1",
     justifyContent: "center",
     alignItems: "center",
     marginTop: 82,
   },
 
   logoIconText: {
-    color: "#00A86B",
+    color: "#004B49",
     fontSize: 31,
     fontWeight: "400",
     marginTop: -3,
@@ -172,14 +172,14 @@ const styles = StyleSheet.create({
   logoText: {
     fontSize: 29,
     fontWeight: "800",
-    color: "#00A86B",
+    color: "#004B49",
     marginTop: 9,
     letterSpacing: -0.7,
   },
 
   subtitle: {
     fontSize: 13.5,
-    color: "#667085",
+    color: "#6B7280",
     marginTop: 7,
     textAlign: "center",
   },
@@ -193,8 +193,8 @@ const styles = StyleSheet.create({
 
   label: {
     fontSize: 12,
-    fontWeight: "700",
-    color: "#202733",
+    fontWeight: "800",
+    color: "#111827",
     marginBottom: 8,
   },
 
@@ -206,7 +206,7 @@ const styles = StyleSheet.create({
     height: 42,
     width: "100%",
     borderWidth: 1,
-    borderColor: "#D9DEE5",
+    borderColor: "#E5E7EB",
     borderRadius: 10,
     backgroundColor: "#FFFFFF",
     flexDirection: "row",
@@ -218,7 +218,7 @@ const styles = StyleSheet.create({
     marginLeft: 12,
     marginRight: 5,
     fontSize: 19,
-    color: "#9AA4B2",
+    color: "#9CA3AF",
     textAlign: "center",
   },
 
@@ -226,7 +226,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: "100%",
     fontSize: 14,
-    color: "#202733",
+    color: "#111827",
     paddingVertical: 0,
   },
 
@@ -239,7 +239,7 @@ const styles = StyleSheet.create({
 
   eye: {
     fontSize: 18,
-    color: "#9AA4B2",
+    color: "#9CA3AF",
   },
 
   /* ---------------- LOGIN BUTTON ---------------- */
@@ -247,13 +247,13 @@ const styles = StyleSheet.create({
   loginButton: {
     height: 45,
     width: "100%",
-    backgroundColor: "#00A86B",
+    backgroundColor: "#004B49",
     borderRadius: 10,
     marginTop: 18,
     justifyContent: "center",
     alignItems: "center",
 
-    shadowColor: "#00A86B",
+    shadowColor: "#004B49",
     shadowOffset: {
       width: 0,
       height: 3,
@@ -266,7 +266,7 @@ const styles = StyleSheet.create({
   loginButtonText: {
     color: "#ffffff",
     fontSize: 14,
-    fontWeight: "700",
+    fontWeight: "800",
   },
 
   /* ---------------- SIGN UP ---------------- */
@@ -278,13 +278,13 @@ const styles = StyleSheet.create({
   },
 
   signupTextNormal: {
-    color: "#667085",
+    color: "#6B7280",
     fontSize: 12,
     fontWeight: "600",
   },
 
   signupLink: {
-    color: "#00A86B",
+    color: "#004B49",
     fontSize: 12,
     fontWeight: "800",
   },
@@ -294,7 +294,7 @@ const styles = StyleSheet.create({
   securityBadge: {
     alignSelf: "center",
     height: 28,
-    backgroundColor: "#E7F7F1",
+    backgroundColor: "#E6F4F1",
     borderRadius: 7,
     paddingHorizontal: 13,
     marginBottom: 27,
@@ -305,14 +305,14 @@ const styles = StyleSheet.create({
   },
 
   shield: {
-    color: "#00A86B",
+    color: "#004B49",
     fontSize: 16,
     marginRight: 7,
   },
 
   securityText: {
-    color: "#00A86B",
+    color: "#004B49",
     fontSize: 10.5,
-    fontWeight: "700",
+    fontWeight: "800",
   },
 });

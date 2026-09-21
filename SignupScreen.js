@@ -80,7 +80,7 @@ export default function SignupScreen({ navigation }) {
           <TextInput
             style={styles.input}
             placeholder="e.g. Sipho Nkosi"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor="#9CA3AF"
             value={fullName}
             onChangeText={setFullName}
           />
@@ -97,7 +97,7 @@ export default function SignupScreen({ navigation }) {
             <TextInput
               style={styles.phoneInput}
               placeholder="82 123 4567"
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor="#9CA3AF"
               keyboardType="phone-pad"
               value={mobile}
               onChangeText={setMobile}
@@ -112,7 +112,7 @@ export default function SignupScreen({ navigation }) {
           <TextInput
             style={styles.input}
             placeholder="sipho@example.com"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor="#9CA3AF"
             keyboardType="email-address"
             autoCapitalize="none"
             value={email}
@@ -127,7 +127,7 @@ export default function SignupScreen({ navigation }) {
           <TextInput
             style={styles.input}
             placeholder="e.g. Sipho's Quick Spaza"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor="#9CA3AF"
             value={shopName}
             onChangeText={setShopName}
           />
@@ -144,7 +144,7 @@ export default function SignupScreen({ navigation }) {
             <TextInput
               style={styles.passwordInput}
               placeholder="••••"
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor="#9CA3AF"
               keyboardType="numeric"
               secureTextEntry={!showPin}
               maxLength={4}
@@ -175,7 +175,7 @@ export default function SignupScreen({ navigation }) {
             <TextInput
               style={styles.passwordInput}
               placeholder="••••"
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor="#9CA3AF"
               keyboardType="numeric"
               secureTextEntry={!showConfirmPin}
               maxLength={4}
@@ -217,7 +217,7 @@ export default function SignupScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#ffffff",
+    backgroundColor: "#F9FAFB",
   },
 
   scrollContainer: {
@@ -237,11 +237,11 @@ const styles = StyleSheet.create({
   logoText: {
     fontSize: 25,
     fontWeight: "800",
-    color: "#202124",
+    color: "#111827",
   },
 
   iqBox: {
-    backgroundColor: "#00A86B",
+    backgroundColor: "#004B49",
     borderRadius: 6,
     paddingHorizontal: 5,
     paddingVertical: 2,
@@ -259,13 +259,13 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontSize: 21,
     fontWeight: "800",
-    color: "#202124",
+    color: "#111827",
     marginBottom: 4,
   },
 
   subtitle: {
     textAlign: "center",
-    color: "#737983",
+    color: "#6B7280",
     fontSize: 12,
     lineHeight: 16,
     marginBottom: 12,
@@ -285,34 +285,34 @@ const styles = StyleSheet.create({
 
   label: {
     fontSize: 11,
-    fontWeight: "600",
-    color: "#202124",
+    fontWeight: "800",
+    color: "#111827",
     marginBottom: 6,
   },
 
   requirement: {
     fontSize: 9,
-    color: "#00A86B",
-    fontWeight: "600",
+    color: "#004B49",
+    fontWeight: "700",
   },
 
   input: {
     height: 43,
-    backgroundColor: "#f6f7f8",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#dedfe2",
+    borderColor: "#E5E7EB",
     borderRadius: 9,
     paddingHorizontal: 13,
     fontSize: 12,
-    color: "#202124",
+    color: "#111827",
   },
 
   // Phone
   phoneContainer: {
     height: 43,
-    backgroundColor: "#f6f7f8",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#dedfe2",
+    borderColor: "#E5E7EB",
     borderRadius: 9,
     flexDirection: "row",
     alignItems: "center",
@@ -326,22 +326,22 @@ const styles = StyleSheet.create({
 
   countryCode: {
     fontSize: 12,
-    color: "#202124",
+    color: "#111827",
     marginRight: 8,
   },
 
   phoneInput: {
     flex: 1,
     fontSize: 12,
-    color: "#202124",
+    color: "#111827",
   },
 
   // Password
   passwordContainer: {
     height: 43,
-    backgroundColor: "#f6f7f8",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#dedfe2",
+    borderColor: "#E5E7EB",
     borderRadius: 9,
     flexDirection: "row",
     alignItems: "center",
@@ -352,32 +352,32 @@ const styles = StyleSheet.create({
   passwordInput: {
     flex: 1,
     fontSize: 14,
-    color: "#202124",
+    color: "#111827",
     letterSpacing: 3,
   },
 
   eye: {
     fontSize: 18,
-    color: "#737983",
+    color: "#6B7280",
   },
 
   helperText: {
     fontSize: 9,
-    color: "#737983",
+    color: "#6B7280",
     marginTop: 6,
   },
 
   // Button
   createButton: {
     height: 44,
-    backgroundColor: "#00A86B",
+    backgroundColor: "#004B49",
     borderRadius: 25,
     justifyContent: "center",
     alignItems: "center",
     marginTop: 6,
 
     // Shadow
-    shadowColor: "#00A86B",
+    shadowColor: "#004B49",
     shadowOffset: {
       width: 0,
       height: 6,
@@ -390,7 +390,7 @@ const styles = StyleSheet.create({
   createButtonText: {
     color: "#ffffff",
     fontSize: 13,
-    fontWeight: "700",
+    fontWeight: "800",
   },
 
   // Login
@@ -401,13 +401,13 @@ const styles = StyleSheet.create({
   },
 
   loginText: {
-    color: "#737983",
+    color: "#6B7280",
     fontSize: 11,
   },
 
   loginLink: {
-    color: "#00A86B",
+    color: "#004B49",
     fontSize: 11,
-    fontWeight: "700",
+    fontWeight: "800",
   },
 });

@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { answerSpazaIQQuestion } from '../services/assistant/assistantService';
 
 const INITIAL_MESSAGES = [
@@ -43,6 +44,7 @@ function currentTime() {
 }
 
 export default function ChatbotScreen({ storeId }) {
+  const navigation = useNavigation();
   const [messages, setMessages] = useState(INITIAL_MESSAGES);
   const [draft, setDraft] = useState('');
   const [isThinking, setIsThinking] = useState(false);
@@ -107,7 +109,11 @@ export default function ChatbotScreen({ storeId }) {
               <Text style={styles.status}>Always Online</Text>
             </View>
           </View>
-          <TouchableOpacity style={styles.closeButton} accessibilityLabel="Close assistant">
+          <TouchableOpacity
+            style={styles.closeButton}
+            onPress={() => navigation.goBack()}
+            accessibilityLabel="Close assistant"
+          >
             <Ionicons name="close" size={22} color="#1F2937" />
           </TouchableOpacity>
         </View>

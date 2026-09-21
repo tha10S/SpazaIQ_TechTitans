@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import {View,
+import {
+  View,
   Text,
   TextInput,
   TouchableOpacity,
@@ -8,16 +9,21 @@ import {View,
   SafeAreaView,
   ActivityIndicator,
   Alert,
+  Platform,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useCart } from '../hooks/useCart';
 import { fetchProducts } from '../services/salesService';
-import QRScannerScreen from './QRScannerScreen';
 
-const PAYMENT_METHODS = ['Cash', 'Card', "Credit"];
-const formatR = (n) => `R${Number(n).toFixed(2).replace(/\.00$/, '')}`;
+const PAYMENT_METHODS = [
+  { id: 'Cash', label: 'Cash', icon: 'cash-outline' },
+  { id: 'Card', label: 'Card', icon: 'card-outline' },
+  { id: 'Credit', label: 'Credit', icon: 'wallet-outline' },
+];
 
-// storeId would normally come from auth context / a store-selection screen
+const formatR = (n) => `R ${Number(n || 0).toFixed(2)}`;
+
 export default function NewSaleScreen({ storeId }) {
   const {
     search,
@@ -36,6 +42,8 @@ export default function NewSaleScreen({ storeId }) {
   const [scannerVisible, setScannerVisible] = useState(false);
   const [scanError, setScanError] = useState('');
 
+  const totalItemsCount = cart.reduce((sum, item) => sum + item.qty, 0);
+
   const handleBarcodeScanned = async (value) => {
     setScannerVisible(false);
     setScanError('');
@@ -44,12 +52,10 @@ export default function NewSaleScreen({ storeId }) {
     try {
       const payload = JSON.parse(productCode);
       productCode = payload.productId || payload.product_id || payload.sku || payload.barcode || payload.id;
-    } catch (err) {
-      // Plain text QR values are supported too, for example: p1.
-    }
+    } catch (err) {}
 
     if (!productCode) {
-      setScanError('This QR code does not contain a product identifier.');
+      setScanError('Invalid QR code format.');
       return;
     }
 
@@ -62,44 +68,58 @@ export default function NewSaleScreen({ storeId }) {
       );
 
       if (!product) {
-        setScanError(`No product matches QR value "${productCode}".`);
+        setScanError(`No product matches code "${productCode}".`);
         return;
       }
 
       addToCart(product);
     } catch (err) {
-      setScanError(err.message || 'Could not look up the scanned product.');
+      setScanError(err.message || 'Lookup failed.');
     }
   };
 
   const handleCompleteSale = async () => {
     if (cart.length === 0) {
-      Alert.alert('Cart is empty', 'Add at least one item before completing the sale.');
+      Alert.alert('Cart Empty', 'Add at least one item to proceed.');
       return;
     }
     try {
       await completeSale(payment.toLowerCase());
-      Alert.alert('Sale complete', `${formatR(subtotal)} recorded.`);
+      Alert.alert('Success', `Sale of ${formatR(subtotal)} completed.`);
     } catch (err) {
-      Alert.alert('Could not complete sale', err.message);
+      Alert.alert('Error', err.message);
     }
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>New Sale (POS)</Text>
+      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        <View style={styles.headerRow}>
+          <View>
+            <Text style={styles.title}>New Sale</Text>
+            <Text style={styles.subtitle}>Checkout & Point of Sale</Text>
+          </View>
+          <View style={styles.badgeContainer}>
+            <Ionicons name="cart-outline" size={15} color={COLORS.primary} />
+            <Text style={styles.badgeText}>{totalItemsCount} {totalItemsCount === 1 ? 'item' : 'items'}</Text>
+          </View>
+        </View>
 
         <View style={styles.searchRow}>
           <View style={styles.searchInputWrap}>
-            <Ionicons name="search" size={18} color="#9CA3AF" style={styles.searchIcon} />
+            <Ionicons name="search-outline" size={18} color={COLORS.textMuted} style={styles.searchIcon} />
             <TextInput
               style={styles.searchInput}
-              placeholder="Search or scan product..."
-              placeholderTextColor="#9CA3AF"
+              placeholder="Search products or SKU..."
+              placeholderTextColor={COLORS.textMuted}
               value={search}
               onChangeText={setSearch}
             />
+            {search.length > 0 && (
+              <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="close-circle" size={18} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            )}
           </View>
           <TouchableOpacity
             style={styles.scanButton}
@@ -109,92 +129,125 @@ export default function NewSaleScreen({ storeId }) {
               setScannerVisible(true);
             }}
           >
-            <Ionicons name="scan-outline" size={22} color="#FFFFFF" />
+            <Ionicons name="qr-code-outline" size={20} color="#FFFFFF" />
+            <Text style={styles.scanButtonText}>Scan</Text>
           </TouchableOpacity>
         </View>
 
-        {!!scanError && <Text style={styles.scanError}>{scanError}</Text>}
+        {!!scanError && (
+          <View style={styles.errorCard}>
+            <Ionicons name="alert-circle" size={16} color={COLORS.danger} />
+            <Text style={styles.scanErrorText}>{scanError}</Text>
+            <TouchableOpacity onPress={() => setScanError('')}>
+              <Ionicons name="close" size={16} color={COLORS.danger} />
+            </TouchableOpacity>
+          </View>
+        )}
 
-        {/* Search results — tap to add to cart */}
         {search.length > 0 && (
           <View style={styles.resultsCard}>
             {loading ? (
-              <ActivityIndicator style={{ padding: 16 }} color="#0F9D58" />
+              <ActivityIndicator style={{ padding: 16 }} color={COLORS.primary} />
             ) : products.length === 0 ? (
-              <Text style={styles.emptyText}>No products found.</Text>
+              <Text style={styles.emptyResultsText}>No products matched search.</Text>
             ) : (
               products.map((product) => (
                 <TouchableOpacity
                   key={product.id}
                   style={styles.resultRow}
-                  onPress={() => addToCart(product)}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    addToCart(product);
+                    setSearch('');
+                  }}
                 >
-                  <Text style={styles.resultName}>{product.name}</Text>
+                  <View style={styles.resultInfo}>
+                    <Text style={styles.resultName}>{product.name}</Text>
+                    {!!product.sku && <Text style={styles.resultSku}>SKU: {product.sku}</Text>}
+                  </View>
                   <Text style={styles.resultPrice}>{formatR(product.unit_price)}</Text>
+                  <Ionicons name="add-circle" size={22} color={COLORS.primary} style={styles.addIcon} />
                 </TouchableOpacity>
               ))
             )}
           </View>
         )}
 
-        <Text style={styles.sectionLabel}>SHOPPING CART</Text>
-
+        <Text style={styles.sectionTitle}>ITEMS IN CART</Text>
         <View style={styles.cartCard}>
-          {cart.length === 0 && (
-            <Text style={styles.emptyText}>Search above to add items.</Text>
-          )}
-          {cart.map((item, index) => (
-            <View
-              key={item.id}
-              style={[styles.cartRow, index !== cart.length - 1 && styles.cartRowDivider]}
-            >
-              <View style={styles.cartItemInfo}>
-                <Text style={styles.cartItemName} numberOfLines={1}>
-                  {item.name}
-                </Text>
-                <Text style={styles.cartItemUnit}>{formatR(item.unitPrice)} each</Text>
-              </View>
-
-              <View style={styles.qtyControl}>
-                <TouchableOpacity style={styles.qtyButton} onPress={() => updateQty(item.id, -1)}>
-                  <Ionicons name="remove" size={16} color="#374151" />
-                </TouchableOpacity>
-                <Text style={styles.qtyText}>{item.qty}</Text>
-                <TouchableOpacity style={styles.qtyButton} onPress={() => updateQty(item.id, 1)}>
-                  <Ionicons name="add" size={16} color="#374151" />
-                </TouchableOpacity>
-              </View>
-
-              <Text style={styles.cartItemTotal}>{formatR(item.unitPrice * item.qty)}</Text>
+          {cart.length === 0 ? (
+            <View style={styles.emptyCartContainer}>
+              <Ionicons name="basket-outline" size={36} color={COLORS.textMuted} />
+              <Text style={styles.emptyText}>Cart is currently empty</Text>
+              <Text style={styles.emptySubtext}>Scan barcode or search items above</Text>
             </View>
-          ))}
+          ) : (
+            cart.map((item, index) => (
+              <View
+                key={item.id}
+                style={[styles.cartRow, index !== cart.length - 1 && styles.cartRowDivider]}
+              >
+                <View style={styles.cartItemDetails}>
+                  <Text style={styles.cartItemName} numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                  <Text style={styles.cartItemUnitPrice}>{formatR(item.unitPrice)} / unit</Text>
+                </View>
+
+                <View style={styles.qtyContainer}>
+                  <TouchableOpacity style={styles.qtyBtn} onPress={() => updateQty(item.id, -1)}>
+                    <Ionicons name="remove" size={14} color={COLORS.textDark} />
+                  </TouchableOpacity>
+                  <Text style={styles.qtyText}>{item.qty}</Text>
+                  <TouchableOpacity style={styles.qtyBtn} onPress={() => updateQty(item.id, 1)}>
+                    <Ionicons name="add" size={14} color={COLORS.textDark} />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.cartItemTotalWrap}>
+                  <Text style={styles.cartItemTotalText}>{formatR(item.unitPrice * item.qty)}</Text>
+                </View>
+              </View>
+            ))
+          )}
         </View>
 
-        <View style={styles.totalsCard}>
-          <View style={styles.totalsRow}>
-            <Text style={styles.subtotalLabel}>Subtotal</Text>
-            <Text style={styles.subtotalValue}>{formatR(subtotal)}</Text>
+        <Text style={styles.sectionTitle}>SUMMARY</Text>
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Subtotal</Text>
+            <Text style={styles.summarySubtotalValue}>{formatR(subtotal)}</Text>
           </View>
-          <View style={styles.totalsDivider} />
-          <View style={styles.totalsRow}>
-            <Text style={styles.totalLabel}>Total Amount</Text>
-            <Text style={styles.totalValue}>{formatR(subtotal)}</Text>
+
+          <View style={styles.summaryDivider} />
+
+          <View style={styles.summaryRow}>
+            <View style={styles.summaryTotalLabelGroup}>
+              <Text style={styles.summaryTotalLabel}>Total Amount</Text>
+              <Text style={styles.taxInclusiveText}>Tax included</Text>
+            </View>
+            <Text style={styles.summaryTotalValue}>{formatR(subtotal)}</Text>
           </View>
         </View>
 
-        <Text style={styles.sectionLabel}>PAYMENT METHOD</Text>
-        <View style={styles.paymentRow}>
+        <Text style={styles.sectionTitle}>PAYMENT METHOD</Text>
+        <View style={styles.paymentGrid}>
           {PAYMENT_METHODS.map((method) => {
-            const selected = payment === method;
+            const isSelected = payment === method.id;
             return (
               <TouchableOpacity
-                key={method}
-                style={[styles.paymentButton, selected && styles.paymentButtonSelected]}
-                onPress={() => setPayment(method)}
+                key={method.id}
+                style={[styles.paymentCard, isSelected && styles.paymentCardSelected]}
+                onPress={() => setPayment(method.id)}
                 activeOpacity={0.85}
               >
-                <Text style={[styles.paymentButtonText, selected && styles.paymentButtonTextSelected]}>
-                  {method}
+                <Ionicons
+                  name={method.icon}
+                  size={18}
+                  color={isSelected ? COLORS.primary : COLORS.textMuted}
+                />
+                <Text style={[styles.paymentCardLabel, isSelected && styles.paymentCardLabelSelected]}>
+                  {method.label}
                 </Text>
               </TouchableOpacity>
             );
@@ -202,88 +255,510 @@ export default function NewSaleScreen({ storeId }) {
         </View>
 
         <TouchableOpacity
-          style={styles.completeButton}
+          style={[styles.completeCta, cart.length === 0 && styles.disabledCta]}
           onPress={handleCompleteSale}
-          activeOpacity={0.9}
-          disabled={submitting}
+          activeOpacity={0.88}
+          disabled={submitting || cart.length === 0}
         >
           {submitting ? (
-            <ActivityIndicator color="#FFFFFF" />
+            <ActivityIndicator color="#FFFFFF" size="small" />
           ) : (
-            <Text style={styles.completeButtonText}>Complete Sale ({formatR(subtotal)})</Text>
+            <View style={styles.ctaContent}>
+              <View style={styles.ctaLeft}>
+                <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
+                <Text style={styles.ctaText}>Complete Sale</Text>
+              </View>
+              <View style={styles.ctaBadge}>
+                <Text style={styles.ctaBadgeText}>{formatR(subtotal)}</Text>
+              </View>
+            </View>
           )}
         </TouchableOpacity>
       </ScrollView>
 
-      {scannerVisible && (
-        <QRScannerScreen
-          onClose={() => setScannerVisible(false)}
-          onScanned={handleBarcodeScanned}
-        />
-      )}
+      <Modal
+        visible={scannerVisible}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setScannerVisible(false)}
+      >
+        <SafeAreaView style={styles.scannerModalContainer}>
+          <View style={styles.scannerHeader}>
+            <Text style={styles.scannerHeaderTitle}>Scan Barcode / QR</Text>
+            <TouchableOpacity
+              style={styles.scannerCloseBtn}
+              onPress={() => setScannerVisible(false)}
+            >
+              <Ionicons name="close" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.scannerViewport}>
+            <View style={styles.scannerOverlay}>
+              <View style={styles.scannerFinder}>
+                <View style={[styles.corner, styles.topLeft]} />
+                <View style={[styles.corner, styles.topRight]} />
+                <View style={[styles.corner, styles.bottomLeft]} />
+                <View style={[styles.corner, styles.bottomRight]} />
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.scannerFooter}>
+            <Ionicons name="information-circle-outline" size={18} color="#94A3B8" />
+            <Text style={styles.scannerFooterText}>Position the barcode within the frame to scan</Text>
+          </View>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
 
-const GREEN = '#0F9D58';
+const COLORS = {
+  primary: '#004B49',
+  primaryBg: '#E6F4F1',
+  bg: '#F9FAFB',
+  cardBg: '#FFFFFF',
+  textDark: '#111827',
+  textMuted: '#6B7280',
+  border: '#E5E7EB',
+  danger: '#DC2626',
+  dangerBg: '#FEE2E2',
+};
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F3F4F6' },
-  container: { padding: 20, paddingBottom: 40 },
-  title: { fontSize: 24, fontWeight: '700', color: '#111827', marginBottom: 16 },
-  searchRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  safeArea: {
+    flex: 1,
+    backgroundColor: COLORS.bg,
+  },
+  container: {
+    padding: 16,
+    paddingBottom: 32,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: COLORS.textDark,
+    letterSpacing: -0.3,
+  },
+  subtitle: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
+  badgeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.primaryBg,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  badgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.primary,
+    marginLeft: 5,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 8,
+  },
   searchInputWrap: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.cardBg,
     borderRadius: 12,
-    paddingHorizontal: 14,
-    height: 48,
-    marginRight: 10,
+    paddingHorizontal: 12,
+    height: 46,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
-  searchIcon: { marginRight: 8 },
-  searchInput: { flex: 1, fontSize: 15, color: '#111827' },
-  scanButton: { width: 48, height: 48, borderRadius: 12, backgroundColor: GREEN, alignItems: 'center', justifyContent: 'center' },
-  scanError: { color: '#B42318', fontSize: 13, marginBottom: 12 },
-  resultsCard: { backgroundColor: '#FFFFFF', borderRadius: 12, marginBottom: 16, overflow: 'hidden' },
-  resultRow: { flexDirection: 'row', justifyContent: 'space-between', padding: 14, borderBottomWidth: 1, borderBottomColor: '#F1F2F4' },
-  resultName: { fontSize: 14, color: '#111827', flex: 1, marginRight: 8 },
-  resultPrice: { fontSize: 14, fontWeight: '600', color: '#111827' },
-  emptyText: { fontSize: 13, color: '#9CA3AF', padding: 16, textAlign: 'center' },
-  sectionLabel: { fontSize: 12, fontWeight: '700', color: '#6B7280', letterSpacing: 0.5, marginBottom: 10 },
-  cartCard: { backgroundColor: '#FFFFFF', borderRadius: 14, marginBottom: 16, paddingHorizontal: 16 },
-  cartRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16 },
-  cartRowDivider: { borderBottomWidth: 1, borderBottomColor: '#F1F2F4' },
-  cartItemInfo: { flex: 1.4, marginRight: 8 },
-  cartItemName: { fontSize: 15, fontWeight: '600', color: '#111827' },
-  cartItemUnit: { fontSize: 13, color: '#9CA3AF', marginTop: 2 },
-  qtyControl: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6, marginRight: 12 },
-  qtyButton: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center' },
-  qtyText: { minWidth: 20, textAlign: 'center', fontSize: 15, fontWeight: '600', color: '#111827' },
-  cartItemTotal: { fontSize: 15, fontWeight: '700', color: '#111827', minWidth: 44, textAlign: 'right' },
-  totalsCard: { backgroundColor: '#FFFFFF', borderRadius: 14, padding: 18, marginBottom: 20 },
-  totalsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  subtotalLabel: { fontSize: 14, color: '#9CA3AF' },
-  subtotalValue: { fontSize: 14, color: '#374151', fontWeight: '600' },
-  totalsDivider: { height: 1, backgroundColor: '#F1F2F4', marginVertical: 12 },
-  totalLabel: { fontSize: 17, fontWeight: '700', color: '#111827' },
-  totalValue: { fontSize: 22, fontWeight: '800', color: GREEN },
-  paymentRow: { flexDirection: 'row', marginBottom: 20 },
-  paymentButton: {
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: COLORS.textDark,
+  },
+  scanButton: {
+    height: 46,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: COLORS.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  scanButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  errorCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.dangerBg,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    gap: 8,
+  },
+  scanErrorText: {
+    color: COLORS.danger,
+    fontSize: 12,
+    fontWeight: '600',
+    flex: 1,
+  },
+  resultsCard: {
+    backgroundColor: COLORS.cardBg,
+    borderRadius: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    overflow: 'hidden',
+  },
+  resultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  resultInfo: {
+    flex: 1,
+  },
+  resultName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textDark,
+  },
+  resultSku: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
+  resultPrice: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.textDark,
+    marginRight: 8,
+  },
+  addIcon: {
+    marginLeft: 4,
+  },
+  emptyResultsText: {
+    padding: 16,
+    textAlign: 'center',
+    fontSize: 13,
+    color: COLORS.textMuted,
+  },
+  sectionTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: COLORS.textMuted,
+    letterSpacing: 0.8,
+    marginBottom: 8,
+    marginTop: 6,
+  },
+  cartCard: {
+    backgroundColor: COLORS.cardBg,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  emptyCartContainer: {
+    paddingVertical: 24,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textDark,
+    marginTop: 8,
+  },
+  emptySubtext: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
+  cartRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  cartRowDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  cartItemDetails: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  cartItemName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textDark,
+  },
+  cartItemUnitPrice: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
+  qtyContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.bg,
+    borderRadius: 8,
+    padding: 2,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginRight: 12,
+  },
+  qtyBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    backgroundColor: COLORS.cardBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  qtyText: {
+    width: 28,
+    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.textDark,
+  },
+  cartItemTotalWrap: {
+    minWidth: 65,
+    alignItems: 'flex-end',
+  },
+  cartItemTotalText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.textDark,
+  },
+  summaryCard: {
+    backgroundColor: COLORS.cardBg,
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  summaryLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: COLORS.textMuted,
+    flex: 1,
+    marginRight: 16,
+  },
+  summarySubtotalValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textDark,
+    textAlign: 'right',
+  },
+  summaryDivider: {
+    height: 1,
+    backgroundColor: COLORS.border,
+    marginVertical: 12,
+  },
+  summaryTotalLabelGroup: {
+    flex: 1,
+    marginRight: 16,
+  },
+  summaryTotalLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.textDark,
+  },
+  taxInclusiveText: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
+  summaryTotalValue: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: COLORS.primary,
+    textAlign: 'right',
+  },
+  paymentGrid: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 20,
+  },
+  paymentCard: {
     flex: 1,
     height: 48,
     borderRadius: 12,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.cardBg,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
+    gap: 6,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: COLORS.border,
   },
-  paymentButtonSelected: { backgroundColor: GREEN, borderColor: GREEN },
-  paymentButtonText: { fontSize: 15, fontWeight: '600', color: '#374151' },
-  paymentButtonTextSelected: { color: '#FFFFFF' },
-  completeButton: { height: 56, borderRadius: 14, backgroundColor: GREEN, alignItems: 'center', justifyContent: 'center' },
-  completeButtonText: { fontSize: 17, fontWeight: '700', color: '#FFFFFF' },
+  paymentCardSelected: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primaryBg,
+  },
+  paymentCardLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+  paymentCardLabelSelected: {
+    color: COLORS.primary,
+    fontWeight: '700',
+  },
+  completeCta: {
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+    ...Platform.select({
+      ios: { shadowColor: COLORS.primary, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.25, shadowRadius: 5 },
+      android: { elevation: 3 },
+    }),
+  },
+  disabledCta: {
+    backgroundColor: '#94A3B8',
+    elevation: 0,
+    shadowOpacity: 0,
+  },
+  ctaContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  ctaLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  ctaText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  ctaBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  ctaBadgeText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  scannerModalContainer: {
+    flex: 1,
+    backgroundColor: '#0F172A',
+  },
+  scannerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+  },
+  scannerHeaderTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  scannerCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scannerViewport: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scannerOverlay: {
+    width: 240,
+    height: 240,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scannerFinder: {
+    width: '100%',
+    height: '100%',
+    position: 'relative',
+  },
+  corner: {
+    position: 'absolute',
+    width: 24,
+    height: 24,
+    borderColor: COLORS.primary,
+  },
+  topLeft: {
+    top: 0,
+    left: 0,
+    borderTopWidth: 4,
+    borderLeftWidth: 4,
+  },
+  topRight: {
+    top: 0,
+    right: 0,
+    borderTopWidth: 4,
+    borderRightWidth: 4,
+  },
+  bottomLeft: {
+    bottom: 0,
+    left: 0,
+    borderBottomWidth: 4,
+    borderLeftWidth: 4,
+  },
+  bottomRight: {
+    bottom: 0,
+    right: 0,
+    borderBottomWidth: 4,
+    borderRightWidth: 4,
+  },
+  scannerFooter: {
+    padding: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  scannerFooterText: {
+    fontSize: 13,
+    color: '#94A3B8',
+  },
 });

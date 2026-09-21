@@ -1,18 +1,18 @@
 import { useState } from "react";
 import {Pressable, ScrollView, StyleSheet, Text, TextInput, View} from "react-native";
 
-const GREEN = "#06ad40";
-const LIGHT_GREEN = "#E6F6ED";
+const GREEN = "#004B49";
+const LIGHT_GREEN = "#E6F4F1";
 
 const categoryColors = {
-  Groceries: { bg: "#3bff90", text: "#ffffff" },
-  Beverages: { bg: "#0963ff", text: "#ffffff" },
-  Bakery: { bg: "#ffa928", text: "#ffffff" },
-  Snacks: { bg: "#ff009082", text: "#ffffff" },
+  Groceries: { bg: "#E6F4F1", text: "#004B49" },
+  Beverages: { bg: "#EFF6FF", text: "#2563EB" },
+  Bakery: { bg: "#FFFBEB", text: "#D97706" },
+  Snacks: { bg: "#FEE2E2", text: "#DC2626" },
 };
 
 const statusColors = {
-  Delivered: { bg: "#E6F6ED", text: GREEN },
+  Delivered: { bg: "#E6F4F1", text: GREEN },
   Pending: { bg: "#FDF3DC", text: "#B8860B" },
 };
 
@@ -125,7 +125,7 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
   const [newCategory, setNewCategory] = useState(CATEGORIES[0]);
   const [newPhone, setNewPhone] = useState("");
 
-  const [addItemFor, setAddItemFor] = useState(null); // supplier name, or null
+  const [addItemFor, setAddItemFor] = useState(null);
   const [newItemName, setNewItemName] = useState("");
   const [newItemQty, setNewItemQty] = useState("");
 
@@ -193,7 +193,7 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
       <TextInput
         style={styles.searchInput}
         placeholder="Search suppliers..."
-        placeholderTextColor="#999"
+        placeholderTextColor="#6B7280"
         value={query}
         onChangeText={setQuery}
       />
@@ -212,14 +212,14 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
           <TextInput
             style={styles.formInput}
             placeholder="Supplier name"
-            placeholderTextColor="#999"
+            placeholderTextColor="#6B7280"
             value={newName}
             onChangeText={setNewName}
           />
           <TextInput
             style={styles.formInput}
             placeholder="Phone number"
-            placeholderTextColor="#999"
+            placeholderTextColor="#6B7280"
             value={newPhone}
             onChangeText={setNewPhone}
             keyboardType="phone-pad"
@@ -254,8 +254,8 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
 
       {filtered.map((s, i) => {
         const catStyle = categoryColors[s.category] ?? {
-          bg: "#EEE",
-          text: "#666",
+          bg: "#F3F4F6",
+          text: "#6B7280",
         };
         return (
           <View key={i} style={styles.card}>
@@ -268,7 +268,7 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
               </View>
             </View>
 
-            <Text style={styles.phoneText}>📞 {s.phone}</Text>
+            <Text style={styles.phoneText}>{s.phone}</Text>
 
             <Text style={styles.presetLabel}>PRESET ITEMS</Text>
             <View style={styles.tagRow}>
@@ -295,14 +295,14 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
                 <TextInput
                   style={styles.formInput}
                   placeholder="Item name"
-                  placeholderTextColor="#999"
+                  placeholderTextColor="#6B7280"
                   value={newItemName}
                   onChangeText={setNewItemName}
                 />
                 <TextInput
                   style={styles.formInput}
                   placeholder="Quantity"
-                  placeholderTextColor="#999"
+                  placeholderTextColor="#6B7280"
                   value={newItemQty}
                   onChangeText={setNewItemQty}
                   keyboardType="number-pad"
@@ -333,7 +333,7 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
 
             <Pressable style={styles.newOrderButton}>
               <Text style={styles.newOrderButtonText}>
-                🛒 New Order from {s.name.split(" ")[0]}
+                New Order from {s.name.split(" ")[0]}
               </Text>
             </Pressable>
           </View>
@@ -354,8 +354,8 @@ function OrdersTab({ orders, setOrders }) {
     <>
       {orders.map((o, i) => {
         const statusStyle = statusColors[o.status] ?? {
-          bg: "#EEE",
-          text: "#666",
+          bg: "#F3F4F6",
+          text: "#6B7280",
         };
         return (
           <View key={i} style={styles.card}>
@@ -406,15 +406,17 @@ function OrdersTab({ orders, setOrders }) {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#F2F2F2" },
+  screen: { flex: 1, backgroundColor: "#F9FAFB" },
   content: { padding: 20, paddingBottom: 40 },
-  header: { fontSize: 24, fontWeight: "700", marginBottom: 16 },
+  header: { fontSize: 24, fontWeight: "800", marginBottom: 16, color: "#111827" },
   segmentWrap: {
     flexDirection: "row",
     backgroundColor: "#fff",
     borderRadius: 24,
     padding: 4,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
   segment: {
     flex: 1,
@@ -423,7 +425,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   segmentActive: { backgroundColor: GREEN },
-  segmentText: { color: "#888", fontWeight: "600" },
+  segmentText: { color: "#6B7280", fontWeight: "600" },
   segmentTextActive: { color: "#fff" },
   searchInput: {
     backgroundColor: "#fff",
@@ -432,6 +434,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 15,
     marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
   addButton: {
     backgroundColor: GREEN,
@@ -447,7 +451,7 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 14,
     borderWidth: 1,
-    borderColor: "#EEE",
+    borderColor: "#E5E7EB",
   },
   formInput: {
     backgroundColor: "#fff",
@@ -457,7 +461,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#E5E5E5",
+    borderColor: "#E5E7EB",
   },
   formSubmit: {
     backgroundColor: GREEN,
@@ -469,7 +473,7 @@ const styles = StyleSheet.create({
   formSubmitText: { color: "#fff", fontWeight: "700", fontSize: 13 },
   categoryPickOption: {
     borderWidth: 1,
-    borderColor: "#E5E5E5",
+    borderColor: "#E5E7EB",
     borderRadius: 14,
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -477,31 +481,33 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   categoryPickSelected: { backgroundColor: GREEN, borderColor: GREEN },
-  categoryPickText: { color: "#666", fontSize: 12, fontWeight: "600" },
+  categoryPickText: { color: "#6B7280", fontSize: 12, fontWeight: "600" },
   categoryPickTextSelected: { color: "#fff" },
   card: {
     backgroundColor: "#fff",
-    borderRadius: 12,
+    borderRadius: 14,
     padding: 16,
     marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
   cardTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
   },
-  itemTitle: { fontWeight: "700", fontSize: 15 },
-  itemSub: { color: "#888", fontSize: 12, marginTop: 2 },
-  itemCost: { fontWeight: "700", fontSize: 16, color: "#000" },
+  itemTitle: { fontWeight: "700", fontSize: 15, color: "#111827" },
+  itemSub: { color: "#6B7280", fontSize: 12, marginTop: 2 },
+  itemCost: { fontWeight: "800", fontSize: 16, color: "#111827" },
   badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
-  badgeText: { fontSize: 11, fontWeight: "600" },
-  phoneText: { color: "#555", fontSize: 13, marginTop: 8 },
-  removeText: { color: "#D64545", fontSize: 12, fontWeight: "600" },
+  badgeText: { fontSize: 11, fontWeight: "700" },
+  phoneText: { color: "#6B7280", fontSize: 13, marginTop: 8 },
+  removeText: { color: "#DC2626", fontSize: 12, fontWeight: "600" },
   addItemText: { color: GREEN, fontSize: 12, fontWeight: "600" },
   presetLabel: {
     fontSize: 10,
-    color: "#999",
-    fontWeight: "600",
+    color: "#6B7280",
+    fontWeight: "700",
     marginTop: 14,
     marginBottom: 8,
   },
@@ -514,9 +520,9 @@ const styles = StyleSheet.create({
     marginRight: 6,
     marginBottom: 6,
   },
-  tagUnselected: { backgroundColor: "#EDEDED" },
+  tagUnselected: { backgroundColor: "#F3F4F6" },
   tagText: { color: GREEN, fontSize: 12, fontWeight: "600" },
-  tagTextUnselected: { color: "#999" },
+  tagTextUnselected: { color: "#6B7280" },
   cardBottomRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -533,7 +539,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   newOrderButtonText: { color: "#fff", fontWeight: "700", fontSize: 13 },
-  receiptLine: { color: "#555", fontSize: 13, marginTop: 6 },
+  receiptLine: { color: "#374151", fontSize: 13, marginTop: 6 },
   orderBottomRow: {
     flexDirection: "row",
     justifyContent: "space-between",
