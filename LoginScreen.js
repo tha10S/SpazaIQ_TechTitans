@@ -9,12 +9,14 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
+import { loginLocalAccount } from "./services/auth/localAuth";
 
 export default function LoginScreen({ navigation }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
+<<<<<<< HEAD
   const login = () => {
     if (!username || !password) {
       Alert.alert(
@@ -26,6 +28,27 @@ export default function LoginScreen({ navigation }) {
 
     navigation.navigate("MainTabs");
   };
+=======
+const login = async () => {
+  if (!username || !password) {
+    Alert.alert(
+      "Missing Information",
+      "Please enter your username/email and password."
+    );
+    return;
+  }
+
+  const account = await loginLocalAccount(username, password);
+  const fallbackName = (username.includes('@') ? username.split('@')[0] : username)
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+  navigation.navigate("MainTabs", {
+    userName: account?.fullName || fallbackName,
+    shopName: account?.shopName || "Thabo's Mini Mart",
+  });
+};
+>>>>>>> 5d0f884411c03a1c0e076f514903c3d6024851e5
 
   return (
     <KeyboardAvoidingView

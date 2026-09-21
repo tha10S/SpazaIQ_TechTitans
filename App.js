@@ -5,6 +5,11 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { ThemeProvider } from './ThemeContext';
+<<<<<<< HEAD
+=======
+import { TouchableOpacity, View } from 'react-native';
+import { TechTitansAssistant } from './components/TechTitansAssistant';
+>>>>>>> 5d0f884411c03a1c0e076f514903c3d6024851e5
 
 // User authentication
 import LoginScreen from './LoginScreen';
@@ -18,7 +23,6 @@ import HomeScreen from './screens/HomeScreen';
 import StockScreen from './screens/StockScreen';
 import NewSaleScreen from './screens/NewSaleScreen';
 import CreditLedgerScreen from './screens/CreditLedgerScreen';
-import ChatbotScreen from './screens/ChatbotScreen';
 import ProfileSettingsScreen from './screens/ProfileSettingsScreen';
 import QRScannerScreen from './screens/QRScannerScreen';
 import PlaceholderScreen from './screens/PlaceholderScreen';
@@ -33,10 +37,18 @@ const icons = {
   Stock: 'cube',
   Sell: 'cart',
   Credit: 'card',
+<<<<<<< HEAD
+=======
+  Insights: 'stats-chart',
+  Profile: 'person',
+  Scanner: 'scan',
+  Notifications: 'notifications',
+>>>>>>> 5d0f884411c03a1c0e076f514903c3d6024851e5
   Suppliers: 'people',
   Insights: 'stats-chart',
 };
 
+<<<<<<< HEAD
 function ChatFAB() {
   const navigation = useNavigation();
   return (
@@ -73,6 +85,60 @@ function MainTabs() {
       </Tab.Navigator>
       <ChatFAB />
     </View>
+=======
+function withAssistant(ScreenComponent) {
+  return function AssistantTab(props) {
+    return (
+      <View style={{ flex: 1 }}>
+        <ScreenComponent {...props} />
+        <TechTitansAssistant
+          storeId={props.route?.params?.storeId}
+          userName={props.route?.params?.userName}
+          shopName={props.route?.params?.shopName}
+        />
+      </View>
+    );
+  };
+}
+
+const HomeWithAssistant = withAssistant(HomeScreen);
+const StockWithAssistant = withAssistant(StockScreen);
+const SellWithAssistant = withAssistant(NewSaleScreen);
+const CreditWithAssistant = withAssistant(CreditLedgerScreen);
+const SuppliersWithAssistant = withAssistant(SuppliersOrders);
+const InsightsWithAssistant = withAssistant(Insights);
+
+function MainTabs({ route }) {
+  const account = route?.params || {};
+
+  return (
+    <Tab.Navigator
+      screenOptions={({ route, navigation }) => ({
+        headerShown: true,
+        headerRight: () => (
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Profile')}
+            style={{ marginRight: 16 }}
+          >
+            <Ionicons name="person-circle" size={32} color={GREEN} />
+          </TouchableOpacity>
+        ),
+        tabBarActiveTintColor: GREEN,
+        tabBarInactiveTintColor: '#888',
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        tabBarIcon: ({ color, size }) => (
+          <Ionicons name={icons[route.name]} size={size} color={color} />
+        ),
+      })}
+    >
+      <Tab.Screen name="Home" component={HomeWithAssistant} initialParams={account} />
+      <Tab.Screen name="Stock" component={StockWithAssistant} initialParams={account} />
+      <Tab.Screen name="Sell" component={SellWithAssistant} initialParams={account} />
+      <Tab.Screen name="Credit" component={CreditWithAssistant} initialParams={account} />
+      <Tab.Screen name="Suppliers" component={SuppliersWithAssistant} initialParams={account} />
+      <Tab.Screen name="Insights" component={InsightsWithAssistant} initialParams={account} />
+    </Tab.Navigator>
+>>>>>>> 5d0f884411c03a1c0e076f514903c3d6024851e5
   );
 }
 

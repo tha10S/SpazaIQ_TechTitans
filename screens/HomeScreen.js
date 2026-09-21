@@ -33,7 +33,7 @@ const lowStockItems = [
   { key: '3', name: 'White Bread', emoji: '🍞', remaining: 4, total: 30, supplier: 'Sasko Logistics' },
 ];
 
-export default function HomeScreen({ navigation }) {
+export default function HomeScreen({ navigation, route }) {
   const { colors, spacing, radius, typography } = useTheme();
   const styles = makeStyles(colors, typography, spacing, radius);
   const [now, setNow] = useState(new Date());
@@ -60,6 +60,7 @@ export default function HomeScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+<<<<<<< HEAD
         
         {/* Header with Greeting, Shop Name, Real-time Clock & Weather API Chip */}
         <View style={styles.header}>
@@ -85,6 +86,13 @@ export default function HomeScreen({ navigation }) {
               <Text style={styles.locationText}>Joburg</Text>
             </View>
           </View>
+=======
+        <View>
+          <Text style={styles.greeting}>{route?.params?.shopName || "Thabo's Mini Mart"}</Text>
+          <Text style={styles.subGreeting}>
+            Welcome {route?.params?.userName || 'shop owner'} · Here's how your shop is doing today
+          </Text>
+>>>>>>> 5d0f884411c03a1c0e076f514903c3d6024851e5
         </View>
 
         {/* Hero Card: Dominant Sales Metric + Fast POS Trigger */}
