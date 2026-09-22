@@ -60,39 +60,27 @@ export default function HomeScreen({ navigation, route }) {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-<<<<<<< HEAD
-        
+
         {/* Header with Greeting, Shop Name, Real-time Clock & Weather API Chip */}
         <View style={styles.header}>
           <View style={styles.headerMain}>
-            <Text style={styles.greeting}>{getGreeting()}, Thabo 👋</Text>
+            <Text style={styles.greeting}>
+              {getGreeting()}, {route?.params?.userName || 'Thabo'} 👋
+            </Text>
             <View style={styles.shopBadge}>
-              <Text style={styles.shopBadgeText}>Thabo's Mini Mart</Text>
+              <Text style={styles.shopBadgeText}>
+                {route?.params?.shopName || "Thabo's Mini Mart"}
+              </Text>
             </View>
             <Text style={styles.clockText}>🕒 {formattedDateTime}</Text>
           </View>
 
-          {/* Weather API Ready Chip + Profile Link */}
           <View style={styles.headerRightCol}>
-            <TouchableOpacity 
-              onPress={() => navigation.navigate('Profile')}
-              style={styles.profileBtn}
-            >
-              <Ionicons name="person-circle" size={40} color="#004B49" />
-            </TouchableOpacity>
-
             <View style={styles.weatherChip}>
               <Text style={styles.weatherText}>{weather.condition} {weather.temp}</Text>
               <Text style={styles.locationText}>Joburg</Text>
             </View>
           </View>
-=======
-        <View>
-          <Text style={styles.greeting}>{route?.params?.shopName || "Thabo's Mini Mart"}</Text>
-          <Text style={styles.subGreeting}>
-            Welcome {route?.params?.userName || 'shop owner'} · Here's how your shop is doing today
-          </Text>
->>>>>>> 5d0f884411c03a1c0e076f514903c3d6024851e5
         </View>
 
         {/* Hero Card: Dominant Sales Metric + Fast POS Trigger */}
@@ -223,7 +211,6 @@ function makeStyles(colors, typography, spacing, radius) {
     },
     shopBadgeText: { fontSize: 12, color: '#374151', fontWeight: '700' },
     clockText: { fontSize: 12, fontWeight: '600', color: '#6B7280', marginTop: 2 },
-    profileBtn: { padding: 0 },
     weatherChip: { alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, borderWidth: 1, borderColor: '#E5E7EB' },
     weatherText: { fontSize: 12, fontWeight: '700', color: '#111827' },
     locationText: { fontSize: 10, color: '#6B7280' },
@@ -256,7 +243,7 @@ function makeStyles(colors, typography, spacing, radius) {
     /* Stat Cards */
     statsRow: {
       flexDirection: 'row',
-      justify: 'space-between',
+      justifyContent: 'space-between',
       gap: 10,
       marginBottom: spacing.lg,
     },
@@ -299,7 +286,7 @@ function makeStyles(colors, typography, spacing, radius) {
     stockList: { gap: spacing.sm },
     stockCard: {
       flexDirection: 'row',
-      justify: 'space-between',
+      justifyContent: 'space-between',
       alignItems: 'center',
       backgroundColor: '#FFFFFF',
       padding: spacing.md,
