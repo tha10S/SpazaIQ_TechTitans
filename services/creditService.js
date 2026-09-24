@@ -10,3 +10,4 @@ export const fetchCustomerBalances = impl.fetchCustomerBalances;
 export const verifyStoreOwner = impl.verifyStoreOwner;
 export const addCreditTransaction = impl.addCreditTransaction;
 export const sendWhatsAppReminder = impl.sendWhatsAppReminder;
+export * from "./firebase/firebaseCreditService";

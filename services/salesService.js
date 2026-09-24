@@ -7,3 +7,4 @@ const impl = USE_MOCK_BACKEND
 
 export const fetchProducts = impl.fetchProducts;
 export const recordSale = impl.recordSale;
+export * from "./firebase/firebaseSalesService";
