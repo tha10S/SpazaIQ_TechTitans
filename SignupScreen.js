@@ -5,49 +5,58 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
 } from "react-native";
-import { createLocalAccount } from "./services/auth/localAuth";
+import { getAuthErrorMessage, signUp } from "./services/auth/firebaseAuth";
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function SignupScreen({ navigation }) {
   const [fullName, setFullName] = useState("");
   const [mobile, setMobile] = useState("");
   const [email, setEmail] = useState("");
   const [shopName, setShopName] = useState("");
-  const [pin, setPin] = useState("");
-  const [confirmPin, setConfirmPin] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
-  const [showPin, setShowPin] = useState(false);
-  const [showConfirmPin, setShowConfirmPin] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const createAccount = async () => {
-    if (
-      !fullName ||
-      !mobile ||
-      !email ||
-      !shopName ||
-      !pin ||
-      !confirmPin
-    ) {
-      Alert.alert("Missing Information", "Please fill in all fields.");
+    const normalizedEmail = email.trim();
+    if (!fullName.trim() || !mobile.trim() || !normalizedEmail || !shopName.trim() || !password || !confirmPassword) {
+      setError("Complete all fields before creating your account.");
       return;
     }
 
-    if (pin.length !== 4) {
-      Alert.alert("Invalid PIN", "PIN must be exactly 4 digits.");
+    if (!EMAIL_PATTERN.test(normalizedEmail)) {
+      setError("Enter a valid email address.");
       return;
     }
 
-    if (pin !== confirmPin) {
-      Alert.alert("PIN Error", "PINs do not match.");
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters.");
       return;
     }
 
-    await createLocalAccount({ fullName, mobile, email, shopName, pin });
-    navigation.navigate("MainTabs", { userName: fullName, shopName });
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    try {
+      setError("");
+      setIsSubmitting(true);
+      await signUp(normalizedEmail, password, fullName.trim());
+    } catch (error) {
+      setError(getAuthErrorMessage(error));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -135,58 +144,54 @@ export default function SignupScreen({ navigation }) {
           />
         </View>
 
-        {/* PIN */}
+        {/* Password */}
         <View style={styles.inputGroup}>
           <View style={styles.labelRow}>
-            <Text style={styles.label}>PIN</Text>
-            <Text style={styles.requirement}>Must be 4 digits</Text>
+            <Text style={styles.label}>Password</Text>
+            <Text style={styles.requirement}>At least 6 characters</Text>
           </View>
 
           <View style={styles.passwordContainer}>
             <TextInput
               style={styles.passwordInput}
-              placeholder="••••"
+              placeholder="••••••"
               placeholderTextColor="#9CA3AF"
-              keyboardType="numeric"
-              secureTextEntry={!showPin}
-              maxLength={4}
-              value={pin}
-              onChangeText={setPin}
+              secureTextEntry={!showPassword}
+              value={password}
+              onChangeText={setPassword}
             />
 
-            <TouchableOpacity onPress={() => setShowPin(!showPin)}>
+            <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
               <Text style={styles.eye}>
-                {showPin ? "◉" : "◉"}
+                {showPassword ? "◉" : "◉"}
               </Text>
             </TouchableOpacity>
           </View>
 
           <Text style={styles.helperText}>
-            Create a secure 4-digit PIN for quick app access
+            Use at least 6 characters for your Firebase password
           </Text>
         </View>
 
-        {/* Confirm PIN */}
+        {/* Confirm Password */}
         <View style={styles.inputGroup}>
           <View style={styles.labelRow}>
-            <Text style={styles.label}>Confirm PIN</Text>
-            <Text style={styles.requirement}>Must be 4 digits</Text>
+            <Text style={styles.label}>Confirm Password</Text>
+            <Text style={styles.requirement}>At least 6 characters</Text>
           </View>
 
           <View style={styles.passwordContainer}>
             <TextInput
               style={styles.passwordInput}
-              placeholder="••••"
+              placeholder="••••••"
               placeholderTextColor="#9CA3AF"
-              keyboardType="numeric"
-              secureTextEntry={!showConfirmPin}
-              maxLength={4}
-              value={confirmPin}
-              onChangeText={setConfirmPin}
+              secureTextEntry={!showConfirmPassword}
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
             />
 
             <TouchableOpacity
-              onPress={() => setShowConfirmPin(!showConfirmPin)}
+              onPress={() => setShowConfirmPassword(!showConfirmPassword)}
             >
               <Text style={styles.eye}>◉</Text>
             </TouchableOpacity>
@@ -197,9 +202,12 @@ export default function SignupScreen({ navigation }) {
         <TouchableOpacity
           style={styles.createButton}
           onPress={createAccount}
+          disabled={isSubmitting}
         >
-          <Text style={styles.createButtonText}>Create Account</Text>
+          <Text style={styles.createButtonText}>{isSubmitting ? "Creating Account..." : "Create Account"}</Text>
         </TouchableOpacity>
+
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         {/* Login */}
         <View style={styles.loginContainer}>
@@ -393,6 +401,13 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 13,
     fontWeight: "800",
+  },
+
+  errorText: {
+    color: "#B91C1C",
+    fontSize: 12,
+    textAlign: "center",
+    marginTop: 10,
   },
 
   // Login

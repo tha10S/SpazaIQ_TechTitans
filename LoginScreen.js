@@ -1,19 +1,35 @@
 import React, { useState } from "react";
 import { View, TextInput, Button, Text } from "react-native";
-import { logIn } from "../services/auth/firebaseAuth";
+import { getAuthErrorMessage, logIn } from "./services/auth/firebaseAuth";
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleLogin() {
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail || !EMAIL_PATTERN.test(normalizedEmail)) {
+      setError("Enter a valid email address.");
+      return;
+    }
+    if (!password) {
+      setError("Enter your password.");
+      return;
+    }
+
     try {
       setError("");
-      await logIn(email.trim(), password);
+      setIsSubmitting(true);
+      await logIn(normalizedEmail, password);
       // no navigation needed, App.js handles it
-    } catch (e) {
-      setError(e.code === "auth/invalid-credential" ? "Wrong email or password" : e.message);
+    } catch (error) {
+      setError(getAuthErrorMessage(error));
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -24,8 +40,8 @@ export default function LoginScreen({ navigation }) {
       <TextInput placeholder="Password" value={password} onChangeText={setPassword}
         secureTextEntry />
       {error ? <Text style={{ color: "red" }}>{error}</Text> : null}
-      <Button title="Log in" onPress={handleLogin} />
-      <Button title="Create account" onPress={() => navigation.navigate("Signup")} />
+      <Button title={isSubmitting ? "Logging in..." : "Log in"} onPress={handleLogin} disabled={isSubmitting} />
+      <Button title="Create account" onPress={() => navigation.navigate("Signup")} disabled={isSubmitting} />
     </View>
   );
 }

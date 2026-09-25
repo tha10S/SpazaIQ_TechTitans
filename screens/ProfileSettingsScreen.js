@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../ThemeContext';
+import { logOut } from '../services/auth/firebaseAuth';
 
 const DEFAULT_PROFILE = {
   name: 'Thabo Nkosi',
@@ -95,7 +96,17 @@ export default function ProfileSettingsScreen() {
   const handleLogout = () => {
     Alert.alert('Log out', 'Are you sure you want to log out?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Log Out', style: 'destructive', onPress: () => {} },
+      {
+        text: 'Log Out',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await logOut();
+          } catch (error) {
+            Alert.alert('Could not log out', error.message);
+          }
+        },
+      },
     ]);
   };
 
