@@ -17,7 +17,7 @@ const TABS = [
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('sale');
+  const [activeTab, setActiveTab] = useState('assistant');
   const ActiveScreen = TABS.find((t) => t.key === activeTab).Component;
 
   return (
@@ -62,8 +62,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     paddingBottom: 6,
     paddingTop: 8,
+    boxShadow: '0px -4px 10px rgba(15, 23, 42, 0.08)',
+    elevation: 8,
   },
-  tabButton: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  tabLabel: { fontSize: 12, color: '#9CA3AF', marginTop: 2 },
-  tabLabelActive: { color: '#0F9D58', fontWeight: '600' },
+  tabButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+  },
+  tabLabel: { fontSize: 12, color: '#9CA3AF', marginTop: 2, fontWeight: '600' },
+  tabLabelActive: { color: '#0F9D58', fontWeight: '700' },
 });

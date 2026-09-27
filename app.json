@@ -13,7 +13,8 @@
         {
           "cameraPermission": "Allow the POS app to scan product QR codes."
         }
-      ]
+      ],
+      "expo-asset"
     ],
     "splash": {
       "image": "./assets/splash-icon.png",

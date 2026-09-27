@@ -13,8 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useCustomerBalances } from '../hooks/useCustomerBalances';
-import { answerSpazaIQQuestion } from '../services/assistant/assistantService';
-import { SUGGESTED_QUESTIONS } from '../services/assistant/intentCatalog';
+import ChatbotScreen from './ChatbotScreen';
 
 const STATUS_CONFIG = {
   good: { label: 'Good', color: '#0F9D58', bg: '#E7F6ED' },
@@ -35,12 +34,6 @@ export default function CreditLedgerScreen({ storeId }) {
   const [pendingDueDate, setPendingDueDate] = useState('');
   const [saving, setSaving] = useState(false);
   const [chatVisible, setChatVisible] = useState(false);
-  const [chatInput, setChatInput] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
-  const [chatError, setChatError] = useState('');
-  const [chatMessages, setChatMessages] = useState([
-    { id: 'welcome', role: 'assistant', text: 'Hi. Ask me about customer balances, overdue credit, or recording a credit sale.' },
-  ]);
 
   const totalOutstanding = customers.reduce((sum, c) => sum + c.balance, 0);
 
@@ -81,24 +74,6 @@ export default function CreditLedgerScreen({ storeId }) {
       Alert.alert('Could not log credit', err.message);
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleChatSubmit = async (suggestedQuestion = chatInput) => {
-    const question = suggestedQuestion.trim();
-    if (!question) return;
-
-    setChatError('');
-    setChatInput('');
-    setChatMessages((messages) => [...messages, { id: `question-${Date.now()}`, role: 'user', text: question }]);
-    setChatLoading(true);
-    try {
-      const result = await answerSpazaIQQuestion({ message: question, storeId });
-      setChatMessages((messages) => [...messages, { id: `answer-${Date.now()}`, role: 'assistant', text: result.response }]);
-    } catch (err) {
-      setChatError(err.message || 'The assistant could not answer that question.');
-    } finally {
-      setChatLoading(false);
     }
   };
 
@@ -259,65 +234,7 @@ export default function CreditLedgerScreen({ storeId }) {
       <Modal visible={chatVisible} transparent animationType="slide" onRequestClose={() => setChatVisible(false)}>
         <View style={styles.chatOverlay}>
           <View style={styles.chatCard}>
-            <View style={styles.chatHeader}>
-              <View>
-                <Text style={styles.chatTitle}>Khaka Chat Bot</Text>
-                <Text style={styles.chatSubtitle}>SpazaIQ business assistant</Text>
-              </View>
-              <View style={styles.chatHeaderActions}>
-                <TouchableOpacity onPress={() => setChatMessages([])} accessibilityLabel="Clear conversation">
-                  <Ionicons name="trash-outline" size={21} color="#6B7280" />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => setChatVisible(false)} accessibilityLabel="Close credit assistant">
-                  <Ionicons name="close" size={24} color="#6B7280" />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <ScrollView style={styles.chatMessages} contentContainerStyle={styles.chatMessagesContent}>
-              {chatMessages.map((message) => (
-                <View
-                  key={message.id}
-                  style={[styles.chatBubble, message.role === 'user' && styles.chatBubbleUser]}
-                >
-                  <Text style={[styles.chatText, message.role === 'user' && styles.chatTextUser]}>
-                    {message.text}
-                  </Text>
-                </View>
-              ))}
-              {chatLoading && <ActivityIndicator color={GREEN} style={styles.chatLoading} />}
-            </ScrollView>
-
-            {!!chatError && <Text style={styles.chatError}>{chatError}</Text>}
-
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsRow}>
-              {SUGGESTED_QUESTIONS.map((question) => (
-                <TouchableOpacity
-                  key={question}
-                  style={styles.suggestionButton}
-                  onPress={() => handleChatSubmit(question)}
-                  disabled={chatLoading}
-                >
-                  <Text style={styles.suggestionText}>{question}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            <View style={styles.chatInputRow}>
-              <TextInput
-                style={styles.chatInput}
-                placeholder="Ask about the ledger..."
-                placeholderTextColor="#9CA3AF"
-                value={chatInput}
-                onChangeText={setChatInput}
-                onSubmitEditing={() => handleChatSubmit()}
-                returnKeyType="send"
-                editable={!chatLoading}
-              />
-              <TouchableOpacity style={styles.chatSendButton} onPress={() => handleChatSubmit()} disabled={chatLoading} accessibilityLabel="Send message">
-                <Ionicons name="send" size={18} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
+            <ChatbotScreen storeId={storeId} onClose={() => setChatVisible(false)} />
           </View>
         </View>
       </Modal>
@@ -381,10 +298,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
+    boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.15)',
   },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(17, 24, 39, 0.5)', justifyContent: 'center', padding: 24 },
   modalCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 22 },
@@ -408,23 +322,5 @@ const styles = StyleSheet.create({
   modalButtonConfirm: { backgroundColor: GREEN },
   modalButtonConfirmText: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
   chatOverlay: { flex: 1, backgroundColor: 'rgba(17, 24, 39, 0.5)', justifyContent: 'flex-end' },
-  chatCard: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 18, maxHeight: '78%' },
-  chatHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 14 },
-  chatHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 16 },
-  chatTitle: { fontSize: 18, fontWeight: '700', color: '#111827' },
-  chatSubtitle: { fontSize: 12, color: '#9CA3AF', marginTop: 3 },
-  chatMessages: { minHeight: 180 },
-  chatMessagesContent: { paddingVertical: 8 },
-  chatLoading: { marginVertical: 8 },
-  chatError: { color: '#B42318', fontSize: 12, marginBottom: 8 },
-  suggestionsRow: { marginVertical: 8 },
-  suggestionButton: { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 16, paddingHorizontal: 11, paddingVertical: 8, marginRight: 7 },
-  suggestionText: { color: '#374151', fontSize: 12 },
-  chatBubble: { alignSelf: 'flex-start', maxWidth: '88%', backgroundColor: '#F3F4F6', borderRadius: 12, padding: 11, marginBottom: 8 },
-  chatBubbleUser: { alignSelf: 'flex-end', backgroundColor: GREEN },
-  chatText: { color: '#374151', fontSize: 14, lineHeight: 19 },
-  chatTextUser: { color: '#FFFFFF' },
-  chatInputRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
-  chatInput: { flex: 1, height: 46, borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 10, paddingHorizontal: 12, color: '#111827', marginRight: 8 },
-  chatSendButton: { width: 46, height: 46, borderRadius: 10, backgroundColor: GREEN, alignItems: 'center', justifyContent: 'center' },
+  chatCard: { height: '92%', width: '100%', overflow: 'hidden', borderTopLeftRadius: 20, borderTopRightRadius: 20, backgroundColor: '#F3F7F5' },
 });

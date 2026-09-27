@@ -1,15 +1,26 @@
-import { USE_MOCK_BACKEND } from '../config';
-import { getState } from '../mock/mockData';
-import { supabase } from '../supabase/supabaseClient';
+import { USE_MOCK_BACKEND } from '../config.js';
+import { getState } from '../mock/mockData.js';
+import { supabase } from '../supabase/supabaseClient.js';
 
 export async function fetchSpazaIQData(storeId) {
   if (USE_MOCK_BACKEND) {
     const state = await getState();
+    const productsById = new Map((state.products ?? []).map((product) => [product.id, product]));
     return {
       products: state.products ?? [],
       sales: state.sales ?? [],
       saleItems: (state.sales ?? []).flatMap((sale) =>
-        (sale.items ?? []).map((item) => ({ ...item, sale_id: sale.id, created_at: sale.created_at }))
+        (sale.items ?? []).map((item) => {
+          const product = productsById.get(item.product_id ?? item.id);
+          return {
+            ...item,
+            product_id: item.product_id ?? item.id,
+            name: item.name ?? product?.name,
+            unit_price: item.unit_price ?? item.unitPrice ?? product?.unit_price,
+            sale_id: sale.id,
+            created_at: sale.created_at,
+          };
+        })
       ),
       customers: state.customers ?? [],
       creditTransactions: state.creditTransactions ?? [],

@@ -74,7 +74,7 @@ export const INTENT_KEYWORDS = {
   OVERDUE_CREDIT: ['overdue', 'late', 'not paid', 'remind'],
   LARGEST_BALANCE: ['owes the most', 'largest balance', 'highest balance'],
   CREDIT_GIVEN: ['credit did i give', 'credit this month'],
-  SALES_SUMMARY: ['sales today', 'sold today', 'sales this week', 'made this week'],
+  SALES_SUMMARY: ['sales today', 'sold today', 'sell today', 'did i sell', 'sales this week', 'sell this week', 'made this week', 'sales this month', 'sell this month'],
   TOP_SELLERS: ['best-selling', 'best selling', 'best sellers', 'best seller', 'best sales', 'best products', 'top sellers', 'top seller', 'top products', 'most sales', 'sells the most', 'top 5'],
   BOTTOM_SELLERS: ['selling poorly', 'worst-selling', 'worst selling'],
   PROFIT_SUMMARY: ['profit today', 'profit this week', 'profit this month'],

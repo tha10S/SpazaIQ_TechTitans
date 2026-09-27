@@ -1,6 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY = 'pos_app_mock_state_v1';
+const safeStorage = AsyncStorage && typeof AsyncStorage.getItem === 'function'
+  ? AsyncStorage
+  : {
+      getItem: async () => null,
+      setItem: async () => undefined,
+      removeItem: async () => undefined,
+    };
 
 const SEED_STATE = {
   products: [
@@ -76,7 +83,37 @@ const SEED_STATE = {
     { id: 't2', customer_id: 'c2', amount: 820, due_date: '2026-08-15' },
     { id: 't3', customer_id: 'c3', amount: 1200, due_date: '2026-08-10' },
   ],
-  sales: [],
+  sales: [
+    {
+      id: 'sale-1',
+      created_at: '2026-09-26T09:30:00.000Z',
+      total: 320,
+      items: [
+        { id: 'si-1', product_id: 'p1', name: 'Simba Fruit Chutney Chips', qty: 12, unitPrice: 12 },
+        { id: 'si-2', product_id: 'p2', name: 'Coca-Cola Original 500ml', qty: 8, unitPrice: 18 },
+        { id: 'si-3', product_id: 'p3', name: 'Albany Superior White Bread', qty: 6, unitPrice: 16 },
+      ],
+    },
+    {
+      id: 'sale-2',
+      created_at: '2026-09-25T17:10:00.000Z',
+      total: 410,
+      items: [
+        { id: 'si-4', product_id: 'p2', name: 'Coca-Cola Original 500ml', qty: 13, unitPrice: 18 },
+        { id: 'si-5', product_id: 'p4', name: 'Lucky Star Pilchards 400g', qty: 7, unitPrice: 22 },
+        { id: 'si-6', product_id: 'p5', name: 'White Star Maize Meal 2.5kg', qty: 4, unitPrice: 35 },
+      ],
+    },
+    {
+      id: 'sale-3',
+      created_at: '2026-09-20T11:45:00.000Z',
+      total: 285,
+      items: [
+        { id: 'si-7', product_id: 'p6', name: 'Full Cream Milk 1L', qty: 10, unitPrice: 19 },
+        { id: 'si-8', product_id: 'p7', name: 'Full Cream Milk 2L', qty: 5, unitPrice: 34 },
+      ],
+    },
+  ],
 };
 
 // In-memory cache, hydrated from AsyncStorage on first access.
@@ -102,7 +139,7 @@ async function loadState() {
 
   loadingPromise = (async () => {
     try {
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      const raw = await safeStorage.getItem(STORAGE_KEY);
       if (raw) {
         const savedState = JSON.parse(raw);
         state = mergeSeedProducts(savedState);
@@ -121,7 +158,7 @@ async function loadState() {
 
 async function persist() {
   try {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    await safeStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch (err) {
     console.warn('[mockData] Failed to persist state', err);
   }
