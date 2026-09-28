@@ -2,13 +2,12 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+import LoginScreen from './screens/LoginScreen';
 import NewSaleScreen from './screens/NewSaleScreen';
 import CreditLedgerScreen from './screens/CreditLedgerScreen';
 import ChatbotScreen from './screens/ChatbotScreen';
 
-// While there's no auth/Supabase yet, the mock backend ignores this —
-// it's just here so the screens already expect a real storeId later.
-const STORE_ID = 'mock-store-1';
+const DEFAULT_STORE_ID = 'mock-store-1';
 
 const TABS = [
   { key: 'sale', label: 'New Sale', icon: 'cart-outline', Component: NewSaleScreen },
@@ -17,13 +16,23 @@ const TABS = [
 ];
 
 export default function App() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [storeId, setStoreId] = useState(DEFAULT_STORE_ID);
   const [activeTab, setActiveTab] = useState('assistant');
+
   const ActiveScreen = TABS.find((t) => t.key === activeTab).Component;
+
+  if (!isLoggedIn) {
+    return <LoginScreen onLogin={(nextStoreId) => {
+      setStoreId(nextStoreId || DEFAULT_STORE_ID);
+      setIsLoggedIn(true);
+    }} />;
+  }
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.screenArea}>
-        <ActiveScreen storeId={STORE_ID} />
+        <ActiveScreen storeId={storeId} />
       </View>
 
       <View style={styles.tabBar}>
