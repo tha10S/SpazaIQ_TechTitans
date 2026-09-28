@@ -9,7 +9,7 @@ import {
   Platform,
   ScrollView,
 } from "react-native";
-import { getAuthErrorMessage, signUp } from "./services/auth/firebaseAuth";
+import { getAuthErrorMessage, signUp } from "../../services/auth/firebaseAuth";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -51,7 +51,11 @@ export default function SignupScreen({ navigation }) {
     try {
       setError("");
       setIsSubmitting(true);
-      await signUp(normalizedEmail, password, fullName.trim());
+      await signUp(normalizedEmail, password, {
+        fullName: fullName.trim(),
+        mobile: mobile.trim(),
+        shopName: shopName.trim(),
+      });
     } catch (error) {
       setError(getAuthErrorMessage(error));
     } finally {

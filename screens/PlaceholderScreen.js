@@ -3,7 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRoute } from '@react-navigation/native';
-import { useTheme } from '../ThemeContext';
+import { useTheme } from '../config/ThemeContext';
 
 export default function PlaceholderScreen() {
   const route = useRoute();

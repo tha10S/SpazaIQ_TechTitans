@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { View, TextInput, Button, Text } from "react-native";
-import { getAuthErrorMessage, logIn } from "./services/auth/firebaseAuth";
+import { getAuthErrorMessage, logIn } from "../../services/auth/firebaseAuth";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -42,6 +42,7 @@ export default function LoginScreen({ navigation }) {
       {error ? <Text style={{ color: "red" }}>{error}</Text> : null}
       <Button title={isSubmitting ? "Logging in..." : "Log in"} onPress={handleLogin} disabled={isSubmitting} />
       <Button title="Create account" onPress={() => navigation.navigate("Signup")} disabled={isSubmitting} />
+      <Button title="Open Firebase Test" onPress={() => navigation.navigate("FirebaseTest")} disabled={isSubmitting} />
     </View>
   );
 }

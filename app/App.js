@@ -4,28 +4,31 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import { ThemeProvider } from './ThemeContext';
-import { TechTitansAssistant } from './components/TechTitansAssistant';
+import { ThemeProvider } from '../config/ThemeContext';
+import { TechTitansAssistant } from '../components/TechTitansAssistant';
 
 // Firebase auth
-import { watchAuth } from './services/auth/firebaseAuth';
+import { watchAuth } from '../services/auth/firebaseAuth';
+import { ensureStoreSeed } from '../services/firestore/seedRepository';
+import { getUserProfile } from '../services/firestore/usersRepository';
 
 // User authentication
-import LoginScreen from './LoginScreen';
-import SignupScreen from './SignupScreen';
+import LoginScreen from '../screens/auth/LoginScreen';
+import SignupScreen from '../screens/auth/SignupScreen';
 
-import Insights from './insights';
-import SuppliersOrders from './suppliers_reorders';
+import Insights from '../screens/dashboard/InsightsScreen';
+import SuppliersOrders from '../screens/dashboard/SuppliersReordersScreen';
 
 // Team member files
-import HomeScreen from './screens/HomeScreen';
-import StockScreen from './screens/StockScreen';
-import NewSaleScreen from './screens/NewSaleScreen';
-import CreditLedgerScreen from './screens/CreditLedgerScreen';
-import ProfileSettingsScreen from './screens/ProfileSettingsScreen';
-import QRScannerScreen from './screens/QRScannerScreen';
-import PlaceholderScreen from './screens/PlaceholderScreen';
-import NotificationsScreen from './screens/NotificationsScreen';
+import HomeScreen from '../screens/HomeScreen';
+import StockScreen from '../screens/StockScreen';
+import NewSaleScreen from '../screens/NewSaleScreen';
+import CreditLedgerScreen from '../screens/CreditLedgerScreen';
+import ProfileSettingsScreen from '../screens/ProfileSettingsScreen';
+import QRScannerScreen from '../screens/QRScannerScreen';
+import PlaceholderScreen from '../screens/PlaceholderScreen';
+import NotificationsScreen from '../screens/NotificationsScreen';
+import FirebaseTestScreen from '../screens/FirebaseTestScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -97,14 +100,37 @@ function MainTabs({ route }) {
 
 export default function App() {
   const [user, setUser] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = watchAuth((u) => {
+    let active = true;
+    const unsubscribe = watchAuth(async (u) => {
       setUser(u);
-      setLoading(false);
+      setUserProfile(null);
+      if (!u) {
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        await ensureStoreSeed(u.uid, {
+          email: u.email,
+          displayName: u.displayName,
+        });
+        const profile = await getUserProfile(u.uid);
+        if (active) setUserProfile(profile);
+      } catch (error) {
+        console.warn('Could not load authenticated store profile', error);
+      } finally {
+        if (active) setLoading(false);
+      }
     });
-    return unsubscribe;
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, []);
 
   if (loading) {
@@ -125,9 +151,9 @@ export default function App() {
                 name="MainTabs"
                 component={MainTabs}
                 initialParams={{
-                  storeId: user.uid,
-                  userName: user.displayName || user.email,
-                  shopName: user.displayName || 'My Shop',
+                  storeId: userProfile?.defaultStoreId || user.uid,
+                  userName: userProfile?.fullName || user.displayName || user.email,
+                  shopName: userProfile?.shopName || user.displayName || 'My Shop',
                 }}
               />
               <Stack.Screen name="Scanner" component={QRScannerScreen} />
@@ -141,6 +167,11 @@ export default function App() {
               <Stack.Screen name="Signup" component={SignupScreen} />
             </>
           )}
+          <Stack.Screen
+            name="FirebaseTest"
+            component={FirebaseTestScreen}
+            options={{ headerShown: true, title: 'Firebase Test' }}
+          />
         </Stack.Navigator>
       </NavigationContainer>
     </ThemeProvider>

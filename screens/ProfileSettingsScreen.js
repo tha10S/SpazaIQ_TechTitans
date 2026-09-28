@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -8,20 +8,24 @@ import {
   TouchableOpacity,
   Switch,
   Alert,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { useTheme } from '../ThemeContext';
+import { useTheme } from '../config/ThemeContext';
 import { logOut } from '../services/auth/firebaseAuth';
+import { auth } from '../services/firebase/firebaseConfig';
+import { deleteCurrentAccount } from '../services/auth/accountDeletionService';
+import { subscribeUserProfile, updateUserProfile } from '../services/firestore/usersRepository';
 
 const DEFAULT_PROFILE = {
-  name: 'Thabo Nkosi',
-  shopName: "Thabo's Mini Mart",
-  phone: '+27 72 555 1234',
-  email: 'thabo@minimart.co.za',
-  location: 'Soweto, Johannesburg',
-  shopRegistration: 'REG-2024-0847',
+  name: '',
+  shopName: '',
+  phone: '',
+  email: '',
+  location: '',
+  shopRegistration: '',
 };
 
 const FIELDS = [
@@ -46,11 +50,41 @@ export default function ProfileSettingsScreen() {
   const { colors, spacing, radius, typography, isDark, toggleTheme } = useTheme();
   const styles = makeStyles(colors, typography, spacing, radius);
 
-  const [profile, setProfile] = useState(DEFAULT_PROFILE);
-  const [draft, setDraft] = useState(DEFAULT_PROFILE);
+  const [profile, setProfile] = useState({
+    ...DEFAULT_PROFILE,
+    name: auth.currentUser?.displayName || '',
+    email: auth.currentUser?.email || '',
+  });
+  const [draft, setDraft] = useState(profile);
   const [isEditing, setIsEditing] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
+
+  useEffect(() => {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return undefined;
+    return subscribeUserProfile(userId, (data) => {
+      if (!data) return;
+      const nextProfile = {
+        name: data.fullName || data.displayName || auth.currentUser?.displayName || '',
+        shopName: data.shopName || '',
+        phone: data.mobile || '',
+        email: data.email || auth.currentUser?.email || '',
+        location: data.location || '',
+        shopRegistration: data.shopRegistration || '',
+      };
+      setProfile(nextProfile);
+      if (!isEditing) setDraft(nextProfile);
+    }, (error) => console.warn('Profile subscription failed', error?.code, error?.message));
+  }, [isEditing]);
 
   const startEditing = () => {
     setDraft(profile);
@@ -62,52 +96,72 @@ export default function ProfileSettingsScreen() {
     setIsEditing(false);
   };
 
-  const saveEditing = () => {
+  const saveEditing = async () => {
     if (!draft.name.trim() || !draft.shopName.trim()) {
       Alert.alert('Missing info', 'Name and shop name cannot be empty.');
       return;
     }
-    setProfile(draft);
-    setIsEditing(false);
+    setIsSavingProfile(true);
+    try {
+      await updateUserProfile(auth.currentUser.uid, {
+        fullName: draft.name,
+        shopName: draft.shopName,
+        mobile: draft.phone,
+        location: draft.location,
+        shopRegistration: draft.shopRegistration,
+      });
+      setProfile(draft);
+      setIsEditing(false);
+    } catch (error) {
+      Alert.alert('Could not save profile', error.message);
+    } finally {
+      setIsSavingProfile(false);
+    }
   };
 
   const updateDraft = (key, val) => setDraft((d) => ({ ...d, [key]: val }));
 
   const handleDeleteAccount = () => {
-    Alert.alert(
-      'Delete account',
-      'This will permanently delete your profile and shop data. This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            setProfile(DEFAULT_PROFILE);
-            setDraft(DEFAULT_PROFILE);
-            setIsEditing(false);
-            Alert.alert('Account deleted', 'Your profile has been reset.');
-          },
-        },
-      ]
-    );
+    setDeletePassword('');
+    setDeleteConfirmation('');
+    setDeleteError('');
+    setDeleteModalVisible(true);
+  };
+
+  const confirmDeleteAccount = async () => {
+    if (deleteConfirmation !== 'DELETE') {
+      setDeleteError('Type DELETE exactly to confirm permanent account deletion.');
+      return;
+    }
+
+    setIsDeletingAccount(true);
+    setDeleteError('');
+    try {
+      await deleteCurrentAccount(deletePassword);
+    } catch (error) {
+      const code = error?.code;
+      if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        setDeleteError('The password is incorrect. Your account has not been deleted.');
+      } else if (code === 'functions/failed-precondition') {
+        setDeleteError('Please sign in again, then retry account deletion.');
+      } else if (code === 'functions/unauthenticated') {
+        setDeleteError('Your session expired. Sign in again before deleting the account.');
+      } else {
+        setDeleteError(error?.message || 'Account deletion failed. Your account may still exist.');
+      }
+      setIsDeletingAccount(false);
+    }
   };
 
   const handleLogout = () => {
-    Alert.alert('Log out', 'Are you sure you want to log out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Log Out',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await logOut();
-          } catch (error) {
-            Alert.alert('Could not log out', error.message);
-          }
-        },
-      },
-    ]);
+    if (isLoggingOut) return;
+    setLogoutError('');
+    setIsLoggingOut(true);
+    logOut()
+      .catch((error) => {
+        setLogoutError(error.message || 'Firebase could not sign you out.');
+      })
+      .finally(() => setIsLoggingOut(false));
   };
 
   return (
@@ -183,11 +237,11 @@ export default function ProfileSettingsScreen() {
 
           {isEditing && (
             <View style={styles.editActionsRow}>
-              <TouchableOpacity style={[styles.editActionBtn, styles.cancelBtn]} onPress={cancelEditing}>
+              <TouchableOpacity style={[styles.editActionBtn, styles.cancelBtn]} onPress={cancelEditing} disabled={isSavingProfile}>
                 <Text style={styles.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.editActionBtn, styles.saveBtn]} onPress={saveEditing}>
-                <Text style={styles.saveBtnText}>Save</Text>
+              <TouchableOpacity style={[styles.editActionBtn, styles.saveBtn]} onPress={saveEditing} disabled={isSavingProfile}>
+                <Text style={styles.saveBtnText}>{isSavingProfile ? 'Saving...' : 'Save'}</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -266,17 +320,79 @@ export default function ProfileSettingsScreen() {
           </View>
         </View>
 
-        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={18} color={colors.danger} />
-          <Text style={styles.logoutBtnText}>Log Out</Text>
+        <TouchableOpacity
+          style={styles.firebaseTestButton}
+          onPress={() => navigation.navigate('FirebaseTest')}
+        >
+          <Text style={styles.firebaseTestButtonText}>Open Firebase Test</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={handleDeleteAccount}>
+        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} disabled={isLoggingOut}>
+          <Ionicons name="log-out-outline" size={18} color={colors.danger} />
+          <Text style={styles.logoutBtnText}>{isLoggingOut ? 'Signing out...' : 'Log Out'}</Text>
+        </TouchableOpacity>
+        {logoutError ? <Text style={styles.logoutErrorText}>{logoutError}</Text> : null}
+
+        <TouchableOpacity onPress={handleDeleteAccount} disabled={isDeletingAccount}>
           <Text style={styles.deleteAccountText}>Delete Account</Text>
         </TouchableOpacity>
 
         <Text style={styles.versionText}>SpazalIQ v1.0.2</Text>
       </ScrollView>
+
+      <Modal
+        visible={deleteModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !isDeletingAccount && setDeleteModalVisible(false)}
+      >
+        <View style={styles.deleteOverlay}>
+          <View style={styles.deleteCard}>
+            <Text style={styles.deleteTitle}>Permanently delete account?</Text>
+            <Text style={styles.deleteDescription}>
+              This deletes the signed-in Firebase account, its user profile, store, products, customers, sales, credit records, repayment schedules, and operation records. The temporary top-level test collection is not deleted.
+            </Text>
+            <Text style={styles.deleteLabel}>CURRENT PASSWORD</Text>
+            <TextInput
+              style={styles.deleteInput}
+              value={deletePassword}
+              onChangeText={setDeletePassword}
+              placeholder="Enter your password"
+              placeholderTextColor={colors.textMuted}
+              secureTextEntry
+              autoCapitalize="none"
+              editable={!isDeletingAccount}
+            />
+            <Text style={styles.deleteLabel}>TYPE DELETE TO CONFIRM</Text>
+            <TextInput
+              style={styles.deleteInput}
+              value={deleteConfirmation}
+              onChangeText={setDeleteConfirmation}
+              placeholder="DELETE"
+              placeholderTextColor={colors.textMuted}
+              autoCapitalize="characters"
+              editable={!isDeletingAccount}
+            />
+            {deleteError ? <Text accessibilityRole="alert" style={styles.deleteError}>{deleteError}</Text> : null}
+            <View style={styles.deleteActions}>
+              <TouchableOpacity
+                style={styles.deleteCancelButton}
+                onPress={() => setDeleteModalVisible(false)}
+                disabled={isDeletingAccount}
+              >
+                <Text style={styles.deleteCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.deleteConfirmButton}
+                onPress={confirmDeleteAccount}
+                disabled={isDeletingAccount || !deletePassword || deleteConfirmation !== 'DELETE'}
+              >
+                <Text style={styles.deleteConfirmText}>{isDeletingAccount ? 'Deleting...' : 'Delete Account'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -404,13 +520,36 @@ function makeStyles(colors, typography, spacing, radius) {
       paddingVertical: spacing.md,
       marginBottom: spacing.md,
     },
+    firebaseTestButton: {
+      alignItems: 'center',
+      paddingVertical: spacing.sm,
+      marginBottom: spacing.sm,
+    },
+    firebaseTestButtonText: {
+      ...typography.small,
+      color: colors.primary,
+      fontWeight: '700',
+    },
     logoutBtnText: { ...typography.body, color: colors.danger, fontWeight: '700' },
+    logoutErrorText: { ...typography.small, color: colors.danger, textAlign: 'center', marginBottom: spacing.sm },
     deleteAccountText: {
       ...typography.small,
       color: colors.danger,
       textAlign: 'center',
       marginBottom: spacing.md,
     },
+    deleteOverlay: { flex: 1, justifyContent: 'center', backgroundColor: 'rgba(17, 24, 39, 0.58)', padding: spacing.lg },
+    deleteCard: { width: '100%', maxWidth: 520, alignSelf: 'center', backgroundColor: colors.card, borderRadius: radius.md, padding: spacing.lg },
+    deleteTitle: { ...typography.h2, color: colors.danger, marginBottom: spacing.sm },
+    deleteDescription: { ...typography.small, lineHeight: 19, marginBottom: spacing.md },
+    deleteLabel: { ...typography.small, fontWeight: '700', marginBottom: spacing.xs, marginTop: spacing.sm },
+    deleteInput: { height: 44, borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, paddingHorizontal: spacing.md, color: colors.textPrimary },
+    deleteError: { ...typography.small, color: colors.danger, marginTop: spacing.sm },
+    deleteActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm, marginTop: spacing.lg },
+    deleteCancelButton: { minWidth: 90, paddingVertical: spacing.sm, borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, alignItems: 'center' },
+    deleteCancelText: { ...typography.body, fontWeight: '700' },
+    deleteConfirmButton: { minWidth: 130, paddingVertical: spacing.sm, backgroundColor: colors.danger, borderRadius: radius.sm, alignItems: 'center' },
+    deleteConfirmText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
     versionText: {
       ...typography.small,
       textAlign: 'center',

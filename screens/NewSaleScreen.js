@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -15,16 +15,20 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useCart } from '../hooks/useCart';
 import { fetchProducts } from '../services/salesService';
+import { getAuthenticatedStoreId } from '../services/firestore/paths';
+import { subscribeCustomers } from '../services/firestore/customersRepository';
 
 const PAYMENT_METHODS = [
   { id: 'Cash', label: 'Cash', icon: 'cash-outline' },
   { id: 'Card', label: 'Card', icon: 'card-outline' },
   { id: 'Credit', label: 'Credit', icon: 'wallet-outline' },
+  { id: 'Split', label: 'Split', icon: 'git-compare-outline' },
 ];
 
 const formatR = (n) => `R ${Number(n || 0).toFixed(2)}`;
 
-export default function NewSaleScreen({ storeId }) {
+export default function NewSaleScreen({ route }) {
+  const storeId = route?.params?.storeId || getAuthenticatedStoreId();
   const {
     search,
     setSearch,
@@ -39,8 +43,17 @@ export default function NewSaleScreen({ storeId }) {
   } = useCart(storeId);
 
   const [payment, setPayment] = useState('Cash');
+  const [customers, setCustomers] = useState([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [splitPaidAmount, setSplitPaidAmount] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [scheduleFrequency, setScheduleFrequency] = useState('one_time');
   const [scannerVisible, setScannerVisible] = useState(false);
   const [scanError, setScanError] = useState('');
+
+  useEffect(() => {
+    return subscribeCustomers(storeId, setCustomers, (error) => setScanError(error.message));
+  }, [storeId]);
 
   const totalItemsCount = cart.reduce((sum, item) => sum + item.qty, 0);
 
@@ -83,9 +96,37 @@ export default function NewSaleScreen({ storeId }) {
       Alert.alert('Cart Empty', 'Add at least one item to proceed.');
       return;
     }
+    const creditAmount = payment === 'Credit'
+      ? subtotal
+      : payment === 'Split'
+        ? Math.max(0, subtotal - Number(splitPaidAmount || 0))
+        : 0;
+    const paidAmount = subtotal - creditAmount;
+    if (creditAmount > 0 && !selectedCustomerId) {
+      Alert.alert('Customer required', 'Select a customer for the credit amount.');
+      return;
+    }
+    if (creditAmount > 0 && !dueDate.trim()) {
+      Alert.alert('Due date required', 'Enter a due date for the credit amount.');
+      return;
+    }
+    if (payment === 'Split' && paidAmount <= 0) {
+      Alert.alert('Invalid split', 'Enter a cash/card amount smaller than the sale total.');
+      return;
+    }
     try {
-      await completeSale(payment.toLowerCase());
+      await completeSale({
+        paymentMethod: payment.toLowerCase(),
+        paidAmount,
+        creditAmount,
+        customerId: creditAmount > 0 ? selectedCustomerId : null,
+        dueDate: creditAmount > 0 ? dueDate.trim() : null,
+        schedule: creditAmount > 0 ? { frequency: scheduleFrequency } : null,
+      });
       Alert.alert('Success', `Sale of ${formatR(subtotal)} completed.`);
+      setSelectedCustomerId('');
+      setSplitPaidAmount('');
+      setDueDate('');
     } catch (err) {
       Alert.alert('Error', err.message);
     }
@@ -253,6 +294,64 @@ export default function NewSaleScreen({ storeId }) {
             );
           })}
         </View>
+
+        {(payment === 'Credit' || payment === 'Split') && (
+          <View style={styles.creditOptionsCard}>
+            <Text style={styles.creditOptionsTitle}>CREDIT DETAILS</Text>
+            <Text style={styles.creditOptionsLabel}>CUSTOMER</Text>
+            <View style={styles.customerOptions}>
+              {customers.map((customer) => (
+                <TouchableOpacity
+                  key={customer.id}
+                  style={[styles.customerOption, selectedCustomerId === customer.id && styles.customerOptionSelected]}
+                  onPress={() => setSelectedCustomerId(customer.id)}
+                >
+                  <Text style={[styles.customerOptionText, selectedCustomerId === customer.id && styles.customerOptionTextSelected]}>
+                    {customer.name}
+                  </Text>
+                  <Text style={styles.customerBalanceText}>R {Number(customer.balance || 0).toFixed(2)} owed</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {payment === 'Split' && (
+              <>
+                <Text style={styles.creditOptionsLabel}>PAID NOW (R)</Text>
+                <TextInput
+                  style={styles.creditTextInput}
+                  placeholder="0.00"
+                  placeholderTextColor={COLORS.textMuted}
+                  keyboardType="decimal-pad"
+                  value={splitPaidAmount}
+                  onChangeText={setSplitPaidAmount}
+                />
+              </>
+            )}
+            <Text style={styles.creditSummaryText}>
+              Credit balance: {formatR(payment === 'Credit' ? subtotal : Math.max(0, subtotal - Number(splitPaidAmount || 0)))}
+            </Text>
+            <Text style={styles.creditOptionsLabel}>DUE DATE</Text>
+            <TextInput
+              style={styles.creditTextInput}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor={COLORS.textMuted}
+              value={dueDate}
+              onChangeText={setDueDate}
+            />
+            <View style={styles.scheduleRow}>
+              {['one_time', 'weekly', 'monthly'].map((frequency) => (
+                <TouchableOpacity
+                  key={frequency}
+                  style={[styles.scheduleOption, scheduleFrequency === frequency && styles.scheduleOptionSelected]}
+                  onPress={() => setScheduleFrequency(frequency)}
+                >
+                  <Text style={[styles.scheduleOptionText, scheduleFrequency === frequency && styles.scheduleOptionTextSelected]}>
+                    {frequency === 'one_time' ? 'Once' : frequency[0].toUpperCase() + frequency.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
 
         <TouchableOpacity
           style={[styles.completeCta, cart.length === 0 && styles.disabledCta]}
@@ -637,6 +736,96 @@ const styles = StyleSheet.create({
   paymentCardLabelSelected: {
     color: COLORS.primary,
     fontWeight: '700',
+  },
+  creditOptionsCard: {
+    backgroundColor: COLORS.cardBg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 20,
+  },
+  creditOptionsTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: COLORS.textMuted,
+    letterSpacing: 0.8,
+    marginBottom: 12,
+  },
+  creditOptionsLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: COLORS.textMuted,
+    marginBottom: 6,
+    marginTop: 4,
+  },
+  customerOptions: {
+    gap: 8,
+    marginBottom: 10,
+  },
+  customerOption: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    padding: 10,
+  },
+  customerOptionSelected: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primaryBg,
+  },
+  customerOptionText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.textDark,
+  },
+  customerOptionTextSelected: {
+    color: COLORS.primary,
+  },
+  customerBalanceText: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
+  creditTextInput: {
+    height: 44,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    fontSize: 14,
+    color: COLORS.textDark,
+    marginBottom: 8,
+  },
+  creditSummaryText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: COLORS.primary,
+    marginVertical: 8,
+  },
+  scheduleRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  scheduleOption: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    paddingVertical: 9,
+    alignItems: 'center',
+  },
+  scheduleOptionSelected: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primaryBg,
+  },
+  scheduleOptionText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+  },
+  scheduleOptionTextSelected: {
+    color: COLORS.primary,
   },
   completeCta: {
     height: 52,
