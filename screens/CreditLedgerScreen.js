@@ -197,12 +197,8 @@ export default function CreditLedgerScreen({ storeId }) {
         </View>
       </ScrollView>
 
-<<<<<<< HEAD
       {/* ID Verification / New Credit Modal */}
       <Modal visible={idModalVisible} transparent animationType="fade" onRequestClose={() => setIdModalVisible(false)}>
-=======
-      <Modal visible={idModalVisible} transparent animationType="fade">
->>>>>>> 5d0f884411c03a1c0e076f514903c3d6024851e5
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
@@ -287,10 +283,6 @@ export default function CreditLedgerScreen({ storeId }) {
           </View>
         </View>
       </Modal>
-<<<<<<< HEAD
-=======
-
->>>>>>> 5d0f884411c03a1c0e076f514903c3d6024851e5
     </SafeAreaView>
   );
 }
