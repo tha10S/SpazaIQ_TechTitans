@@ -1,5 +1,4 @@
 import { fetchSpazaIQData } from './assistantDataService.js';
-import { SHARED_CHATBOT_API_KEY, hasSharedChatbotApiKey } from './apiConfig.js';
 import { INTENT_CATALOG, INTENT_KEYWORDS } from './intentCatalog.js';
 
 const money = (value) => `R${Number(value || 0).toLocaleString('en-ZA', { maximumFractionDigits: 2 })}`;
@@ -10,77 +9,6 @@ function normalizeText(value = '') {
     .replace(/[?!.,]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-function buildAssistantContext(data) {
-  const products = (data.products ?? []).map((product) => ({
-    name: product.name,
-    price: Number(product.unit_price ?? product.unitPrice ?? 0),
-  }));
-  const sales = (data.sales ?? []).slice(-25).map((sale) => ({
-    date: sale.created_at,
-    total: Number(sale.total ?? 0),
-    items: (sale.items ?? []).map((item) => ({
-      name: item.name,
-      quantity: Number(item.qty ?? item.quantity ?? 0),
-      unitPrice: Number(item.unitPrice ?? item.unit_price ?? 0),
-    })),
-  }));
-  const customers = (data.customers ?? []).map((customer) => {
-    const balance = (data.creditTransactions ?? [])
-      .filter((transaction) => transaction.customer_id === customer.id)
-      .reduce((sum, transaction) => sum + Number(transaction.amount ?? 0), 0);
-    return { name: customer.name, balance };
-  });
-
-  return JSON.stringify({
-    products,
-    recentSales: sales,
-    customerBalances: customers,
-    inventory: data.inventory ?? 'not connected',
-    expenses: data.expenses ?? 'not connected',
-    suppliers: data.suppliers ?? 'not connected',
-  });
-}
-
-async function callSharedChatbotApi(question, data) {
-  if (!hasSharedChatbotApiKey()) return null;
-
-  try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${SHARED_CHATBOT_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        temperature: 0.3,
-        messages: [
-          {
-            role: 'system',
-            content:
-              `You are SpazaIQ, a helpful assistant for a South African spaza shop. Keep answers brief, practical, and grounded only in the app context below. If the context does not contain the requested data, say that it is not connected yet. Never invent sales, stock, prices, balances, or customer details. Context: ${buildAssistantContext(data)}`,
-          },
-          {
-            role: 'user',
-            content: question,
-          },
-        ],
-      }),
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`OpenAI request failed (${response.status}): ${text}`);
-    }
-
-    const payload = await response.json();
-    return payload.choices?.[0]?.message?.content?.trim() || null;
-  } catch (error) {
-    console.warn('Shared chatbot API failed, falling back to local assistant.', error);
-    return null;
-  }
 }
 
 function detectIntent(message) {
@@ -96,6 +24,10 @@ function detectIntent(message) {
 
   if (/\b(owes me the most|owes the most|largest balance|highest balance|who owes me money|who owes me the most)\b/.test(text)) {
     return { intent: 'LARGEST_BALANCE', confidence: 0.97, matches: 1 };
+  }
+
+  if (/\b(how do i|how can i|where do i|how to|can i)\b/.test(text) && /\b(app|screen|scan|barcode|qr|add|create|record|sale|sell|customer|product|stock|credit|payment|supplier|reorder|report|insight)\b/.test(text)) {
+    return { intent: 'APP_HELP', confidence: 0.9, matches: 1 };
   }
 
   let best = { intent: 'BUSINESS_ADVICE', confidence: 0.25, matches: 0 };
@@ -139,11 +71,106 @@ function productSales(data) {
       quantity: 0,
       revenue: 0,
     };
-    current.quantity += Number(item.qty || 0);
-    current.revenue += Number(item.qty || 0) * Number(item.unitPrice ?? item.unit_price ?? 0);
+    const quantity = Number(item.qty ?? item.quantity ?? 0);
+    current.quantity += quantity;
+    current.revenue += quantity * Number(item.unitPrice ?? item.unit_price ?? 0);
     totals.set(productId, current);
   }
   return [...totals.values()].sort((a, b) => b.quantity - a.quantity);
+}
+
+function inventoryRecords(data) {
+  const records = Array.isArray(data.inventory) ? data.inventory : data.products;
+  if (!Array.isArray(records) || !records.length) return [];
+  return records.filter((product) => Number.isFinite(Number(product.quantity ?? product.stockQuantity)));
+}
+
+function lowStockRecords(data) {
+  return inventoryRecords(data)
+    .map((product) => ({
+      ...product,
+      quantity: Number(product.quantity ?? product.stockQuantity ?? 0),
+      reorderLevel: Number(product.reorder_level ?? product.reorderLevel ?? 0),
+    }))
+    .filter((product) => product.quantity <= product.reorderLevel)
+    .sort((a, b) => a.quantity - b.quantity);
+}
+
+function findProductMention(question, products) {
+  const text = normalizeText(question);
+  const exactMatch = products.find((product) => {
+    const name = normalizeText(product.name);
+    return name.length > 3 && text.includes(name);
+  });
+  if (exactMatch) return exactMatch;
+
+  const ignored = new Set(['what', 'which', 'how', 'much', 'many', 'price', 'cost', 'stock', 'have', 'sell', 'selling', 'product', 'products', 'the', 'for', 'of', 'do', 'i', 'in', 'is', 'my', 'on', 'me', 'we', 'our']);
+  const words = text.split(' ').filter((word) => word.length > 2 && !ignored.has(word));
+  if (!words.length) return null;
+
+  const ranked = products.map((product) => {
+    const productWords = normalizeText(product.name).split(' ').filter((word) => word.length > 2);
+    const matches = words.filter((word) => productWords.some((productWord) => productWord.includes(word) || word.includes(productWord)));
+    return { product, matches: new Set(matches).size, productWordCount: productWords.length };
+  }).sort((a, b) => b.matches - a.matches);
+
+  return ranked[0]?.matches >= Math.min(2, ranked[0]?.productWordCount || 2) ? ranked[0].product : null;
+}
+
+function appHelpResponse(question) {
+  const text = normalizeText(question);
+  const asksHowTo = /\b(how do i|how can i|where do i|where can i|how to|how does|open|go to|navigate to|which screen|can i add|can i create|can i record)\b/.test(text);
+  if (!asksHowTo) return null;
+
+  if (/\b(scan|barcode|qr code)\b/.test(text)) return 'To scan a product, open Stock and tap the scan icon beside the search bar. You can also add or edit products from Stock Management.';
+  if (/\b(add|create|new)\b/.test(text) && /\b(product|item|stock)\b/.test(text)) return 'Open Stock Management, then tap the + button to add a product. Enter its name, selling price, cost price, quantity, and reorder level, then save.';
+  if (/\b(add|create|new)\b/.test(text) && /\b(customer|client)\b/.test(text)) return 'Open Credit from the bottom navigation and tap Add Customer. Save the customer details, then select them to record credit or a payment.';
+  if (/\b(sale|sell|checkout|pos|purchase)\b/.test(text)) return 'Open Sell from the bottom navigation to start a sale. Add products to the cart, review the total, choose the payment method, and complete the sale.';
+  if (/\b(credit|payment|repay|repayment)\b/.test(text)) return 'Open Credit from the bottom navigation. Select a customer to record credit, or use Make Payment on an account to record a repayment.';
+  if (/\b(supplier|reorder|order)\b/.test(text)) return 'Open Suppliers from the bottom navigation to view the supplier and order screens. Supplier prices and purchase history are not connected to the assistant’s store data yet.';
+  if (/\b(report|insight|dashboard|performance)\b/.test(text)) return 'Open Home for today’s dashboard, or Insights from the bottom navigation for business summaries. You can also ask me for sales, stock, and credit figures.';
+  return null;
+}
+
+function profitForSales(sales, products) {
+  const costs = new Map(products.map((product) => [String(product.id), Number(product.cost_price ?? product.costPrice)]));
+  let total = 0;
+  let itemCount = 0;
+  for (const sale of sales) {
+    for (const item of sale.items ?? []) {
+      const productId = item.product_id ?? item.productId ?? item.id;
+      const cost = Number(item.cost_price ?? item.costPrice ?? costs.get(String(productId)));
+      const quantity = Number(item.qty ?? item.quantity ?? 0);
+      const sellingPrice = Number(item.unitPrice ?? item.unit_price ?? 0);
+      if (!Number.isFinite(cost) || !Number.isFinite(sellingPrice) || quantity <= 0) continue;
+      total += (sellingPrice - cost) * quantity;
+      itemCount += 1;
+    }
+  }
+  return { total, itemCount };
+}
+
+function productProfitTotals(sales, products) {
+  const productsById = new Map(products.map((product) => [String(product.id), product]));
+  const totals = new Map();
+  for (const sale of sales) {
+    for (const item of sale.items ?? []) {
+      const productId = item.product_id ?? item.productId ?? item.id;
+      const product = productsById.get(String(productId));
+      const cost = Number(item.cost_price ?? item.costPrice ?? product?.cost_price ?? product?.costPrice);
+      const unitPrice = Number(item.unitPrice ?? item.unit_price ?? product?.unit_price ?? product?.unitPrice);
+      const quantity = Number(item.qty ?? item.quantity ?? 0);
+      if (!product || !Number.isFinite(cost) || !Number.isFinite(unitPrice) || quantity <= 0) continue;
+      const current = totals.get(String(productId)) ?? { name: product.name, profit: 0, revenue: 0 };
+      current.profit += (unitPrice - cost) * quantity;
+      current.revenue += unitPrice * quantity;
+      totals.set(String(productId), current);
+    }
+  }
+  return [...totals.values()].map((product) => ({
+    ...product,
+    margin: product.revenue > 0 ? (product.profit / product.revenue) * 100 : 0,
+  }));
 }
 
 function salesForPeriod(sales, question, now = new Date()) {
@@ -187,6 +214,7 @@ function buildBusinessSummary(data) {
     totalSales,
     outstanding,
     totalCustomers: customers.length,
+    totalProducts: data.products?.length ?? 0,
     topCustomer,
     topProducts,
   };
@@ -197,7 +225,7 @@ function generateGeneralResponse(data, question) {
   const text = normalizeText(question);
 
   if (/\b(what can you do|what are you|who are you|your purpose)\b/.test(text)) {
-    return 'I am SpazaIQ, your retail operations assistant. I can track sales, identify your best sellers, highlight who owes money, flag overdue credit, and suggest what to restock next.';
+    return 'I’m SpazaIQ, your shop assistant. I can summarize recorded sales, rank best sellers, check customer balances, review stock and reorder levels, and guide you through app tasks. I’ll tell you when the required data is not connected.';
   }
 
   if (/\b(how are you|how are things)\b/.test(text)) {
@@ -216,12 +244,35 @@ function generateGeneralResponse(data, question) {
     return `Hi! I’m SpazaIQ, ready to help your shop run smarter. ${productLine} ${greeting}`;
   }
 
-  return `I can help with the numbers behind your shop. Right now, sales total ${money(summary.totalSales)}, outstanding credit is ${money(summary.outstanding)}, and the top product signal is ${summary.topProducts.length ? summary.topProducts[0].name : 'not available yet'}.`;
+  return 'I can help with recorded sales, stock, customer credit, product performance, and using the app. I couldn’t match that question to connected data. Try asking “How much did I sell today?”, “What stock is running low?”, or “Who owes me the most?”';
 }
 
 function generateAnswer(intent, data, question) {
   const balances = positiveBalances(data);
   const totalOutstanding = balances.reduce((sum, customer) => sum + customer.balance, 0);
+  const products = data.products ?? [];
+  const inventory = inventoryRecords(data);
+  const lowStock = lowStockRecords(data);
+  const helpResponse = appHelpResponse(question);
+  const mentionedProduct = findProductMention(question, products);
+
+  if (helpResponse) return helpResponse;
+
+  if (mentionedProduct && /\b(price|cost|how much|in stock|stock|quantity|how many)\b/.test(normalizeText(question))) {
+    if (/\b(price|cost|how much)\b/.test(normalizeText(question))) {
+      const price = Number(mentionedProduct.unit_price ?? mentionedProduct.unitPrice);
+      return Number.isFinite(price) && price > 0
+        ? `${mentionedProduct.name} is priced at ${money(price)}.`
+        : `I don’t have a selling price recorded for ${mentionedProduct.name}.`;
+    }
+    const stockRecord = inventory.find((product) => product.id === mentionedProduct.id);
+    if (stockRecord) return `${mentionedProduct.name} has ${Number(stockRecord.quantity ?? stockRecord.stockQuantity ?? 0)} units recorded in stock.`;
+    return `I can identify ${mentionedProduct.name}, but its stock quantity is not connected to the assistant yet.`;
+  }
+
+  if (intent === 'APP_HELP') {
+    return helpResponse || 'Tell me what you are trying to do—such as record a sale, scan a product, add a customer, or check credit—and I’ll point you to the right screen.';
+  }
 
   if (intent === 'GREETING') {
     return generateGeneralResponse(data, question);
@@ -266,6 +317,96 @@ function generateAnswer(intent, data, question) {
     return `No sales have been recorded ${period} yet.`;
   }
 
+  if (intent === 'INVENTORY_SUMMARY') {
+    if (!inventory.length) return 'Stock quantities are not available in the assistant’s connected store data yet. Open Stock Management to review the product list.';
+    const totalUnits = inventory.reduce((sum, product) => sum + Number(product.quantity ?? product.stockQuantity ?? 0), 0);
+    const outOfStock = inventory.filter((product) => Number(product.quantity ?? product.stockQuantity ?? 0) <= 0).length;
+    return `There are ${inventory.length} products with ${totalUnits} units recorded in stock. ${lowStock.length} ${lowStock.length === 1 ? 'product is' : 'products are'} at or below their reorder levels, including ${outOfStock} out of stock.`;
+  }
+
+  if (intent === 'LOW_STOCK' || intent === 'RESTOCK_RECOMMENDATION') {
+    if (!inventory.length) return 'I can’t identify low stock because this store has no connected stock quantities yet. Open Stock Management to enter quantities and reorder levels.';
+    if (!lowStock.length) return 'No products are at or below their recorded reorder levels right now.';
+    const list = lowStock.slice(0, 5).map((product) => `${product.name} (${product.quantity} left; reorder level ${product.reorderLevel})`).join('; ');
+    return `${intent === 'LOW_STOCK' ? 'Low-stock items' : 'Restock priorities'}: ${list}${lowStock.length > 5 ? `; and ${lowStock.length - 5} more` : ''}.`;
+  }
+
+  if (intent === 'SALES_TREND') {
+    const now = new Date();
+    const thisWeek = salesForPeriod(data.sales ?? [], 'this week', now);
+    const currentWeekStart = new Date(now);
+    currentWeekStart.setHours(0, 0, 0, 0);
+    currentWeekStart.setDate(currentWeekStart.getDate() - ((currentWeekStart.getDay() || 7) - 1));
+    const previousWeekStart = new Date(currentWeekStart);
+    previousWeekStart.setDate(previousWeekStart.getDate() - 7);
+    const previousWeek = (data.sales ?? []).filter((sale) => {
+      if (!sale.created_at) return false;
+      const createdAt = new Date(sale.created_at);
+      return createdAt >= previousWeekStart && createdAt < currentWeekStart;
+    });
+    if (!thisWeek.length || !previousWeek.length) return 'I need recorded sales in both this week and last week before I can say whether sales are increasing or decreasing.';
+    const currentTotal = salesTotal(thisWeek);
+    const previousTotal = salesTotal(previousWeek);
+    if (previousTotal === 0) return `Sales this week total ${money(currentTotal)}. Last week had no sales to compare against.`;
+    const change = ((currentTotal - previousTotal) / previousTotal) * 100;
+    return `Sales this week are ${money(currentTotal)} versus ${money(previousTotal)} last week, ${change >= 0 ? 'up' : 'down'} ${Math.abs(change).toFixed(1)}%.`;
+  }
+
+  if (intent === 'BUSIEST_DAYS') {
+    const totalsByDay = new Map();
+    for (const sale of data.sales ?? []) {
+      if (!sale.created_at) continue;
+      const day = new Date(sale.created_at).toLocaleDateString('en-ZA', { weekday: 'long' });
+      totalsByDay.set(day, (totalsByDay.get(day) ?? 0) + Number(sale.total ?? 0));
+    }
+    const busiest = [...totalsByDay].sort((a, b) => b[1] - a[1])[0];
+    return busiest ? `${busiest[0]} has the highest recorded sales total so far, at ${money(busiest[1])}. This is based on ${(data.sales ?? []).length} available sales.` : 'I need dated sales records before I can compare your busiest days.';
+  }
+
+  if (intent === 'PROFIT_SUMMARY') {
+    const requestedSales = salesForPeriod(data.sales ?? [], question);
+    const profit = profitForSales(requestedSales, products);
+    if (!profit.itemCount) return 'I can’t calculate profit yet because cost prices for sold items are not available in the connected records.';
+    const period = normalizeText(question).includes('week') ? ' this week' : normalizeText(question).includes('month') ? ' this month' : ' today';
+    return `Recorded gross profit${period} is ${money(profit.total)} from ${profit.itemCount} sold line items. This excludes expenses and supplier payments.`;
+  }
+
+  if (intent === 'TOP_PROFIT') {
+    const rankings = productProfitTotals(data.sales ?? [], products).sort((a, b) => b.profit - a.profit).slice(0, 5);
+    return rankings.length
+      ? `Highest gross profit by product: ${rankings.map((product) => `${product.name} (${money(product.profit)})`).join('; ')}. This excludes expenses and supplier payments.`
+      : 'I can’t rank product profit yet because cost prices for sold products are not available in the connected records.';
+  }
+
+  if (intent === 'PROFIT_MARGIN') {
+    const margins = products
+      .map((product) => {
+        const price = Number(product.unit_price ?? product.unitPrice);
+        const cost = Number(product.cost_price ?? product.costPrice);
+        return { name: product.name, margin: price > 0 && Number.isFinite(cost) ? ((price - cost) / price) * 100 : null };
+      })
+      .filter((product) => product.margin !== null);
+    if (!margins.length) return 'Cost and selling prices are not both recorded, so I can’t calculate product profit margins yet.';
+    if (/\b(not profitable|negative margin|loss)\b/.test(normalizeText(question))) {
+      const unprofitable = margins.filter((product) => product.margin <= 0);
+      return unprofitable.length
+        ? `Products with no positive gross margin: ${unprofitable.map((product) => product.name).join(', ')}.`
+        : 'All products with recorded cost and selling prices have a positive gross margin.';
+    }
+    const ranked = margins.sort((a, b) => b.margin - a.margin).slice(0, 5);
+    return `Highest recorded gross margins: ${ranked.map((product) => `${product.name} (${product.margin.toFixed(1)}%)`).join('; ')}. These figures exclude expenses.`;
+  }
+
+  if (intent === 'OVERSTOCK') return 'Maximum stock targets are not recorded, so I can’t reliably label items overstocked. You can review quantities and reorder levels in Stock Management.';
+  if (intent === 'EXPIRY_TRACKING') return 'Expiry dates are not part of the connected product records yet, so I can’t identify items close to expiry.';
+  if (intent === 'CASH_FLOW') return 'I can summarize sales, but business expenses and supplier payments are not connected to the assistant. I can’t calculate net cash flow without those records.';
+  if (intent === 'SUPPLIER_COMPARISON') return 'Supplier contacts are visible in Suppliers & Orders, but supplier price comparisons are not connected to the assistant’s store data yet.';
+  if (intent === 'DEMAND_FORECAST') return 'I need a longer history of dated sales before making a reliable demand forecast. I won’t invent a forecast from too little data.';
+  if (intent === 'STOCK_SHRINKAGE') return 'Stock movement and adjustment history are not connected, so I can’t determine whether stock is missing.';
+  if (intent === 'RESTOCK_QUANTITY') return inventory.length
+    ? 'I can show which products are below reorder level, but I need reliable demand history to estimate order quantities.'
+    : 'I need recorded stock quantities and reorder levels before I can recommend order quantities.';
+
   if (intent === 'TOP_SELLERS' || intent === 'BOTTOM_SELLERS') {
     const sellers = productSales(data);
     if (!sellers.length) return 'I do not have enough product-level sales data yet to answer that.';
@@ -275,16 +416,21 @@ function generateAnswer(intent, data, question) {
   }
 
   if (intent === 'BUSINESS_PERFORMANCE') {
-    const sales = salesForPeriod(data.sales, 'today');
+    const sales = salesForPeriod(data.sales ?? [], 'today');
     const creditLine = balances.length ? `Outstanding credit is ${money(totalOutstanding)} across ${balances.length} customers.` : 'There are no outstanding customer balances.';
-    return sales.length ? `Today\'s sales are ${money(salesTotal(sales))} across ${sales.length} sales. ${creditLine}` : `I do not have enough sales data for a full performance summary. ${creditLine}`;
+    const lowStockLine = inventory.length
+      ? lowStock.length ? `${lowStock.length} products are at or below reorder level.` : 'No products are below their reorder level.'
+      : 'Stock quantities are not connected.';
+    const monthSales = salesForPeriod(data.sales ?? [], 'this month');
+    return `Today: ${money(salesTotal(sales))} across ${sales.length} sales. Month to date: ${money(salesTotal(monthSales))}. ${creditLine} ${lowStockLine}`;
   }
 
   if (intent === 'BUSINESS_ADVICE') {
     const actions = [];
     if (balances.length) actions.push(`follow up on ${balances.length} customer balance${balances.length === 1 ? '' : 's'}`);
     if ((data.sales ?? []).length === 0) actions.push('record sales consistently so trends can be measured');
-    if (!data.inventory) actions.push('connect inventory levels to receive restock recommendations');
+    if (!inventory.length) actions.push('enter stock quantities and reorder levels to get restock alerts');
+    else if (lowStock.length) actions.push(`review ${lowStock.length} product${lowStock.length === 1 ? '' : 's'} at or below the reorder level`);
     return actions.length ? `Based on the data available, focus on: ${actions.join('; ')}.` : 'I need more connected business data before making recommendations.';
   }
 
@@ -297,18 +443,10 @@ export async function answerSpazaIQQuestion({ message, storeId }) {
   if (!question) throw new Error('Enter a question first.');
 
   const data = await fetchSpazaIQData(storeId);
-  const sharedResponse = await callSharedChatbotApi(question, data);
-  if (sharedResponse) {
-    return {
-      intent: 'AI_ASSISTANT',
-      response: sharedResponse,
-      dataUsed: ['chatbot_api'],
-      confidence: 0.96,
-    };
-  }
-
   const detected = detectIntent(question);
-  const response = generateAnswer(detected.intent, data, question);
+  const response = detected.matches === 0
+    ? generateGeneralResponse(data, question)
+    : generateAnswer(detected.intent, data, question);
   const catalogExample = findCatalogExample(detected.intent);
 
   return {

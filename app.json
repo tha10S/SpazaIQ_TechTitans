@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "project",
-    "slug": "project",
+    "name": "insights_SpazaIQ",
+    "slug": "insights_SpazaIQ",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -14,7 +14,8 @@
           "cameraPermission": "Allow the POS app to scan product QR codes."
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      "expo-image-picker"
     ],
     "splash": {
       "image": "./assets/splash-icon.png",
