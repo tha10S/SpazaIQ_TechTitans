@@ -14,6 +14,12 @@ import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath } from './paths';
 import { mapProduct } from './mappers';
 
+function matchesSearch(product, term) {
+  return !term || [product.name, product.sku, product.barcode]
+    .map((value) => String(value ?? '').toLowerCase())
+    .some((value) => value.includes(term));
+}
+
 function productsCollection(storeId) {
   return collection(db, ...storeCollectionPath(storeId, 'products'));
 }
@@ -73,9 +79,7 @@ export async function fetchProducts(storeId, searchTerm = '') {
   const snapshot = await getDocs(query(productsCollection(authenticatedStoreId), orderBy('name')));
   const products = snapshot.docs.map(mapProduct);
   const term = searchTerm.trim().toLowerCase();
-  return term
-    ? products.filter((product) => [product.name, product.sku, product.barcode].some((value) => value.toLowerCase().includes(term)))
-    : products;
+  return products.filter((product) => matchesSearch(product, term));
 }
 
 export function subscribeProducts(storeId, searchTerm, onData, onError) {
@@ -84,7 +88,7 @@ export function subscribeProducts(storeId, searchTerm, onData, onError) {
   const productsQuery = query(productsCollection(authenticatedStoreId), orderBy('name'));
   return onSnapshot(productsQuery, (snapshot) => {
     const products = snapshot.docs.map(mapProduct).filter((product) =>
-      !term || [product.name, product.sku, product.barcode].some((value) => value.toLowerCase().includes(term))
+      matchesSearch(product, term)
     );
     onData(products);
   }, onError);

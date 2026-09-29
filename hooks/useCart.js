@@ -6,12 +6,14 @@ export function useCart(storeId) {
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]); // { id, name, unitPrice, qty }
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const pendingSale = useRef(null);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
+    setError(null);
     let unsubscribe;
     try {
       unsubscribe = subscribeProducts(
@@ -23,10 +25,18 @@ export function useCart(storeId) {
             setLoading(false);
           }
         },
-        () => active && setLoading(false)
+        (subscriptionError) => {
+          if (!active) return;
+          setProducts([]);
+          setError(subscriptionError);
+          setLoading(false);
+        }
       );
     } catch (error) {
-      if (active) setLoading(false);
+      if (active) {
+        setError(error);
+        setLoading(false);
+      }
     }
     return () => {
       active = false;
@@ -105,6 +115,7 @@ export function useCart(storeId) {
     updateQty,
     subtotal,
     loading,
+    error,
     submitting,
     completeSale,
   };

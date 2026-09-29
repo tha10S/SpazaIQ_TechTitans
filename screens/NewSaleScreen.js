@@ -38,6 +38,7 @@ export default function NewSaleScreen({ route }) {
     updateQty,
     subtotal,
     loading,
+    error,
     submitting,
     completeSale,
   } = useCart(storeId);
@@ -182,6 +183,17 @@ export default function NewSaleScreen({ route }) {
             <TouchableOpacity onPress={() => setScanError('')}>
               <Ionicons name="close" size={16} color={COLORS.danger} />
             </TouchableOpacity>
+          </View>
+        )}
+
+        {!!error && (
+          <View style={styles.errorCard}>
+            <Ionicons name="alert-circle" size={16} color={COLORS.danger} />
+            <Text style={styles.scanErrorText}>
+              {error.code === 'permission-denied'
+                ? 'Firestore denied access to products. Deploy firestore.rules and sign in again.'
+                : error.message || 'Products could not be loaded.'}
+            </Text>
           </View>
         )}
 
