@@ -232,14 +232,6 @@ export default function StockScreen({ navigation, route }) {
           <Ionicons name="add" size={26} color="#FFFFFF" />
         </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={styles.chatButton}
-          onPress={() => navigation?.navigate('Chatbot')}
-          activeOpacity={0.9}
-        >
-          <Ionicons name="chatbubble-ellipses" size={20} color="#FFFFFF" />
-        </TouchableOpacity>
-
         <Modal
           visible={productFormVisible}
           transparent
@@ -421,22 +413,6 @@ function makeStyles(colors, typography, spacing, radius) {
       position: 'absolute',
       right: 16,
       bottom: 72,
-      width: 48,
-      height: 48,
-      borderRadius: 24,
-      backgroundColor: emeraldPrimary,
-      alignItems: 'center',
-      justifyContent: 'center',
-      elevation: 5,
-      shadowColor: '#000',
-      shadowOpacity: 0.15,
-      shadowRadius: 6,
-      shadowOffset: { width: 0, height: 3 },
-    },
-    chatButton: {
-      position: 'absolute',
-      right: 16,
-      bottom: 16,
       width: 48,
       height: 48,
       borderRadius: 24,

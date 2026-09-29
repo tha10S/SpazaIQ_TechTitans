@@ -6,12 +6,16 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow the POS app to scan product QR codes."
+        }
+      ],
+      "expo-asset",
+      "expo-image-picker"
+    ],
     "ios": {
       "supportsTablet": true
     },
@@ -19,14 +23,10 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
-      },
-      "edgeToEdgeEnabled": true
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    },
-    "plugins": [
-      "expo-status-bar"
-    ]
+    }
   }
 }

@@ -103,7 +103,6 @@ export default function CreditLedgerScreen({ route }) {
       setSaving(false);
     }
   };
-
   if (loading) {
     return (
       <SafeAreaView style={[styles.safeArea, styles.centered]}>

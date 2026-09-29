@@ -43,28 +43,6 @@ const icons = {
   Insights: 'stats-chart',
 };
 
-function withAssistant(ScreenComponent) {
-  return function AssistantTab(props) {
-    return (
-      <View style={{ flex: 1 }}>
-        <ScreenComponent {...props} />
-        <TechTitansAssistant
-          storeId={props.route?.params?.storeId}
-          userName={props.route?.params?.userName}
-          shopName={props.route?.params?.shopName}
-        />
-      </View>
-    );
-  };
-}
-
-const HomeWithAssistant = withAssistant(HomeScreen);
-const StockWithAssistant = withAssistant(StockScreen);
-const SellWithAssistant = withAssistant(NewSaleScreen);
-const CreditWithAssistant = withAssistant(CreditLedgerScreen);
-const SuppliersWithAssistant = withAssistant(SuppliersOrders);
-const InsightsWithAssistant = withAssistant(Insights);
-
 function MainTabs({ route }) {
   const account = route?.params || {};
 
@@ -88,12 +66,12 @@ function MainTabs({ route }) {
         ),
       })}
     >
-      <Tab.Screen name="Home" component={HomeWithAssistant} initialParams={account} />
-      <Tab.Screen name="Stock" component={StockWithAssistant} initialParams={account} />
-      <Tab.Screen name="Sell" component={SellWithAssistant} initialParams={account} />
-      <Tab.Screen name="Credit" component={CreditWithAssistant} initialParams={account} />
-      <Tab.Screen name="Suppliers" component={SuppliersWithAssistant} initialParams={account} />
-      <Tab.Screen name="Insights" component={InsightsWithAssistant} initialParams={account} />
+      <Tab.Screen name="Home" component={HomeScreen} initialParams={account} />
+      <Tab.Screen name="Stock" component={StockScreen} initialParams={account} />
+      <Tab.Screen name="Sell" component={NewSaleScreen} initialParams={account} />
+      <Tab.Screen name="Credit" component={CreditLedgerScreen} initialParams={account} />
+      <Tab.Screen name="Suppliers" component={SuppliersOrders} initialParams={account} />
+      <Tab.Screen name="Insights" component={Insights} initialParams={account} />
     </Tab.Navigator>
   );
 }
@@ -143,37 +121,46 @@ export default function App() {
 
   return (
     <ThemeProvider>
-      <NavigationContainer>
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
-          {user ? (
-            <>
-              <Stack.Screen
-                name="MainTabs"
-                component={MainTabs}
-                initialParams={{
-                  storeId: userProfile?.defaultStoreId || user.uid,
-                  userName: userProfile?.fullName || user.displayName || user.email,
-                  shopName: userProfile?.shopName || user.displayName || 'My Shop',
-                }}
-              />
-              <Stack.Screen name="Scanner" component={QRScannerScreen} />
-              <Stack.Screen name="Notifications" component={NotificationsScreen} />
-              <Stack.Screen name="Placeholder" component={PlaceholderScreen} />
-              <Stack.Screen name="Profile" component={ProfileSettingsScreen} />
-            </>
-          ) : (
-            <>
-              <Stack.Screen name="Login" component={LoginScreen} />
-              <Stack.Screen name="Signup" component={SignupScreen} />
-            </>
-          )}
-          <Stack.Screen
-            name="FirebaseTest"
-            component={FirebaseTestScreen}
-            options={{ headerShown: true, title: 'Firebase Test' }}
+      <View style={{ flex: 1 }}>
+        <NavigationContainer>
+          <Stack.Navigator screenOptions={{ headerShown: false }}>
+            {user ? (
+              <>
+                <Stack.Screen
+                  name="MainTabs"
+                  component={MainTabs}
+                  initialParams={{
+                    storeId: userProfile?.defaultStoreId || user.uid,
+                    userName: userProfile?.fullName || user.displayName || user.email,
+                    shopName: userProfile?.shopName || user.displayName || 'My Shop',
+                  }}
+                />
+                <Stack.Screen name="Scanner" component={QRScannerScreen} />
+                <Stack.Screen name="Notifications" component={NotificationsScreen} />
+                <Stack.Screen name="Placeholder" component={PlaceholderScreen} />
+                <Stack.Screen name="Profile" component={ProfileSettingsScreen} />
+              </>
+            ) : (
+              <>
+                <Stack.Screen name="Login" component={LoginScreen} />
+                <Stack.Screen name="Signup" component={SignupScreen} />
+              </>
+            )}
+            <Stack.Screen
+              name="FirebaseTest"
+              component={FirebaseTestScreen}
+              options={{ headerShown: true, title: 'Firebase Test' }}
+            />
+          </Stack.Navigator>
+        </NavigationContainer>
+        {user && (
+          <TechTitansAssistant
+            storeId={userProfile?.defaultStoreId || user.uid}
+            userName={userProfile?.fullName || user.displayName || user.email}
+            shopName={userProfile?.shopName || user.displayName || 'My Shop'}
           />
-        </Stack.Navigator>
-      </NavigationContainer>
+        )}
+      </View>
     </ThemeProvider>
   );
 }

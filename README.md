@@ -27,6 +27,12 @@ firebase deploy --only firestore
 
 The app uses the authenticated Firebase user UID as the store ID. Store data lives under `stores/{uid}` and is seeded with realistic products and customer accounts on first sign-in.
 
+## Chatbot configuration
+
+- The assistant answers supported sales, product, inventory, and customer-credit questions locally from the signed-in user's Firestore records.
+- No OpenAI/Gemini API key or Firebase Functions deployment is required to use those answers.
+- The `mock-store-1` dataset is used only by chatbot tests; signed-in users read their own store through the Firestore repository and existing store security rules.
+
 ## Data workflows
 
 - Products and stock load in realtime from Firestore.
