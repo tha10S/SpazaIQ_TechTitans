@@ -2,7 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '../ThemeContext';
+import { useTheme } from '../config/ThemeContext';
+import { subscribeCustomers } from '../services/firestore/customersRepository';
+import { getAuthenticatedStoreId } from '../services/firestore/paths';
+import { subscribeProducts } from '../services/firestore/productsRepository';
+import { subscribeSales } from '../services/firestore/salesRepository';
 
 function getGreeting() {
   const hour = new Date().getHours();
@@ -11,32 +15,14 @@ function getGreeting() {
   return 'Good evening';
 }
 
-const SECONDARY_STATS = [
-  { key: 'profit', label: 'Profit', value: 'R 680', icon: 'trending-up', color: '#059669', bg: '#ECFDF5' },
-  { key: 'stock', label: 'Stock Value', value: 'R 18,300', icon: 'cube', color: '#2563EB', bg: '#EFF6FF' },
-  { key: 'credit', label: 'Credit Out', value: 'R 1,120', icon: 'card', color: '#D97706', bg: '#FFFBEB' },
-];
-
-// Today's intraday hourly sales data
-const todayHourlySales = [
-  { time: '08:00', value: 280 },
-  { time: '10:00', value: 450 },
-  { time: '12:00', value: 620 }, // Lunch rush
-  { time: '14:00', value: 310 },
-  { time: '16:00', value: 580 },
-  { time: '18:00', value: 720 }, // Peak evening rush
-];
-
-const lowStockItems = [
-  { key: '1', name: 'Cooking Oil 2L', emoji: '🛢️', remaining: 3, total: 20, supplier: 'Metro Cash & Carry' },
-  { key: '2', name: 'Maize Meal 5kg', emoji: '🌽', remaining: 5, total: 25, supplier: 'Tiger Brands Direct' },
-  { key: '3', name: 'White Bread', emoji: '🍞', remaining: 4, total: 30, supplier: 'Sasko Logistics' },
-];
-
 export default function HomeScreen({ navigation, route }) {
   const { colors, spacing, radius, typography } = useTheme();
   const styles = makeStyles(colors, typography, spacing, radius);
   const [now, setNow] = useState(new Date());
+  const [sales, setSales] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const storeId = route?.params?.storeId || getAuthenticatedStoreId();
 
   // Weather state placeholder (ready for your weather API fetch)
   const [weather, setWeather] = useState({ temp: '18°C', condition: '☀️' });
@@ -47,6 +33,15 @@ export default function HomeScreen({ navigation, route }) {
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    const subscriptions = [
+      subscribeSales(storeId, setSales, (error) => console.warn('Sales subscription failed', error?.code)),
+      subscribeProducts(storeId, '', setProducts, (error) => console.warn('Products subscription failed', error?.code)),
+      subscribeCustomers(storeId, setCustomers, (error) => console.warn('Customers subscription failed', error?.code)),
+    ];
+    return () => subscriptions.forEach((unsubscribe) => unsubscribe());
+  }, [storeId]);
+
   const formattedDateTime = now.toLocaleDateString('en-ZA', {
     weekday: 'short',
     day: 'numeric',
@@ -54,7 +49,40 @@ export default function HomeScreen({ navigation, route }) {
     year: 'numeric',
   }) + ' • ' + now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-  const maxHourlySale = Math.max(...todayHourlySales.map((d) => d.value));
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const todaySales = sales.filter((sale) => sale.createdAt && new Date(sale.createdAt) >= todayStart);
+  const todayRevenue = todaySales.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
+  const todayProfit = todaySales.reduce((sum, sale) => sum + (sale.items || []).reduce((itemSum, item) => {
+    const cost = Number(item.costPrice);
+    return Number.isFinite(cost)
+      ? itemSum + (Number(item.unitPrice || 0) - cost) * Number(item.qty || 0)
+      : itemSum;
+  }, 0), 0);
+  const stockValue = products.reduce((sum, product) => sum + product.quantity * product.cost_price, 0);
+  const creditOutstanding = customers.reduce((sum, customer) => sum + customer.balance, 0);
+  const todayHourlySales = Array.from({ length: 6 }, (_, index) => {
+    const hour = 8 + index * 2;
+    const value = todaySales
+      .filter((sale) => new Date(sale.createdAt).getHours() >= hour && new Date(sale.createdAt).getHours() < hour + 2)
+      .reduce((sum, sale) => sum + Number(sale.total || 0), 0);
+    return { time: `${String(hour).padStart(2, '0')}:00`, value };
+  });
+  const secondaryStats = [
+    { key: 'profit', label: 'Profit', value: `R ${todayProfit.toFixed(2)}`, icon: 'trending-up', color: '#059669', bg: '#ECFDF5' },
+    { key: 'stock', label: 'Stock Value', value: `R ${stockValue.toFixed(2)}`, icon: 'cube', color: '#2563EB', bg: '#EFF6FF' },
+    { key: 'credit', label: 'Credit Out', value: `R ${creditOutstanding.toFixed(2)}`, icon: 'card', color: '#D97706', bg: '#FFFBEB' },
+  ];
+  const lowStockItems = products
+    .filter((product) => product.quantity <= product.reorder_level)
+    .slice(0, 3)
+    .map((product) => ({
+      key: product.id,
+      name: product.name,
+      remaining: product.quantity,
+      total: Math.max(product.quantity, product.reorder_level, 1),
+      supplier: product.category,
+    }));
+  const maxHourlySale = Math.max(1, ...todayHourlySales.map((d) => d.value));
   const peakHour = todayHourlySales.reduce((prev, current) => (prev.value > current.value ? prev : current));
 
   return (
@@ -92,7 +120,7 @@ export default function HomeScreen({ navigation, route }) {
               <Text style={styles.heroBadge}>LIVE</Text>
             </View>
           </View>
-          <Text style={styles.heroValue}>R 2,450</Text>
+          <Text style={styles.heroValue}>R {todayRevenue.toFixed(2)}</Text>
           
           <TouchableOpacity 
             style={styles.quickSellBtn} 
@@ -106,7 +134,7 @@ export default function HomeScreen({ navigation, route }) {
 
         {/* Visual Stats Cards (Profit, Stock Value, Credit Out) */}
         <View style={styles.statsRow}>
-          {SECONDARY_STATS.map((stat) => (
+          {secondaryStats.map((stat) => (
             <View key={stat.key} style={styles.statCard}>
               <View style={[styles.statIconBadge, { backgroundColor: stat.bg }]}>
                 <Ionicons name={stat.icon} size={18} color={stat.color} />
@@ -158,9 +186,7 @@ export default function HomeScreen({ navigation, route }) {
             return (
               <View key={item.key} style={styles.stockCard}>
                 <View style={styles.stockInfo}>
-                  <Text style={styles.stockName}>
-                    ‼️ {item.emoji} {item.name}
-                  </Text>
+                  <Text style={styles.stockName}>‼️ {item.name}</Text>
                   <Text style={styles.supplierText}>{item.supplier}</Text>
                   
                   <View style={styles.progressTrack}>

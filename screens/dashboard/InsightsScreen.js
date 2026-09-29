@@ -1,60 +1,75 @@
-import {useState} from "react";
+import {useEffect, useState} from "react";
 import {Pressable, ScrollView, StyleSheet, Text, View,} from "react-native";
+import { getAuthenticatedStoreId } from '../../services/firestore/paths';
+import { subscribeSales } from '../../services/firestore/salesRepository';
 
-// Each period has its own dataset — swapped based on the toggle
-const periodData = {
-  Today: {
-    stats: { revenue: "R1,850", profit: "R480", itemsSold: 24 },
-    salesByDay: [{ day: "Today", value: 85 }],
-    topProducts: [
-      { name: "Coca-Cola 500ml", sold: 14, fill: 0.9 },
-      { name: "Simba Chips 120g", sold: 10, fill: 0.65 },
-      { name: "Albany White Bread", sold: 8, fill: 0.5 },
-    ],
-  },
-  Week: {
-    stats: { revenue: "R12,400", profit: "R3,200", itemsSold: 186 },
-    salesByDay: [
-      { day: "Mon", value: 30 },
-      { day: "Tue", value: 55 },
-      { day: "Wed", value: 30 },
-      { day: "Thu", value: 70 },
-      { day: "Fri", value: 95 },
-      { day: "Sat", value: 75 },
-      { day: "Sun", value: 60 },
-    ],
-    topProducts: [
-      { name: "Simba Chips 120g", sold: 84, fill: 0.9 },
-      { name: "Coca-Cola 500ml", sold: 72, fill: 0.75 },
-      { name: "Albany White Bread", sold: 55, fill: 0.55 },
-    ],
-  },
-  Month: {
-    stats: { revenue: "R48,900", profit: "R12,100", itemsSold: 742 },
-    salesByDay: [
-      { day: "Week 1", value: 60 },
-      { day: "Week 2", value: 80 },
-      { day: "Week 3", value: 45 },
-      { day: "Week 4", value: 95 },
-    ],
-    topProducts: [
-      { name: "Coca-Cola 500ml", sold: 310, fill: 0.95 },
-      { name: "Simba Chips 120g", sold: 268, fill: 0.8 },
-      { name: "Albany White Bread", sold: 190, fill: 0.6 },
-    ],
-  },
-};
+function getPeriodData(sales, period) {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (period === 'Week') {
+    start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  } else if (period === 'Month') {
+    start.setDate(1);
+  }
+  const filteredSales = sales.filter((sale) => sale.createdAt && new Date(sale.createdAt) >= start);
+  const productTotals = new Map();
+  let itemsSold = 0;
+  let profit = 0;
+  filteredSales.forEach((sale) => (sale.items || []).forEach((item) => {
+    const quantity = Number(item.qty || 0);
+    const key = item.id || item.name;
+    const total = productTotals.get(key) || { name: item.name || 'Product', sold: 0 };
+    total.sold += quantity;
+    productTotals.set(key, total);
+    itemsSold += quantity;
+    const cost = Number(item.costPrice);
+    if (Number.isFinite(cost)) profit += (Number(item.unitPrice || 0) - cost) * quantity;
+  }));
+  const topProducts = [...productTotals.values()].sort((left, right) => right.sold - left.sold).slice(0, 3);
+  const maxProductSales = Math.max(1, ...topProducts.map((item) => item.sold));
+  topProducts.forEach((item) => { item.fill = item.sold / maxProductSales; });
 
-const recentlyPurchased = [
-  { name: "Coca-Cola 500ml", qty: 2, time: "10 min ago" },
-  { name: "Simba Chips 120g", qty: 1, time: "32 min ago" },
-  { name: "Albany White Bread", qty: 3, time: "1 hr ago" },
-  { name: "Long Life Milk 1L", qty: 1, time: "2 hr ago" },
-];
+  const buckets = period === 'Week'
+    ? Array.from({ length: 7 }, (_, index) => ({ day: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][index], value: 0 }))
+    : Array.from({ length: Math.ceil(now.getDate() / 7) }, (_, index) => ({ day: `Week ${index + 1}`, value: 0 }));
+  filteredSales.forEach((sale) => {
+    const date = new Date(sale.createdAt);
+    const index = period === 'Week' ? (date.getDay() + 6) % 7 : Math.floor((date.getDate() - 1) / 7);
+    if (buckets[index]) buckets[index].value += Number(sale.total || 0);
+  });
 
-export default function Insights() {
+  return {
+    stats: {
+      revenue: `R${filteredSales.reduce((sum, sale) => sum + Number(sale.total || 0), 0).toFixed(2)}`,
+      profit: `R${profit.toFixed(2)}`,
+      itemsSold,
+    },
+    salesByDay: buckets,
+    topProducts,
+    filteredSales,
+  };
+}
+
+export default function Insights({ route }) {
   const [period, setPeriod] = useState("Today");
-  const data = periodData[period];
+  const [sales, setSales] = useState([]);
+  const storeId = route?.params?.storeId || getAuthenticatedStoreId();
+
+  useEffect(() => subscribeSales(
+    storeId,
+    setSales,
+    (error) => console.warn('Insights sales subscription failed', error?.code)
+  ), [storeId]);
+
+  const data = getPeriodData(sales, period);
+  const recentlyPurchased = data.filteredSales
+    .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))
+    .flatMap((sale) => (sale.items || []).map((item) => ({
+      name: item.name || 'Product',
+      qty: item.qty,
+      time: new Date(sale.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    })))
+    .slice(0, 4);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
@@ -108,9 +123,9 @@ export default function Insights() {
   </View>
 )}
 
-      {period === "Today" && (
+        {period === "Today" && (
       <><Text style={styles.sectionLabel}>RECENTLY PURCHASED</Text><View style={styles.card}>
-          {recentlyPurchased.map((item, i) => (
+          {recentlyPurchased.length === 0 ? <Text style={styles.recentTime}>No sales recorded today.</Text> : recentlyPurchased.map((item, i) => (
             <View
               key={i}
               style={[
@@ -124,12 +139,7 @@ export default function Insights() {
               </View>
               <View style={styles.recentRight}>
                 <Text style={styles.recentQty}>×{item.qty}</Text>
-                <Pressable
-                  style={styles.reverseBtn}
-                  onPress={() => console.log("Reverse purchase:", item.name)}
-                >
-                  <Text style={styles.reverseBtnText}>Reverse Purchase</Text>
-                </Pressable>
+                <Text style={styles.recentTime}>{item.time}</Text>
               </View>
             </View>
           ))}
@@ -142,10 +152,9 @@ export default function Insights() {
       <View style={styles.forecastCard}>
         <Text style={styles.forecastTitle}>Demand forecast</Text>
         <Text style={styles.forecastText}>
-          &ldquo;Based on previous week trends, consider ordering more{" "}
-          <Text style={styles.bold}>white bread</Text> and{" "}
-          <Text style={styles.bold}>cold drinks</Text> ahead of this upcoming
-          weekend.&rdquo;
+          {data.topProducts.length
+            ? `Most sold in this period: ${data.topProducts.map((product) => product.name).join(', ')}.`
+            : 'Record sales to see your best-selling products for this period.'}
         </Text>
       </View>
 

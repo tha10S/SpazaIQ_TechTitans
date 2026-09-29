@@ -1,23 +1,46 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { fetchProducts, recordSale } from '../services/salesService';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { recordSale, subscribeProducts } from '../services/salesService';
 
 export function useCart(storeId) {
   const [search, setSearch] = useState('');
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]); // { id, name, unitPrice, qty }
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const pendingSale = useRef(null);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    fetchProducts(storeId, search)
-      .then((data) => {
-        if (active) setProducts(data);
-      })
-      .finally(() => active && setLoading(false));
+    setError(null);
+    let unsubscribe;
+    try {
+      unsubscribe = subscribeProducts(
+        storeId,
+        search,
+        (data) => {
+          if (active) {
+            setProducts(data);
+            setLoading(false);
+          }
+        },
+        (subscriptionError) => {
+          if (!active) return;
+          setProducts([]);
+          setError(subscriptionError);
+          setLoading(false);
+        }
+      );
+    } catch (error) {
+      if (active) {
+        setError(error);
+        setLoading(false);
+      }
+    }
     return () => {
       active = false;
+      unsubscribe?.();
     };
   }, [storeId, search]);
 
@@ -29,7 +52,13 @@ export function useCart(storeId) {
           item.id === product.id ? { ...item, qty: item.qty + 1 } : item
         );
       }
-      return [...prev, { id: product.id, name: product.name, unitPrice: product.unit_price, qty: 1 }];
+      return [...prev, {
+        id: product.id,
+        name: product.name,
+        unitPrice: product.unit_price,
+        costPrice: product.cost_price,
+        qty: 1,
+      }];
     });
   }, []);
 
@@ -46,10 +75,31 @@ export function useCart(storeId) {
     [cart]
   );
 
-  const completeSale = async (paymentMethod) => {
+  const completeSale = async (paymentDetails) => {
     setSubmitting(true);
     try {
-      await recordSale({ storeId, cart, paymentMethod, total: subtotal });
+      const details = typeof paymentDetails === 'string'
+        ? { paymentMethod: paymentDetails, paidAmount: subtotal, creditAmount: 0 }
+        : paymentDetails;
+      const signature = JSON.stringify({
+        cart: cart.map(({ id, unitPrice, qty }) => ({ id, unitPrice, qty })),
+        details,
+        total: subtotal,
+      });
+      if (!pendingSale.current || pendingSale.current.signature !== signature) {
+        pendingSale.current = {
+          signature,
+          idempotencyKey: `sale-${storeId}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        };
+      }
+      await recordSale({
+        storeId,
+        cart,
+        total: subtotal,
+        ...details,
+        idempotencyKey: details.idempotencyKey || pendingSale.current.idempotencyKey,
+      });
+      pendingSale.current = null;
       setCart([]);
     } finally {
       setSubmitting(false);
@@ -65,6 +115,7 @@ export function useCart(storeId) {
     updateQty,
     subtotal,
     loading,
+    error,
     submitting,
     completeSale,
   };

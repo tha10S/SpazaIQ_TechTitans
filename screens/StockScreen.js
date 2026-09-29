@@ -7,67 +7,73 @@ import {
   TouchableOpacity,
   TextInput,
   StatusBar,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '../ThemeContext';
+import { useTheme } from '../config/ThemeContext';
+import { useProducts } from '../hooks/useProducts';
+import { getAuthenticatedStoreId } from '../services/firestore/paths';
+import { createProduct, updateProduct } from '../services/salesService';
 
-const initialProducts = [
-  {
-    id: '1',
-    name: 'Simba Fruit Chutney Chips 120g',
-    emoji: '🥔',
-    quantity: 4,
-    price: 'R 12.00',
-    status: 'Low Stock',
-    statusType: 'low',
-  },
-  {
-    id: '2',
-    name: 'White Star Maize Meal 2.5kg',
-    emoji: '🌽',
-    quantity: 28,
-    price: 'R 38.50',
-    status: 'In Stock',
-    statusType: 'stock',
-  },
-  {
-    id: '3',
-    name: 'Coca-Cola Original 500ml',
-    emoji: '🥤',
-    quantity: 45,
-    price: 'R 18.00',
-    status: 'In Stock',
-    statusType: 'stock',
-  },
-  {
-    id: '4',
-    name: 'Sunlight Laundry Soap 500g',
-    emoji: '🧼',
-    quantity: 0,
-    price: 'R 22.00',
-    status: 'Out of Stock',
-    statusType: 'out',
-  },
-  {
-    id: '5',
-    name: 'Albany Superior White Bread',
-    emoji: '🍞',
-    quantity: 2,
-    price: 'R 16.00',
-    status: 'Low Stock',
-    statusType: 'low',
-  },
-];
+const EMPTY_PRODUCT = {
+  name: '',
+  sku: '',
+  barcode: '',
+  unitPrice: '',
+  costPrice: '',
+  quantity: '0',
+  reorderLevel: '0',
+  category: 'General',
+};
 
-export default function StockScreen({ navigation }) {
+export default function StockScreen({ navigation, route }) {
   const { colors, spacing, radius, typography } = useTheme();
   const styles = makeStyles(colors, typography, spacing, radius);
   const [searchQuery, setSearchQuery] = useState('');
+  const [productFormVisible, setProductFormVisible] = useState(false);
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [productForm, setProductForm] = useState(EMPTY_PRODUCT);
+  const [productError, setProductError] = useState('');
+  const [savingProduct, setSavingProduct] = useState(false);
+  const storeId = route?.params?.storeId || getAuthenticatedStoreId();
+  const { products, loading, error } = useProducts(storeId, searchQuery);
 
-  const filteredProducts = initialProducts.filter((p) =>
-    p.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const lowStockCount = products.filter((product) => product.quantity <= product.reorder_level).length;
+  const totalQuantity = products.reduce((total, product) => total + product.quantity, 0);
+
+  const openProductForm = (product = null) => {
+    setEditingProduct(product);
+    setProductForm(product ? {
+      name: product.name,
+      sku: product.sku,
+      barcode: product.barcode,
+      unitPrice: String(product.unit_price),
+      costPrice: String(product.cost_price),
+      quantity: String(product.quantity),
+      reorderLevel: String(product.reorder_level),
+      category: product.category,
+    } : EMPTY_PRODUCT);
+    setProductError('');
+    setProductFormVisible(true);
+  };
+
+  const saveProduct = async () => {
+    setSavingProduct(true);
+    setProductError('');
+    try {
+      if (editingProduct) {
+        await updateProduct(storeId, editingProduct.id, productForm);
+      } else {
+        await createProduct(storeId, productForm);
+      }
+      setProductFormVisible(false);
+    } catch (error) {
+      setProductError(error.message || 'Could not save this product.');
+    } finally {
+      setSavingProduct(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -117,7 +123,7 @@ export default function StockScreen({ navigation }) {
                 <Ionicons name="cube" size={16} color="#2563EB" />
               </View>
               <Text style={styles.summaryLabel}>Total Items</Text>
-              <Text style={styles.summaryValue}>148</Text>
+              <Text style={styles.summaryValue}>{totalQuantity}</Text>
             </View>
 
             <View style={styles.summaryCard}>
@@ -125,7 +131,7 @@ export default function StockScreen({ navigation }) {
                 <Ionicons name="warning" size={16} color="#DC2626" />
               </View>
               <Text style={styles.summaryLabel}>Low Stock</Text>
-              <Text style={[styles.summaryValue, { color: '#DC2626' }]}>3</Text>
+              <Text style={[styles.summaryValue, { color: '#DC2626' }]}>{lowStockCount}</Text>
             </View>
 
             <View style={styles.summaryCard}>
@@ -162,24 +168,28 @@ export default function StockScreen({ navigation }) {
           <View style={styles.catalogHeader}>
             <Text style={styles.catalogTitle}>PRODUCT CATALOG</Text>
             <View style={styles.countBadge}>
-              <Text style={styles.catalogCount}>{filteredProducts.length} items</Text>
+              <Text style={styles.catalogCount}>{products.length} items</Text>
             </View>
           </View>
 
           {/* Product List */}
           <View style={styles.productList}>
-            {filteredProducts.map((product) => (
+            {loading ? <Text style={styles.emptyText}>Loading products...</Text> : error ? <Text style={styles.emptyText}>{error.message}</Text> : products.map((product) => {
+              const statusType = product.quantity === 0 ? 'out' : product.quantity <= product.reorder_level ? 'low' : 'stock';
+              const status = statusType === 'out' ? 'Out of Stock' : statusType === 'low' ? 'Low Stock' : 'In Stock';
+              return (
               <TouchableOpacity
                 key={product.id}
                 style={styles.productCard}
                 activeOpacity={0.7}
+                onPress={() => openProductForm(product)}
               >
                 <View style={styles.productInformation}>
                   <Text style={styles.productName} numberOfLines={1}>
-                    {product.statusType === 'low' ? '‼️ ' : ''}{product.emoji} {product.name}
+                    {statusType === 'low' ? '‼️ ' : ''}{product.name}
                   </Text>
                   <View style={styles.detailsRow}>
-                    <Text style={styles.productPrice}>{product.price}</Text>
+                    <Text style={styles.productPrice}>R {product.unit_price.toFixed(2)}</Text>
                     <Text style={styles.dotSeparator}>•</Text>
                     <Text style={styles.productQty}>
                       Qty: <Text style={styles.qtyBold}>{product.quantity}</Text>
@@ -190,24 +200,25 @@ export default function StockScreen({ navigation }) {
                 <View
                   style={[
                     styles.statusBadge,
-                    product.statusType === 'low' && styles.lowBadge,
-                    product.statusType === 'stock' && styles.stockBadge,
-                    product.statusType === 'out' && styles.outBadge,
+                    statusType === 'low' && styles.lowBadge,
+                    statusType === 'stock' && styles.stockBadge,
+                    statusType === 'out' && styles.outBadge,
                   ]}
                 >
                   <Text
                     style={[
                       styles.statusText,
-                      product.statusType === 'low' && styles.lowText,
-                      product.statusType === 'stock' && styles.stockText,
-                      product.statusType === 'out' && styles.outText,
+                      statusType === 'low' && styles.lowText,
+                      statusType === 'stock' && styles.stockText,
+                      statusType === 'out' && styles.outText,
                     ]}
                   >
-                    {product.status}
+                    {status}
                   </Text>
                 </View>
               </TouchableOpacity>
-            ))}
+              );
+            })}
           </View>
         </ScrollView>
 
@@ -215,6 +226,8 @@ export default function StockScreen({ navigation }) {
         <TouchableOpacity 
           style={styles.addButton}
           activeOpacity={0.9}
+          onPress={() => openProductForm()}
+          accessibilityLabel="Add product"
         >
           <Ionicons name="add" size={26} color="#FFFFFF" />
         </TouchableOpacity>
@@ -226,6 +239,52 @@ export default function StockScreen({ navigation }) {
         >
           <Ionicons name="chatbubble-ellipses" size={20} color="#FFFFFF" />
         </TouchableOpacity>
+
+        <Modal
+          visible={productFormVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setProductFormVisible(false)}
+        >
+          <View style={styles.formOverlay}>
+            <ScrollView contentContainerStyle={styles.formScroll} keyboardShouldPersistTaps="handled">
+              <View style={styles.formCard}>
+                <Text style={styles.formTitle}>{editingProduct ? 'Edit Product' : 'Add Product'}</Text>
+                {[
+                  ['name', 'Product name'],
+                  ['sku', 'SKU'],
+                  ['barcode', 'Barcode'],
+                  ['unitPrice', 'Selling price (R)'],
+                  ['costPrice', 'Cost price (R)'],
+                  ['quantity', 'Quantity'],
+                  ['reorderLevel', 'Low-stock threshold'],
+                  ['category', 'Category'],
+                ].map(([key, label]) => (
+                  <View key={key} style={styles.formField}>
+                    <Text style={styles.formLabel}>{label}</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      value={productForm[key]}
+                      onChangeText={(value) => setProductForm((current) => ({ ...current, [key]: value }))}
+                      keyboardType={['unitPrice', 'costPrice', 'quantity', 'reorderLevel'].includes(key) ? 'decimal-pad' : 'default'}
+                      autoCapitalize={key === 'sku' || key === 'barcode' ? 'characters' : 'sentences'}
+                      editable={!savingProduct}
+                    />
+                  </View>
+                ))}
+                {productError ? <Text style={styles.formError}>{productError}</Text> : null}
+                <View style={styles.formActions}>
+                  <TouchableOpacity style={styles.formSecondaryButton} onPress={() => setProductFormVisible(false)} disabled={savingProduct}>
+                    <Text style={styles.formSecondaryText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.formPrimaryButton} onPress={saveProduct} disabled={savingProduct}>
+                    <Text style={styles.formPrimaryText}>{savingProduct ? 'Saving...' : 'Save Product'}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </ScrollView>
+          </View>
+        </Modal>
       </View>
     </SafeAreaView>
   );
@@ -390,5 +449,18 @@ function makeStyles(colors, typography, spacing, radius) {
       shadowRadius: 6,
       shadowOffset: { width: 0, height: 3 },
     },
+    formOverlay: { flex: 1, justifyContent: 'center', backgroundColor: 'rgba(17, 24, 39, 0.55)', padding: 18 },
+    formScroll: { flexGrow: 1, justifyContent: 'center' },
+    formCard: { width: '100%', maxWidth: 520, alignSelf: 'center', maxHeight: '90%', backgroundColor: '#FFFFFF', borderRadius: 14, padding: 18 },
+    formTitle: { fontSize: 19, fontWeight: '800', color: '#111827', marginBottom: 14 },
+    formField: { marginBottom: 10 },
+    formLabel: { fontSize: 12, fontWeight: '700', color: '#4B5563', marginBottom: 4 },
+    formInput: { height: 40, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, paddingHorizontal: 10, color: '#111827' },
+    formError: { color: '#B91C1C', fontSize: 12, marginTop: 4 },
+    formActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 12 },
+    formSecondaryButton: { minWidth: 94, paddingVertical: 11, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, alignItems: 'center' },
+    formSecondaryText: { color: '#4B5563', fontWeight: '700' },
+    formPrimaryButton: { minWidth: 120, paddingVertical: 11, backgroundColor: emeraldPrimary, borderRadius: 8, alignItems: 'center' },
+    formPrimaryText: { color: '#FFFFFF', fontWeight: '700' },
   });
 }

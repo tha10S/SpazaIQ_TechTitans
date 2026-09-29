@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function ownsStore(storeId) { return signedIn() && request.auth.uid == storeId; }
+
+    match /test/{documentId} {
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow read: if signedIn() && resource.data.ownerUid == request.auth.uid;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.uid == userId
+        && request.resource.data.defaultStoreId == userId
+        && request.resource.data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'fullName', 'mobile', 'shopName',
+          'defaultStoreId', 'createdAt', 'updatedAt', 'location', 'shopRegistration'
+        ]);
+      allow update: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.uid == userId
+        && request.resource.data.defaultStoreId == resource.data.defaultStoreId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'fullName', 'mobile', 'shopName',
+          'defaultStoreId', 'createdAt', 'updatedAt', 'location', 'shopRegistration'
+        ]);
+      allow delete: if false;
+    }
+
+    match /stores/{storeId} {
+      allow read: if ownsStore(storeId);
+      allow create: if ownsStore(storeId)
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'ownerId', 'name', 'seedVersion', 'createdAt', 'updatedAt'
+        ]);
+      allow update: if ownsStore(storeId)
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'ownerId', 'name', 'seedVersion', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if false;
+
+      match /{collectionName}/{documentId} {
+        allow read: if ownsStore(storeId);
+        allow create: if ownsStore(storeId) && request.resource.data.storeId == storeId;
+        allow update: if ownsStore(storeId)
+          && resource.data.storeId == storeId
+          && request.resource.data.storeId == storeId;
+        allow delete: if ownsStore(storeId) && resource.data.storeId == storeId;
+      }
+    }
+  }
+}

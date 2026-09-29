@@ -14,6 +14,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useCustomerBalances } from '../hooks/useCustomerBalances';
+import { getAuthenticatedStoreId } from '../services/firestore/paths';
+import { createCustomer } from '../services/creditService';
 
 const STATUS_CONFIG = {
   good: { label: 'Good', color: '#004B49', bg: '#E6F4F1' },
@@ -23,53 +25,80 @@ const STATUS_CONFIG = {
 
 const formatR = (n) => `R ${Number(n || 0).toFixed(2)}`;
 
-export default function CreditLedgerScreen({ storeId }) {
-  const { customers, loading, error, confirmCredit } = useCustomerBalances(storeId);
+export default function CreditLedgerScreen({ route }) {
+  const storeId = route?.params?.storeId || getAuthenticatedStoreId();
+  const { customers, loading, error, confirmCredit, recordPayment } = useCustomerBalances(storeId);
 
   const [idModalVisible, setIdModalVisible] = useState(false);
-  const [idNumber, setIdNumber] = useState('');
+  const [modalMode, setModalMode] = useState('credit');
   const [activeCustomer, setActiveCustomer] = useState(null);
   const [pendingAmount, setPendingAmount] = useState('');
   const [pendingDueDate, setPendingDueDate] = useState('');
+  const [scheduleFrequency, setScheduleFrequency] = useState('one_time');
   const [saving, setSaving] = useState(false);
+  const [customerFormVisible, setCustomerFormVisible] = useState(false);
+  const [customerForm, setCustomerForm] = useState({ name: '', phone: '', creditLimit: '' });
+  const [customerFormError, setCustomerFormError] = useState('');
 
   const totalOutstanding = customers.reduce((sum, c) => sum + (c.balance || 0), 0);
 
   const openIdVerification = (customer) => {
+    setModalMode('credit');
     setActiveCustomer(customer);
     setIdModalVisible(true);
   };
 
+  const openPayment = (customer) => {
+    setModalMode('payment');
+    setActiveCustomer(customer);
+    setPendingAmount('');
+    setIdModalVisible(true);
+  };
+
   const handleVerifyAndAppend = async () => {
-    if (idNumber.trim().length < 6) {
-      Alert.alert('Invalid ID', 'Please enter a valid store-linked ID number.');
-      return;
-    }
     const amount = parseFloat(pendingAmount);
     if (!amount || amount <= 0) {
-      Alert.alert('Invalid amount', 'Please enter the credit amount for this sale.');
+      Alert.alert('Invalid amount', 'Please enter a valid amount.');
       return;
     }
-    if (!pendingDueDate.trim()) {
+    if (modalMode === 'credit' && !pendingDueDate.trim()) {
       Alert.alert('Due date required', 'Please enter when this credit should be paid.');
       return;
     }
 
     setSaving(true);
     try {
-      await confirmCredit({
-        idNumber,
-        customer: activeCustomer,
-        amount,
-        dueDate: pendingDueDate.trim(),
-      });
+      if (modalMode === 'payment') {
+        await recordPayment({ customerId: activeCustomer.id, amount, note: 'Payment recorded in credit ledger' });
+      } else {
+        await confirmCredit({
+          customer: activeCustomer,
+          amount,
+          dueDate: pendingDueDate.trim(),
+          schedule: { frequency: scheduleFrequency },
+        });
+      }
       setIdModalVisible(false);
-      setIdNumber('');
       setPendingAmount('');
       setPendingDueDate('');
+      setScheduleFrequency('one_time');
       setActiveCustomer(null);
     } catch (err) {
-      Alert.alert('Could not log credit', err.message);
+      Alert.alert(modalMode === 'payment' ? 'Could not make payment' : 'Could not log credit', err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCreateCustomer = async () => {
+    setSaving(true);
+    setCustomerFormError('');
+    try {
+      await createCustomer(storeId, customerForm);
+      setCustomerForm({ name: '', phone: '', creditLimit: '' });
+      setCustomerFormVisible(false);
+    } catch (err) {
+      setCustomerFormError(err.message || 'Could not save customer.');
     } finally {
       setSaving(false);
     }
@@ -140,7 +169,7 @@ export default function CreditLedgerScreen({ storeId }) {
               <Ionicons name="folder-open-outline" size={32} color={COLORS.emerald} />
             </View>
             <Text style={styles.emptyText}>No customers on credit yet</Text>
-            <Text style={styles.emptySubtext}>Tap below to record your first credit sale</Text>
+            <Text style={styles.emptySubtext}>Add a customer to start tracking credit</Text>
           </View>
         ) : (
           customers.map((customer) => {
@@ -176,6 +205,11 @@ export default function CreditLedgerScreen({ storeId }) {
                       {status.label}
                     </Text>
                   </View>
+                  {customer.balance > 0 && (
+                    <TouchableOpacity style={styles.paymentLink} onPress={() => openPayment(customer)}>
+                      <Text style={styles.paymentLinkText}>Make Payment</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               </TouchableOpacity>
             );
@@ -185,10 +219,13 @@ export default function CreditLedgerScreen({ storeId }) {
         <TouchableOpacity
           style={styles.recordButton}
           activeOpacity={0.88}
-          onPress={() => openIdVerification({ id: 'new', name: 'New Customer', balance: 0 })}
+          onPress={() => {
+            setCustomerFormError('');
+            setCustomerFormVisible(true);
+          }}
         >
           <Ionicons name="add-circle" size={22} color="#FFFFFF" />
-          <Text style={styles.recordButtonText}>Record New Credit</Text>
+          <Text style={styles.recordButtonText}>Add Customer</Text>
         </TouchableOpacity>
 
         <View style={styles.complianceRow}>
@@ -206,7 +243,7 @@ export default function CreditLedgerScreen({ storeId }) {
                 <View style={styles.modalIconWrap}>
                   <Ionicons name="card" size={18} color={COLORS.emerald} />
                 </View>
-                <Text style={styles.modalTitle}>Verify Credit Sale</Text>
+                <Text style={styles.modalTitle}>{modalMode === 'payment' ? 'Make Payment' : 'Record Credit'}</Text>
               </View>
               <TouchableOpacity onPress={() => setIdModalVisible(false)} disabled={saving} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                 <Ionicons name="close-circle" size={24} color={COLORS.textMuted} />
@@ -214,25 +251,11 @@ export default function CreditLedgerScreen({ storeId }) {
             </View>
 
             <Text style={styles.modalSubtitle}>
-              Enter store owner credentials to authorize credit logging for{' '}
+              {modalMode === 'payment' ? 'Record a repayment for ' : 'Record credit for '}
               <Text style={styles.modalCustomerHighlight}>{activeCustomer?.name}</Text>.
             </Text>
 
-            <Text style={styles.inputLabel}>STORE OWNER ID NUMBER</Text>
-            <View style={styles.inputWrapper}>
-              <Ionicons name="id-card-outline" size={18} color={COLORS.textMuted} style={styles.inputIcon} />
-              <TextInput
-                style={styles.modalInput}
-                placeholder="e.g. 9001015800083"
-                placeholderTextColor={COLORS.textMuted}
-                keyboardType="number-pad"
-                value={idNumber}
-                onChangeText={setIdNumber}
-                editable={!saving}
-              />
-            </View>
-
-            <Text style={styles.inputLabel}>CREDIT AMOUNT (R)</Text>
+            <Text style={styles.inputLabel}>{modalMode === 'payment' ? 'PAYMENT AMOUNT (R)' : 'CREDIT AMOUNT (R)'}</Text>
             <View style={styles.inputWrapper}>
               <Text style={styles.currencyPrefix}>R</Text>
               <TextInput
@@ -246,18 +269,36 @@ export default function CreditLedgerScreen({ storeId }) {
               />
             </View>
 
-            <Text style={styles.inputLabel}>DUE DATE</Text>
-            <View style={styles.inputWrapper}>
-              <Ionicons name="calendar-outline" size={18} color={COLORS.textMuted} style={styles.inputIcon} />
-              <TextInput
-                style={styles.modalInput}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={COLORS.textMuted}
-                value={pendingDueDate}
-                onChangeText={setPendingDueDate}
-                editable={!saving}
-              />
-            </View>
+            {modalMode === 'credit' && (
+              <>
+                <Text style={styles.inputLabel}>DUE DATE</Text>
+                <View style={styles.inputWrapper}>
+                  <Ionicons name="calendar-outline" size={18} color={COLORS.textMuted} style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.modalInput}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor={COLORS.textMuted}
+                    value={pendingDueDate}
+                    onChangeText={setPendingDueDate}
+                    editable={!saving}
+                  />
+                </View>
+                <Text style={styles.inputLabel}>REPAYMENT SCHEDULE</Text>
+                <View style={styles.scheduleRow}>
+                  {['one_time', 'weekly', 'monthly'].map((frequency) => (
+                    <TouchableOpacity
+                      key={frequency}
+                      style={[styles.scheduleOption, scheduleFrequency === frequency && styles.scheduleOptionSelected]}
+                      onPress={() => setScheduleFrequency(frequency)}
+                    >
+                      <Text style={[styles.scheduleOptionText, scheduleFrequency === frequency && styles.scheduleOptionTextSelected]}>
+                        {frequency === 'one_time' ? 'Once' : frequency[0].toUpperCase() + frequency.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            )}
 
             <View style={styles.modalButtonRow}>
               <TouchableOpacity
@@ -276,8 +317,58 @@ export default function CreditLedgerScreen({ storeId }) {
                 {saving ? (
                   <ActivityIndicator color="#FFFFFF" size="small" />
                 ) : (
-                  <Text style={styles.modalButtonConfirmText}>Confirm & Log</Text>
+                  <Text style={styles.modalButtonConfirmText}>{modalMode === 'payment' ? 'Save Payment' : 'Confirm & Log'}</Text>
                 )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={customerFormVisible} transparent animationType="fade" onRequestClose={() => setCustomerFormVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add Customer</Text>
+              <TouchableOpacity onPress={() => setCustomerFormVisible(false)} disabled={saving}>
+                <Ionicons name="close-circle" size={24} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            </View>
+            {[
+              ['name', 'Customer name', 'default'],
+              ['phone', 'Phone number', 'phone-pad'],
+              ['creditLimit', 'Credit limit (R)', 'decimal-pad'],
+            ].map(([key, label, keyboardType]) => (
+              <View key={key}>
+                <Text style={styles.inputLabel}>{label.toUpperCase()}</Text>
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    style={styles.modalInput}
+                    placeholder={label}
+                    placeholderTextColor={COLORS.textMuted}
+                    keyboardType={keyboardType}
+                    value={customerForm[key]}
+                    onChangeText={(value) => setCustomerForm((current) => ({ ...current, [key]: value }))}
+                    editable={!saving}
+                  />
+                </View>
+              </View>
+            ))}
+            {customerFormError ? <Text style={styles.customerFormError}>{customerFormError}</Text> : null}
+            <View style={styles.modalButtonRow}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonCancel]}
+                onPress={() => setCustomerFormVisible(false)}
+                disabled={saving}
+              >
+                <Text style={styles.modalButtonCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonConfirm]}
+                onPress={handleCreateCustomer}
+                disabled={saving}
+              >
+                {saving ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.modalButtonConfirmText}>Save Customer</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -321,6 +412,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.textMuted,
     textAlign: 'center',
+  },
+  customerFormError: {
+    color: COLORS.danger,
+    fontSize: 12,
+    marginBottom: 6,
   },
   container: {
     padding: 16,
@@ -534,6 +630,15 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: 5,
   },
+  paymentLink: {
+    paddingVertical: 2,
+    paddingHorizontal: 4,
+  },
+  paymentLinkText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: COLORS.emerald,
+  },
   customerBalance: {
     fontSize: 16,
     fontWeight: '800',
@@ -660,6 +765,31 @@ const styles = StyleSheet.create({
     height: 48,
     paddingHorizontal: 12,
     marginBottom: 14,
+  },
+  scheduleRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  scheduleOption: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  scheduleOptionSelected: {
+    borderColor: COLORS.emerald,
+    backgroundColor: COLORS.emeraldBg,
+  },
+  scheduleOptionText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+  },
+  scheduleOptionTextSelected: {
+    color: COLORS.emerald,
   },
   inputIcon: {
     marginRight: 8,

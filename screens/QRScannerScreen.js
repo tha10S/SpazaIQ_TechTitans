@@ -1,32 +1,60 @@
-  import React, { useState } from 'react';
+  import React, { useEffect, useState } from 'react';
   import { Modal, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
   import { CameraView, useCameraPermissions } from 'expo-camera';
   import { Ionicons } from '@expo/vector-icons';
 
-  export default function QRScannerScreen({ onClose, onScanned }) {
+  export default function QRScannerScreen({
+    visible = true,
+    onClose,
+    onScanned,
+    navigation,
+    route,
+  }) {
     const [permission, requestPermission] = useCameraPermissions();
     const [hasScanned, setHasScanned] = useState(false);
     const [manualValue, setManualValue] = useState('');
 
-    const handleScan = ({ data }) => {
+    useEffect(() => {
+      if (visible) setHasScanned(false);
+    }, [visible]);
+
+    const closeScanner = () => {
+      if (onClose) {
+        onClose();
+      } else {
+        navigation.goBack();
+      }
+    };
+
+    const returnScan = (value) => {
       if (hasScanned) return;
       setHasScanned(true);
-      onScanned(data);
+      if (onScanned) {
+        onScanned(value);
+      } else {
+        navigation.navigate('MainTabs', {
+          screen: route?.params?.returnTo || 'Home',
+          params: { scannedCode: value },
+        });
+      }
+    };
+
+    const handleScan = ({ data }) => {
+      returnScan(data);
     };
 
     const handleManualSubmit = () => {
       const value = manualValue.trim();
       if (!value) return;
-      setHasScanned(true);
-      onScanned(value);
+      returnScan(value);
     };
 
     return (
-      <Modal animationType="slide" onRequestClose={onClose}>
+      <Modal visible={visible} animationType="slide" onRequestClose={closeScanner}>
         <SafeAreaView style={styles.container}>
           <View style={styles.header}>
-            <Text style={styles.title}>Scan product QR</Text>
-            <TouchableOpacity onPress={onClose} accessibilityLabel="Close scanner">
+            <Text style={styles.title}>Scan product barcode or QR code</Text>
+            <TouchableOpacity onPress={closeScanner} accessibilityLabel="Close scanner">
               <Ionicons name="close" size={28} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
@@ -50,12 +78,12 @@
                 onBarcodeScanned={handleScan}
               />
               <View style={styles.frame} />
-              <Text style={styles.helper}>Point the camera at a product QR code</Text>
+              <Text style={styles.helper}>Point the camera at a product barcode or QR code</Text>
             </View>
           )}
 
           <View style={styles.manualPanel}>
-            <Text style={styles.manualTitle}>No camera? Enter the QR value</Text>
+            <Text style={styles.manualTitle}>No camera? Enter the barcode or QR value</Text>
             <View style={styles.manualRow}>
               <TextInput
                 style={styles.manualInput}

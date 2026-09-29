@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRoute, useNavigation } from '@react-navigation/native';
-import { useTheme } from '../ThemeContext';
+import { useTheme } from '../config/ThemeContext';
 
 
 const suppliers = [
