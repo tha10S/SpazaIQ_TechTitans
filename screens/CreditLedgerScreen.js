@@ -22,7 +22,7 @@ const BRAND_GREEN = '#004B49'; // solid buttons and hero card keep brand green i
 
 const formatR = (n) => `R ${Number(n || 0).toFixed(2)}`;
 
-export default function CreditLedgerScreen({ route }) {
+export default function CreditLedgerScreen({ route, navigation }) {
   const { colors } = useTheme();
 
   // Same names as the old static COLORS object, now driven by the theme
@@ -61,12 +61,27 @@ export default function CreditLedgerScreen({ route }) {
   const [pendingAmount, setPendingAmount] = useState('');
   const [pendingDueDate, setPendingDueDate] = useState('');
   const [scheduleFrequency, setScheduleFrequency] = useState('one_time');
+  const [durationMonths, setDurationMonths] = useState('');
+  const [durationWeeks, setDurationWeeks] = useState('');
   const [saving, setSaving] = useState(false);
   const [customerFormVisible, setCustomerFormVisible] = useState(false);
   const [customerForm, setCustomerForm] = useState({ name: '', phone: '', creditLimit: '' });
   const [customerFormError, setCustomerFormError] = useState('');
 
   const totalOutstanding = customers.reduce((sum, c) => sum + (c.balance || 0), 0);
+  const repaymentPeriods = scheduleFrequency === 'monthly'
+    ? Number(durationMonths)
+    : scheduleFrequency === 'weekly'
+      ? Number(durationWeeks)
+      : 1;
+  const installmentAmount = Number.isFinite(Number(pendingAmount)) && repaymentPeriods > 0
+    ? Number(pendingAmount) / repaymentPeriods
+    : 0;
+
+  const setNumericInput = (setter, value, allowDecimal = false) => {
+    const pattern = allowDecimal ? /^\d*\.?\d{0,2}$/ : /^\d*$/;
+    if (pattern.test(value)) setter(value);
+  };
 
   const openIdVerification = (customer) => {
     setModalMode('credit');
@@ -82,13 +97,21 @@ export default function CreditLedgerScreen({ route }) {
   };
 
   const handleVerifyAndAppend = async () => {
-    const amount = parseFloat(pendingAmount);
-    if (!amount || amount <= 0) {
-      Alert.alert('Invalid amount', 'Please enter a valid amount.');
+    const amount = Number(pendingAmount);
+    if (!pendingAmount.trim() || !Number.isFinite(amount) || amount <= 0) {
+      Alert.alert('Invalid amount', 'Enter an amount using numbers only, greater than zero.');
       return;
     }
     if (modalMode === 'credit' && !pendingDueDate.trim()) {
       Alert.alert('Due date required', 'Please enter when this credit should be paid.');
+      return;
+    }
+    if (modalMode === 'credit' && scheduleFrequency === 'monthly' && (!Number.isInteger(Number(durationMonths)) || Number(durationMonths) < 1 || Number(durationMonths) > 12)) {
+      Alert.alert('Invalid duration', 'Enter a whole number of months between 1 and 12.');
+      return;
+    }
+    if (modalMode === 'credit' && scheduleFrequency === 'weekly' && (!Number.isInteger(Number(durationWeeks)) || Number(durationWeeks) < 1)) {
+      Alert.alert('Invalid duration', 'Enter a whole number of weeks greater than zero.');
       return;
     }
 
@@ -101,13 +124,21 @@ export default function CreditLedgerScreen({ route }) {
           customer: activeCustomer,
           amount,
           dueDate: pendingDueDate.trim(),
-          schedule: { frequency: scheduleFrequency },
+          schedule: {
+            frequency: scheduleFrequency,
+            totalPayments: repaymentPeriods,
+            installmentAmount: Number(installmentAmount.toFixed(2)),
+            ...(scheduleFrequency === 'monthly' ? { durationMonths: Number(durationMonths) } : {}),
+            ...(scheduleFrequency === 'weekly' ? { durationWeeks: Number(durationWeeks) } : {}),
+          },
         });
       }
       setIdModalVisible(false);
       setPendingAmount('');
       setPendingDueDate('');
       setScheduleFrequency('one_time');
+      setDurationMonths('');
+      setDurationWeeks('');
       setActiveCustomer(null);
     } catch (err) {
       Alert.alert(modalMode === 'payment' ? 'Could not make payment' : 'Could not log credit', err.message);
@@ -186,6 +217,16 @@ export default function CreditLedgerScreen({ route }) {
             </Text>
           </View>
         </View>
+
+        <TouchableOpacity
+          style={styles.trackerButton}
+          activeOpacity={0.85}
+          onPress={() => navigation.navigate('RepaymentTracker', { storeId })}
+        >
+          <Ionicons name="calendar" size={18} color={COLORS.emerald} />
+          <Text style={styles.trackerButtonText}>Repayment Tracker</Text>
+          <Ionicons name="chevron-forward" size={17} color={COLORS.emerald} />
+        </TouchableOpacity>
 
         <Text style={styles.sectionTitle}>CUSTOMER BALANCES</Text>
 
@@ -290,7 +331,7 @@ export default function CreditLedgerScreen({ route }) {
                 placeholderTextColor={COLORS.textMuted}
                 keyboardType="decimal-pad"
                 value={pendingAmount}
-                onChangeText={setPendingAmount}
+                onChangeText={(value) => setNumericInput(setPendingAmount, value, true)}
                 editable={!saving}
               />
             </View>
@@ -315,13 +356,42 @@ export default function CreditLedgerScreen({ route }) {
                     <TouchableOpacity
                       key={frequency}
                       style={[styles.scheduleOption, scheduleFrequency === frequency && styles.scheduleOptionSelected]}
-                      onPress={() => setScheduleFrequency(frequency)}
+                      onPress={() => {
+                        setScheduleFrequency(frequency);
+                        setDurationMonths('');
+                        setDurationWeeks('');
+                      }}
                     >
                       <Text style={[styles.scheduleOptionText, scheduleFrequency === frequency && styles.scheduleOptionTextSelected]}>
                         {frequency === 'one_time' ? 'Once' : frequency[0].toUpperCase() + frequency.slice(1)}
                       </Text>
                     </TouchableOpacity>
                   ))}
+                </View>
+                {scheduleFrequency !== 'one_time' && (
+                  <>
+                    <Text style={styles.inputLabel}>PLAN DURATION ({scheduleFrequency === 'monthly' ? 'MONTHS' : 'WEEKS'})</Text>
+                    <View style={styles.inputWrapper}>
+                      <Ionicons name="time-outline" size={18} color={COLORS.textMuted} style={styles.inputIcon} />
+                      <TextInput
+                        style={styles.modalInput}
+                        placeholder={scheduleFrequency === 'monthly' ? '1 to 12' : 'e.g. 12'}
+                        placeholderTextColor={COLORS.textMuted}
+                        keyboardType="number-pad"
+                        value={scheduleFrequency === 'monthly' ? durationMonths : durationWeeks}
+                        onChangeText={(value) => setNumericInput(scheduleFrequency === 'monthly' ? setDurationMonths : setDurationWeeks, value)}
+                        editable={!saving}
+                      />
+                    </View>
+                  </>
+                )}
+                <View style={styles.installmentPreview}>
+                  <Ionicons name="calculator-outline" size={17} color={COLORS.emerald} />
+                  <Text style={styles.installmentPreviewText}>
+                    {scheduleFrequency === 'one_time'
+                      ? `One payment of ${formatR(Number(pendingAmount) || 0)}`
+                      : `${formatR(installmentAmount)} ${scheduleFrequency === 'monthly' ? 'per month' : 'per week'} × ${repaymentPeriods || 0} payments`}
+                  </Text>
                 </View>
               </>
             )}
@@ -552,6 +622,24 @@ const makeStyles = (COLORS) =>
       letterSpacing: 0.8,
       marginBottom: 12,
       marginTop: 4,
+    },
+    trackerButton: {
+      minHeight: 48,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingHorizontal: 14,
+      marginBottom: 16,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: COLORS.border,
+      backgroundColor: COLORS.cardBg,
+    },
+    trackerButtonText: {
+      flex: 1,
+      fontSize: 14,
+      fontWeight: '700',
+      color: COLORS.emerald,
     },
 
     /* Empty State */
@@ -803,6 +891,22 @@ const makeStyles = (COLORS) =>
     },
     scheduleOptionTextSelected: {
       color: COLORS.emerald,
+    },
+    installmentPreview: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: COLORS.emeraldBg,
+      borderRadius: 8,
+      paddingHorizontal: 11,
+      paddingVertical: 10,
+      marginTop: 10,
+    },
+    installmentPreviewText: {
+      flex: 1,
+      color: COLORS.emerald,
+      fontSize: 12,
+      fontWeight: '700',
     },
     inputIcon: {
       marginRight: 8,

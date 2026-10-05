@@ -49,7 +49,22 @@ export async function fetchLedgerEntries(storeId, customerId) {
   return snapshot.docs.map(mapLedgerEntry);
 }
 
-export async function makePayment({ storeId, customerId, amount, idempotencyKey, note = '' }) {
+export async function fetchRepaymentTrackerData(storeId) {
+  const authenticatedStoreId = assertStoreId(storeId);
+  const [customersSnapshot, schedulesSnapshot, ledgerSnapshot] = await Promise.all([
+    getDocs(query(customersCollection(authenticatedStoreId), orderBy('name'))),
+    getDocs(collection(db, ...storeCollectionPath(authenticatedStoreId, 'repaymentSchedules'))),
+    getDocs(query(ledgerCollection(authenticatedStoreId), orderBy('createdAt', 'desc'))),
+  ]);
+
+  return {
+    customers: customersSnapshot.docs.map(mapCustomer),
+    schedules: schedulesSnapshot.docs.map((snapshot) => ({ id: snapshot.id, ...snapshot.data() })),
+    ledgerEntries: ledgerSnapshot.docs.map(mapLedgerEntry),
+  };
+}
+
+export async function makePayment({ storeId, customerId, amount, idempotencyKey, note = '', paymentMethod = 'Cash', paymentDate }) {
   const authenticatedStoreId = assertStoreId(storeId);
   const numericAmount = Number(amount);
   if (!customerId || !Number.isFinite(numericAmount) || numericAmount <= 0) {
@@ -100,6 +115,8 @@ export async function makePayment({ storeId, customerId, amount, idempotencyKey,
         amount: appliedAmount,
       })),
       note,
+      paymentMethod,
+      paymentDate: paymentDate || new Date().toISOString().slice(0, 10),
       idempotencyKey,
       createdAt: serverTimestamp(),
     });
@@ -131,6 +148,23 @@ export async function addCreditTransaction({ storeId, customerId, customerName, 
   const authenticatedStoreId = assertStoreId(storeId);
   const numericAmount = Number(amount);
   if (!customerId || !Number.isFinite(numericAmount) || numericAmount <= 0) throw new Error('Enter a valid credit amount.');
+  const frequency = schedule?.frequency ?? 'one_time';
+  const periodCount = frequency === 'monthly'
+    ? Number(schedule.durationMonths ?? schedule.totalPayments)
+    : frequency === 'weekly'
+      ? Number(schedule.durationWeeks ?? schedule.totalPayments)
+      : 1;
+  if (!['one_time', 'monthly', 'weekly'].includes(frequency)) throw new Error('Choose a valid repayment frequency.');
+  if (frequency !== 'one_time' && (!Number.isInteger(periodCount) || periodCount < 1)) {
+    throw new Error(`Enter a whole number of ${frequency === 'monthly' ? 'months' : 'weeks'} greater than zero.`);
+  }
+  if (frequency === 'monthly' && periodCount > 12) throw new Error('Monthly repayment plans cannot exceed 12 months.');
+  const repaymentSchedule = schedule ? {
+    ...schedule,
+    frequency,
+    totalPayments: periodCount,
+    installmentAmount: Number((numericAmount / periodCount).toFixed(2)),
+  } : null;
 
   return runTransaction(db, async (transaction) => {
     const operation = await transaction.get(operationRef(authenticatedStoreId, idempotencyKey));
@@ -149,7 +183,7 @@ export async function addCreditTransaction({ storeId, customerId, customerName, 
     if (creditLimit > 0 && balance + numericAmount > creditLimit) throw new Error(`Credit limit exceeded. Available: R ${(creditLimit - balance).toFixed(2)}.`);
 
     const ledger = doc(ledgerCollection(authenticatedStoreId));
-    const scheduleReference = schedule
+    const scheduleReference = repaymentSchedule
       ? doc(collection(db, ...storeCollectionPath(authenticatedStoreId, 'repaymentSchedules')))
       : null;
     const result = { id: ledger.id, customerId: customer.id, amount: numericAmount };
@@ -159,7 +193,7 @@ export async function addCreditTransaction({ storeId, customerId, customerName, 
       type: 'credit',
       amount: numericAmount,
       dueDate: dueDate || null,
-      schedule: schedule || null,
+      schedule: repaymentSchedule,
       scheduleId: scheduleReference?.id ?? null,
       idempotencyKey,
       createdAt: serverTimestamp(),
@@ -176,7 +210,7 @@ export async function addCreditTransaction({ storeId, customerId, customerName, 
     }, { merge: true });
     if (scheduleReference) {
       transaction.set(scheduleReference, {
-        ...schedule,
+        ...repaymentSchedule,
         storeId: authenticatedStoreId,
         customerId: customer.id,
         ledgerId: ledger.id,
