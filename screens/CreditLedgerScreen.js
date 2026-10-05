@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -13,19 +13,45 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '../config/ThemeContext';
 import { useCustomerBalances } from '../hooks/useCustomerBalances';
 import { getAuthenticatedStoreId } from '../services/firestore/paths';
 import { createCustomer } from '../services/creditService';
 
-const STATUS_CONFIG = {
-  good: { label: 'Good', color: '#004B49', bg: '#E6F4F1' },
-  fair: { label: 'Fair', color: '#D97706', bg: '#FEF3C7' },
-  at_risk: { label: 'At Risk', color: '#DC2626', bg: '#FEE2E2' },
-};
+const BRAND_GREEN = '#004B49'; // solid buttons and hero card keep brand green in both themes
 
 const formatR = (n) => `R ${Number(n || 0).toFixed(2)}`;
 
 export default function CreditLedgerScreen({ route, navigation }) {
+  const { colors } = useTheme();
+
+  // Same names as the old static COLORS object, now driven by the theme
+  const COLORS = useMemo(
+    () => ({
+      emerald: colors.primary,
+      emeraldBg: colors.primaryLight,
+      emeraldDark: '#003432', // hero card background (always dark green)
+      emeraldLight: '#A7C9C7', // text/icons on the hero card
+      bg: colors.background,
+      cardBg: colors.card,
+      textDark: colors.textPrimary,
+      textMuted: colors.textMuted,
+      border: colors.border,
+      danger: colors.danger,
+    }),
+    [colors]
+  );
+  const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
+
+  const STATUS_CONFIG = useMemo(
+    () => ({
+      good: { label: 'Good', color: colors.primary, bg: colors.primaryLight },
+      fair: { label: 'Fair', color: '#F59E0B', bg: 'rgba(245, 158, 11, 0.15)' },
+      at_risk: { label: 'At Risk', color: colors.danger, bg: 'rgba(220, 38, 38, 0.15)' },
+    }),
+    [colors]
+  );
+
   const storeId = route?.params?.storeId || getAuthenticatedStoreId();
   const { customers, loading, error, confirmCredit, recordPayment } = useCustomerBalances(storeId);
 
@@ -134,6 +160,7 @@ export default function CreditLedgerScreen({ route, navigation }) {
       setSaving(false);
     }
   };
+
   if (loading) {
     return (
       <SafeAreaView style={[styles.safeArea, styles.centered]}>
@@ -178,9 +205,9 @@ export default function CreditLedgerScreen({ route, navigation }) {
               <Text style={styles.heroBadgeText}>Active Ledger</Text>
             </View>
           </View>
-          
+
           <Text style={styles.heroAmount}>{formatR(totalOutstanding)}</Text>
-          
+
           <View style={styles.heroFooter}>
             <View style={styles.heroFooterIconWrap}>
               <Ionicons name="analytics" size={14} color={COLORS.emeraldLight} />
@@ -447,496 +474,483 @@ export default function CreditLedgerScreen({ route, navigation }) {
   );
 }
 
-const COLORS = {
-  emerald: '#004B49',
-  emeraldDark: '#003432',
-  emeraldLight: '#A7C9C7',
-  emeraldBg: '#E6F4F1',
-  bg: '#F9FAFB',
-  cardBg: '#FFFFFF',
-  textDark: '#111827',
-  textMuted: '#6B7280',
-  border: '#E5E7EB',
-  danger: '#DC2626',
-  dangerBg: '#FEE2E2',
-};
+const makeStyles = (COLORS) =>
+  StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: COLORS.bg,
+    },
+    centered: {
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 24,
+    },
+    errorText: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: COLORS.textDark,
+      marginBottom: 4,
+    },
+    errorSubtext: {
+      fontSize: 13,
+      color: COLORS.textMuted,
+      textAlign: 'center',
+    },
+    customerFormError: {
+      color: COLORS.danger,
+      fontSize: 12,
+      marginBottom: 6,
+    },
+    container: {
+      padding: 16,
+      paddingBottom: 40,
+    },
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: COLORS.bg,
-  },
-  centered: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  errorText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.textDark,
-    marginBottom: 4,
-  },
-  errorSubtext: {
-    fontSize: 13,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-  },
-  customerFormError: {
-    color: COLORS.danger,
-    fontSize: 12,
-    marginBottom: 6,
-  },
-  container: {
-    padding: 16,
-    paddingBottom: 40,
-  },
+    /* Header */
+    headerRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    title: {
+      fontSize: 24,
+      fontWeight: '800',
+      color: COLORS.textDark,
+      letterSpacing: -0.4,
+    },
+    subtitle: {
+      fontSize: 13,
+      color: COLORS.textMuted,
+      marginTop: 2,
+      fontWeight: '500',
+    },
+    badgeContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: COLORS.emeraldBg,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: COLORS.border,
+      gap: 6,
+    },
+    badgeText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: COLORS.emerald,
+    },
 
-  /* Header */
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: COLORS.textDark,
-    letterSpacing: -0.4,
-  },
-  subtitle: {
-    fontSize: 13,
-    color: COLORS.textMuted,
-    marginTop: 2,
-    fontWeight: '500',
-  },
-  badgeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.emeraldBg,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: COLORS.emeraldLight,
-    gap: 6,
-  },
-  badgeText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.emerald,
-  },
+    /* Hero Total Card */
+    heroCard: {
+      backgroundColor: COLORS.emeraldDark,
+      borderRadius: 20,
+      padding: 20,
+      marginBottom: 20,
+      borderWidth: 1,
+      borderColor: BRAND_GREEN,
+      ...Platform.select({
+        ios: { shadowColor: BRAND_GREEN, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.25, shadowRadius: 10 },
+        android: { elevation: 6 },
+      }),
+    },
+    heroHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    heroLabel: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: COLORS.emeraldLight,
+      letterSpacing: 1,
+    },
+    heroBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: 'rgba(255, 255, 255, 0.15)',
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 12,
+      gap: 4,
+    },
+    heroBadgeText: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
+    heroAmount: {
+      fontSize: 34,
+      fontWeight: '800',
+      color: '#FFFFFF',
+      marginBottom: 16,
+      letterSpacing: -0.5,
+    },
+    heroFooter: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingTop: 12,
+      borderTopWidth: 1,
+      borderTopColor: 'rgba(255, 255, 255, 0.12)',
+      gap: 8,
+    },
+    heroFooterIconWrap: {
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    heroFooterText: {
+      fontSize: 12,
+      color: '#D1E8E6',
+      fontWeight: '500',
+    },
+    heroFooterHighlight: {
+      fontWeight: '800',
+      color: '#FFFFFF',
+    },
 
-  /* Emerald Hero Total Card */
-  heroCard: {
-    backgroundColor: COLORS.emeraldDark,
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: COLORS.emerald,
-    ...Platform.select({
-      ios: { shadowColor: COLORS.emerald, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.25, shadowRadius: 10 },
-      android: { elevation: 6 },
-    }),
-  },
-  heroHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  heroLabel: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: COLORS.emeraldLight,
-    letterSpacing: 1,
-  },
-  heroBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 12,
-    gap: 4,
-  },
-  heroBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  heroAmount: {
-    fontSize: 34,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    marginBottom: 16,
-    letterSpacing: -0.5,
-  },
-  heroFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.12)',
-    gap: 8,
-  },
-  heroFooterIconWrap: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  heroFooterText: {
-    fontSize: 12,
-    color: '#D1E8E6',
-    fontWeight: '500',
-  },
-  heroFooterHighlight: {
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
+    /* Section Header */
+    sectionTitle: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: COLORS.textMuted,
+      letterSpacing: 0.8,
+      marginBottom: 12,
+      marginTop: 4,
+    },
+    trackerButton: {
+      minHeight: 48,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingHorizontal: 14,
+      marginBottom: 16,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: COLORS.border,
+      backgroundColor: COLORS.cardBg,
+    },
+    trackerButtonText: {
+      flex: 1,
+      fontSize: 14,
+      fontWeight: '700',
+      color: COLORS.emerald,
+    },
 
-  /* Section Header */
-  sectionTitle: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: COLORS.textMuted,
-    letterSpacing: 0.8,
-    marginBottom: 12,
-    marginTop: 4,
-  },
-  trackerButton: {
-    minHeight: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 14,
-    marginBottom: 16,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.emeraldLight,
-    backgroundColor: COLORS.cardBg,
-  },
-  trackerButtonText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.emerald,
-  },
+    /* Empty State */
+    emptyCard: {
+      backgroundColor: COLORS.cardBg,
+      borderRadius: 16,
+      paddingVertical: 32,
+      paddingHorizontal: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: COLORS.border,
+      marginBottom: 16,
+    },
+    emptyIconCircle: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: COLORS.emeraldBg,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 10,
+    },
+    emptyText: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: COLORS.textDark,
+    },
+    emptySubtext: {
+      fontSize: 12,
+      color: COLORS.textMuted,
+      marginTop: 3,
+    },
 
-  /* Empty State */
-  emptyCard: {
-    backgroundColor: COLORS.cardBg,
-    borderRadius: 16,
-    paddingVertical: 32,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    marginBottom: 16,
-  },
-  emptyIconCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: COLORS.emeraldBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  emptyText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.textDark,
-  },
-  emptySubtext: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginTop: 3,
-  },
+    /* Customer Card */
+    customerCard: {
+      backgroundColor: COLORS.cardBg,
+      borderRadius: 16,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      marginBottom: 12,
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: COLORS.border,
+      ...Platform.select({
+        ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 4 },
+        android: { elevation: 1 },
+      }),
+    },
+    avatarCircle: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      backgroundColor: COLORS.emeraldBg,
+      borderWidth: 1,
+      borderColor: COLORS.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 12,
+    },
+    avatarText: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: COLORS.emerald,
+    },
+    customerInfo: {
+      flex: 1,
+      paddingRight: 8,
+    },
+    customerName: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: COLORS.textDark,
+      letterSpacing: -0.2,
+    },
+    dueRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 4,
+      gap: 4,
+    },
+    customerDue: {
+      fontSize: 12,
+      fontWeight: '500',
+      color: COLORS.textMuted,
+    },
+    customerRight: {
+      alignItems: 'flex-end',
+      gap: 5,
+    },
+    paymentLink: {
+      paddingVertical: 2,
+      paddingHorizontal: 4,
+    },
+    paymentLinkText: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: COLORS.emerald,
+    },
+    customerBalance: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: COLORS.textDark,
+    },
+    statusPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 12,
+    },
+    statusDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      marginRight: 6,
+    },
+    statusText: {
+      fontSize: 11,
+      fontWeight: '800',
+    },
 
-  /* Customer Card */
-  customerCard: {
-    backgroundColor: COLORS.cardBg,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    marginBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    ...Platform.select({
-      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 4 },
-      android: { elevation: 1 },
-    }),
-  },
-  avatarCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: COLORS.emeraldBg,
-    borderWidth: 1,
-    borderColor: COLORS.emeraldLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  avatarText: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: COLORS.emerald,
-  },
-  customerInfo: {
-    flex: 1,
-    paddingRight: 8,
-  },
-  customerName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.textDark,
-    letterSpacing: -0.2,
-  },
-  dueRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-    gap: 4,
-  },
-  customerDue: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: COLORS.textMuted,
-  },
-  customerRight: {
-    alignItems: 'flex-end',
-    gap: 5,
-  },
-  paymentLink: {
-    paddingVertical: 2,
-    paddingHorizontal: 4,
-  },
-  paymentLinkText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: COLORS.emerald,
-  },
-  customerBalance: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: COLORS.textDark,
-  },
-  statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginRight: 6,
-  },
-  statusText: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
+    /* Action Buttons */
+    recordButton: {
+      flexDirection: 'row',
+      height: 52,
+      borderRadius: 16,
+      backgroundColor: BRAND_GREEN,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 10,
+      gap: 8,
+      ...Platform.select({
+        ios: { shadowColor: BRAND_GREEN, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 6 },
+        android: { elevation: 4 },
+      }),
+    },
+    recordButtonText: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: '#FFFFFF',
+      letterSpacing: 0.2,
+    },
+    complianceRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 18,
+      gap: 6,
+    },
+    complianceText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: COLORS.textMuted,
+    },
 
-  /* Action Buttons */
-  recordButton: {
-    flexDirection: 'row',
-    height: 52,
-    borderRadius: 16,
-    backgroundColor: COLORS.emerald,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 10,
-    gap: 8,
-    ...Platform.select({
-      ios: { shadowColor: COLORS.emerald, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 6 },
-      android: { elevation: 4 },
-    }),
-  },
-  recordButtonText: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    letterSpacing: 0.2,
-  },
-  complianceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 18,
-    gap: 6,
-  },
-  complianceText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.textMuted,
-  },
-
-  /* Modal */
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.6)',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  modalCard: {
-    backgroundColor: COLORS.cardBg,
-    borderRadius: 20,
-    padding: 22,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    ...Platform.select({
-      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.2, shadowRadius: 15 },
-      android: { elevation: 10 },
-    }),
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  modalTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  modalIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: COLORS.emeraldBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.textDark,
-  },
-  modalSubtitle: {
-    fontSize: 13,
-    color: COLORS.textMuted,
-    marginBottom: 18,
-    lineHeight: 18,
-  },
-  modalCustomerHighlight: {
-    fontWeight: '700',
-    color: COLORS.emerald,
-  },
-  inputLabel: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: COLORS.textMuted,
-    marginBottom: 6,
-    letterSpacing: 0.6,
-  },
-  inputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.bg,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 12,
-    height: 48,
-    paddingHorizontal: 12,
-    marginBottom: 14,
-  },
-  scheduleRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 8,
-  },
-  scheduleOption: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  scheduleOptionSelected: {
-    borderColor: COLORS.emerald,
-    backgroundColor: COLORS.emeraldBg,
-  },
-  scheduleOptionText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.textMuted,
-  },
-  scheduleOptionTextSelected: {
-    color: COLORS.emerald,
-  },
-  installmentPreview: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: COLORS.emeraldBg,
-    borderRadius: 8,
-    paddingHorizontal: 11,
-    paddingVertical: 10,
-    marginTop: 10,
-  },
-  installmentPreviewText: {
-    flex: 1,
-    color: COLORS.emerald,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  inputIcon: {
-    marginRight: 8,
-  },
-  currencyPrefix: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.emerald,
-    marginRight: 8,
-  },
-  modalInput: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textDark,
-  },
-  modalButtonRow: {
-    flexDirection: 'row',
-    marginTop: 8,
-    gap: 12,
-  },
-  modalButton: {
-    flex: 1,
-    height: 48,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalButtonCancel: {
-    backgroundColor: COLORS.bg,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  modalButtonCancelText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.textMuted,
-  },
-  modalButtonConfirm: {
-    backgroundColor: COLORS.emerald,
-  },
-  modalButtonConfirmText: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-});
+    /* Modal */
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(15, 23, 42, 0.6)',
+      justifyContent: 'center',
+      padding: 20,
+    },
+    modalCard: {
+      backgroundColor: COLORS.cardBg,
+      borderRadius: 20,
+      padding: 22,
+      borderWidth: 1,
+      borderColor: COLORS.border,
+      ...Platform.select({
+        ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.2, shadowRadius: 15 },
+        android: { elevation: 10 },
+      }),
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    modalTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    modalIconWrap: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: COLORS.emeraldBg,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    modalTitle: {
+      fontSize: 18,
+      fontWeight: '800',
+      color: COLORS.textDark,
+    },
+    modalSubtitle: {
+      fontSize: 13,
+      color: COLORS.textMuted,
+      marginBottom: 18,
+      lineHeight: 18,
+    },
+    modalCustomerHighlight: {
+      fontWeight: '700',
+      color: COLORS.emerald,
+    },
+    inputLabel: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: COLORS.textMuted,
+      marginBottom: 6,
+      letterSpacing: 0.6,
+    },
+    inputWrapper: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: COLORS.bg,
+      borderWidth: 1,
+      borderColor: COLORS.border,
+      borderRadius: 12,
+      height: 48,
+      paddingHorizontal: 12,
+      marginBottom: 14,
+    },
+    scheduleRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginBottom: 8,
+    },
+    scheduleOption: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: COLORS.border,
+      borderRadius: 10,
+      paddingVertical: 10,
+      alignItems: 'center',
+    },
+    scheduleOptionSelected: {
+      borderColor: COLORS.emerald,
+      backgroundColor: COLORS.emeraldBg,
+    },
+    scheduleOptionText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: COLORS.textMuted,
+    },
+    scheduleOptionTextSelected: {
+      color: COLORS.emerald,
+    },
+    installmentPreview: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: COLORS.emeraldBg,
+      borderRadius: 8,
+      paddingHorizontal: 11,
+      paddingVertical: 10,
+      marginTop: 10,
+    },
+    installmentPreviewText: {
+      flex: 1,
+      color: COLORS.emerald,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    inputIcon: {
+      marginRight: 8,
+    },
+    currencyPrefix: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: COLORS.emerald,
+      marginRight: 8,
+    },
+    modalInput: {
+      flex: 1,
+      fontSize: 14,
+      fontWeight: '600',
+      color: COLORS.textDark,
+    },
+    modalButtonRow: {
+      flexDirection: 'row',
+      marginTop: 8,
+      gap: 12,
+    },
+    modalButton: {
+      flex: 1,
+      height: 48,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    modalButtonCancel: {
+      backgroundColor: COLORS.bg,
+      borderWidth: 1,
+      borderColor: COLORS.border,
+    },
+    modalButtonCancelText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: COLORS.textMuted,
+    },
+    modalButtonConfirm: {
+      backgroundColor: BRAND_GREEN,
+    },
+    modalButtonConfirmText: {
+      fontSize: 14,
+      fontWeight: '800',
+      color: '#FFFFFF',
+    },
+  });

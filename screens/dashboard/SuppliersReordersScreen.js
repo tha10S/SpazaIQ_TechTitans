@@ -1,22 +1,27 @@
-import { useState } from "react";
-import {Pressable, ScrollView, StyleSheet, Text, TextInput, View} from "react-native";
+import { useMemo, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useTheme } from "../../config/ThemeContext";
 
-const GREEN = "#004B49";
-const LIGHT_GREEN = "#E6F4F1";
+const BRAND_GREEN = "#004B49"; // solid buttons keep brand green in both themes
 
-const categoryColors = {
-  Groceries: { bg: "#E6F4F1", text: "#004B49" },
-  Beverages: { bg: "#EFF6FF", text: "#2563EB" },
-  Bakery: { bg: "#FFFBEB", text: "#D97706" },
-  Snacks: { bg: "#FEE2E2", text: "#DC2626" },
-};
+const CATEGORIES = ["Groceries", "Beverages", "Bakery", "Snacks"];
 
-const statusColors = {
-  Delivered: { bg: "#E6F4F1", text: GREEN },
-  Pending: { bg: "#FDF3DC", text: "#B8860B" },
-};
+// Badge colors are built from the theme so they work in light and dark mode
+function getCategoryColors(colors) {
+  return {
+    Groceries: { bg: colors.primaryLight, text: colors.primary },
+    Beverages: { bg: "rgba(59, 130, 246, 0.15)", text: "#3B82F6" },
+    Bakery: { bg: "rgba(245, 158, 11, 0.15)", text: "#F59E0B" },
+    Snacks: { bg: "rgba(220, 38, 38, 0.15)", text: colors.danger },
+  };
+}
 
-const CATEGORIES = Object.keys(categoryColors);
+function getStatusColors(colors) {
+  return {
+    Delivered: { bg: colors.primaryLight, text: colors.primary },
+    Pending: { bg: "rgba(245, 158, 11, 0.15)", text: "#F59E0B" },
+  };
+}
 
 const initialSuppliers = [
   {
@@ -76,7 +81,15 @@ const initialOrders = [
   },
 ];
 
+// Small helper so every component below gets theme colors + styles
+function useThemedStyles() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  return { colors, styles };
+}
+
 export default function SuppliersAndReorders() {
+  const { styles } = useThemedStyles();
   const [tab, setTab] = useState("Suppliers");
   const [query, setQuery] = useState("");
   const [suppliers, setSuppliers] = useState(initialSuppliers);
@@ -120,6 +133,9 @@ export default function SuppliersAndReorders() {
 }
 
 function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
+  const { colors, styles } = useThemedStyles();
+  const categoryColors = useMemo(() => getCategoryColors(colors), [colors]);
+
   const [showAddSupplier, setShowAddSupplier] = useState(false);
   const [newName, setNewName] = useState("");
   const [newCategory, setNewCategory] = useState(CATEGORIES[0]);
@@ -193,7 +209,7 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
       <TextInput
         style={styles.searchInput}
         placeholder="Search suppliers..."
-        placeholderTextColor="#6B7280"
+        placeholderTextColor={colors.textMuted}
         value={query}
         onChangeText={setQuery}
       />
@@ -212,14 +228,14 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
           <TextInput
             style={styles.formInput}
             placeholder="Supplier name"
-            placeholderTextColor="#6B7280"
+            placeholderTextColor={colors.textMuted}
             value={newName}
             onChangeText={setNewName}
           />
           <TextInput
             style={styles.formInput}
             placeholder="Phone number"
-            placeholderTextColor="#6B7280"
+            placeholderTextColor={colors.textMuted}
             value={newPhone}
             onChangeText={setNewPhone}
             keyboardType="phone-pad"
@@ -254,8 +270,8 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
 
       {filtered.map((s, i) => {
         const catStyle = categoryColors[s.category] ?? {
-          bg: "#F3F4F6",
-          text: "#6B7280",
+          bg: colors.border,
+          text: colors.textMuted,
         };
         return (
           <View key={i} style={styles.card}>
@@ -295,14 +311,14 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
                 <TextInput
                   style={styles.formInput}
                   placeholder="Item name"
-                  placeholderTextColor="#6B7280"
+                  placeholderTextColor={colors.textMuted}
                   value={newItemName}
                   onChangeText={setNewItemName}
                 />
                 <TextInput
                   style={styles.formInput}
                   placeholder="Quantity"
-                  placeholderTextColor="#6B7280"
+                  placeholderTextColor={colors.textMuted}
                   value={newItemQty}
                   onChangeText={setNewItemQty}
                   keyboardType="number-pad"
@@ -344,6 +360,9 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
 }
 
 function OrdersTab({ orders, setOrders }) {
+  const { colors, styles } = useThemedStyles();
+  const statusColors = useMemo(() => getStatusColors(colors), [colors]);
+
   function markDelivered(orderId) {
     setOrders((prev) =>
       prev.map((o) => (o.id === orderId ? { ...o, status: "Delivered" } : o)),
@@ -354,8 +373,8 @@ function OrdersTab({ orders, setOrders }) {
     <>
       {orders.map((o, i) => {
         const statusStyle = statusColors[o.status] ?? {
-          bg: "#F3F4F6",
-          text: "#6B7280",
+          bg: colors.border,
+          text: colors.textMuted,
         };
         return (
           <View key={i} style={styles.card}>
@@ -405,162 +424,165 @@ function OrdersTab({ orders, setOrders }) {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#F9FAFB" },
-  content: { padding: 20, paddingBottom: 40 },
-  header: { fontSize: 24, fontWeight: "800", marginBottom: 16, color: "#111827" },
-  segmentWrap: {
-    flexDirection: "row",
-    backgroundColor: "#fff",
-    borderRadius: 24,
-    padding: 4,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  segment: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 20,
-    alignItems: "center",
-  },
-  segmentActive: { backgroundColor: GREEN },
-  segmentText: { color: "#6B7280", fontWeight: "600" },
-  segmentTextActive: { color: "#fff" },
-  searchInput: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 15,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  addButton: {
-    backgroundColor: GREEN,
-    borderRadius: 12,
-    paddingVertical: 10,
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  addButtonText: { color: "#fff", fontWeight: "700", fontSize: 14 },
-  formCard: {
-    backgroundColor: "#FAFAFA",
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  formInput: {
-    backgroundColor: "#fff",
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  formSubmit: {
-    backgroundColor: GREEN,
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: "center",
-    marginTop: 4,
-  },
-  formSubmitText: { color: "#fff", fontWeight: "700", fontSize: 13 },
-  categoryPickOption: {
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginRight: 6,
-    marginBottom: 6,
-  },
-  categoryPickSelected: { backgroundColor: GREEN, borderColor: GREEN },
-  categoryPickText: { color: "#6B7280", fontSize: 12, fontWeight: "600" },
-  categoryPickTextSelected: { color: "#fff" },
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  cardTopRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-  },
-  itemTitle: { fontWeight: "700", fontSize: 15, color: "#111827" },
-  itemSub: { color: "#6B7280", fontSize: 12, marginTop: 2 },
-  itemCost: { fontWeight: "800", fontSize: 16, color: "#111827" },
-  badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
-  badgeText: { fontSize: 11, fontWeight: "700" },
-  phoneText: { color: "#6B7280", fontSize: 13, marginTop: 8 },
-  removeText: { color: "#DC2626", fontSize: 12, fontWeight: "600" },
-  addItemText: { color: GREEN, fontSize: 12, fontWeight: "600" },
-  presetLabel: {
-    fontSize: 10,
-    color: "#6B7280",
-    fontWeight: "700",
-    marginTop: 14,
-    marginBottom: 8,
-  },
-  tagRow: { flexDirection: "row", flexWrap: "wrap" },
-  tag: {
-    backgroundColor: LIGHT_GREEN,
-    borderRadius: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginRight: 6,
-    marginBottom: 6,
-  },
-  tagUnselected: { backgroundColor: "#F3F4F6" },
-  tagText: { color: GREEN, fontSize: 12, fontWeight: "600" },
-  tagTextUnselected: { color: "#6B7280" },
-  cardBottomRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 8,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: "#F0F0F0",
-  },
-  newOrderButton: {
-    backgroundColor: GREEN,
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: "center",
-    marginTop: 12,
-  },
-  newOrderButtonText: { color: "#fff", fontWeight: "700", fontSize: 13 },
-  receiptLine: { color: "#374151", fontSize: 13, marginTop: 6 },
-  orderBottomRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 14,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#F0F0F0",
-  },
-  reorderButton: {
-    backgroundColor: LIGHT_GREEN,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  reorderButtonText: { color: GREEN, fontWeight: "700", fontSize: 13 },
-  deliverButton: {
-    backgroundColor: GREEN,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  deliverButtonText: { color: "#fff", fontWeight: "700", fontSize: 13 },
-});
+const makeStyles = (colors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: colors.background },
+    content: { padding: 20, paddingBottom: 40 },
+    header: { fontSize: 24, fontWeight: "800", marginBottom: 16, color: colors.textPrimary },
+    segmentWrap: {
+      flexDirection: "row",
+      backgroundColor: colors.card,
+      borderRadius: 24,
+      padding: 4,
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    segment: {
+      flex: 1,
+      paddingVertical: 8,
+      borderRadius: 20,
+      alignItems: "center",
+    },
+    segmentActive: { backgroundColor: BRAND_GREEN },
+    segmentText: { color: colors.textMuted, fontWeight: "600" },
+    segmentTextActive: { color: "#FFFFFF" },
+    searchInput: {
+      backgroundColor: colors.card,
+      color: colors.textPrimary,
+      borderRadius: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      fontSize: 15,
+      marginBottom: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    addButton: {
+      backgroundColor: BRAND_GREEN,
+      borderRadius: 12,
+      paddingVertical: 10,
+      alignItems: "center",
+      marginBottom: 16,
+    },
+    addButtonText: { color: "#FFFFFF", fontWeight: "700", fontSize: 14 },
+    formCard: {
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      padding: 14,
+      marginBottom: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    formInput: {
+      backgroundColor: colors.card,
+      color: colors.textPrimary,
+      borderRadius: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      fontSize: 14,
+      marginBottom: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    formSubmit: {
+      backgroundColor: BRAND_GREEN,
+      borderRadius: 10,
+      paddingVertical: 10,
+      alignItems: "center",
+      marginTop: 4,
+    },
+    formSubmitText: { color: "#FFFFFF", fontWeight: "700", fontSize: 13 },
+    categoryPickOption: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 14,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      marginRight: 6,
+      marginBottom: 6,
+    },
+    categoryPickSelected: { backgroundColor: BRAND_GREEN, borderColor: BRAND_GREEN },
+    categoryPickText: { color: colors.textMuted, fontSize: 12, fontWeight: "600" },
+    categoryPickTextSelected: { color: "#FFFFFF" },
+    card: {
+      backgroundColor: colors.card,
+      borderRadius: 14,
+      padding: 16,
+      marginBottom: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    cardTopRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+    },
+    itemTitle: { fontWeight: "700", fontSize: 15, color: colors.textPrimary },
+    itemSub: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
+    itemCost: { fontWeight: "800", fontSize: 16, color: colors.textPrimary },
+    badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+    badgeText: { fontSize: 11, fontWeight: "700" },
+    phoneText: { color: colors.textMuted, fontSize: 13, marginTop: 8 },
+    removeText: { color: colors.danger, fontSize: 12, fontWeight: "600" },
+    addItemText: { color: colors.primary, fontSize: 12, fontWeight: "600" },
+    presetLabel: {
+      fontSize: 10,
+      color: colors.textMuted,
+      fontWeight: "700",
+      marginTop: 14,
+      marginBottom: 8,
+    },
+    tagRow: { flexDirection: "row", flexWrap: "wrap" },
+    tag: {
+      backgroundColor: colors.primaryLight,
+      borderRadius: 14,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      marginRight: 6,
+      marginBottom: 6,
+    },
+    tagUnselected: { backgroundColor: colors.border },
+    tagText: { color: colors.primary, fontSize: 12, fontWeight: "600" },
+    tagTextUnselected: { color: colors.textMuted },
+    cardBottomRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      marginTop: 8,
+      paddingTop: 10,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    newOrderButton: {
+      backgroundColor: BRAND_GREEN,
+      borderRadius: 10,
+      paddingVertical: 10,
+      alignItems: "center",
+      marginTop: 12,
+    },
+    newOrderButtonText: { color: "#FFFFFF", fontWeight: "700", fontSize: 13 },
+    receiptLine: { color: colors.textSecondary, fontSize: 13, marginTop: 6 },
+    orderBottomRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginTop: 14,
+      paddingTop: 12,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    reorderButton: {
+      backgroundColor: colors.primaryLight,
+      borderRadius: 20,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+    },
+    reorderButtonText: { color: colors.primary, fontWeight: "700", fontSize: 13 },
+    deliverButton: {
+      backgroundColor: BRAND_GREEN,
+      borderRadius: 20,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+    },
+    deliverButtonText: { color: "#FFFFFF", fontWeight: "700", fontSize: 13 },
+  });git remote set-url origin https://github.com/tha10S/SpazaIQ_TechTitans.git

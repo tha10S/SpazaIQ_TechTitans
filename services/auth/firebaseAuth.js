@@ -5,6 +5,9 @@ import {
   onAuthStateChanged,
   updateProfile,
 } from "firebase/auth";
+
+
+
 import { auth } from "../firebase/firebaseConfig";
 import { ensureStoreSeed } from '../firestore/seedRepository';
 

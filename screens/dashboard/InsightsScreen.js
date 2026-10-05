@@ -1,7 +1,10 @@
-import {useEffect, useState} from "react";
-import {Pressable, ScrollView, StyleSheet, Text, View,} from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useTheme } from '../../config/ThemeContext';
 import { getAuthenticatedStoreId } from '../../services/firestore/paths';
 import { subscribeSales } from '../../services/firestore/salesRepository';
+
+const BRAND_GREEN = "#004B49"; // active segment keeps brand green in both themes
 
 function getPeriodData(sales, period) {
   const now = new Date();
@@ -51,6 +54,9 @@ function getPeriodData(sales, period) {
 }
 
 export default function Insights({ route }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+
   const [period, setPeriod] = useState("Today");
   const [sales, setSales] = useState([]);
   const storeId = route?.params?.storeId || getAuthenticatedStoreId();
@@ -70,6 +76,9 @@ export default function Insights({ route }) {
       time: new Date(sale.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     })))
     .slice(0, 4);
+
+  // Scale chart bars so large rand values don't overflow the chart area
+  const maxBarValue = Math.max(1, ...data.salesByDay.map((d) => d.value));
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
@@ -110,44 +119,55 @@ export default function Insights({ route }) {
       </View>
 
       {period !== "Today" && (
-  <View style={styles.card}>
-    <Text style={styles.cardTitle}>Sales by Day of Week</Text>
-    <View style={styles.chartRow}>
-      {data.salesByDay.map((d, i) => (
-        <View key={i} style={styles.barColumn}>
-          <View style={[styles.bar, { height: d.value }]} />
-          <Text style={styles.barLabel}>{d.day}</Text>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>
+            {period === "Week" ? "Sales by Day of Week" : "Sales by Week"}
+          </Text>
+          <View style={styles.chartRow}>
+            {data.salesByDay.map((d, i) => (
+              <View key={i} style={styles.barColumn}>
+                <View
+                  style={[
+                    styles.bar,
+                    { height: Math.max(4, (d.value / maxBarValue) * 80) },
+                  ]}
+                />
+                <Text style={styles.barLabel}>{d.day}</Text>
+              </View>
+            ))}
+          </View>
         </View>
-      ))}
-    </View>
-  </View>
-)}
+      )}
 
-        {period === "Today" && (
-      <><Text style={styles.sectionLabel}>RECENTLY PURCHASED</Text><View style={styles.card}>
-          {recentlyPurchased.length === 0 ? <Text style={styles.recentTime}>No sales recorded today.</Text> : recentlyPurchased.map((item, i) => (
-            <View
-              key={i}
-              style={[
-                styles.recentRow,
-                i === recentlyPurchased.length - 1 && { marginBottom: 0, paddingBottom: 0, borderBottomWidth: 0 },
-              ]}
-            >
-              <View>
-                <Text style={styles.recentName}>{item.name}</Text>
-                <Text style={styles.recentTime}>{item.time}</Text>
-              </View>
-              <View style={styles.recentRight}>
-                <Text style={styles.recentQty}>×{item.qty}</Text>
-                <Text style={styles.recentTime}>{item.time}</Text>
-              </View>
-            </View>
-          ))}
-        </View></>
-
-        
-  ) }
-
+      {period === "Today" && (
+        <>
+          <Text style={styles.sectionLabel}>RECENTLY PURCHASED</Text>
+          <View style={styles.card}>
+            {recentlyPurchased.length === 0 ? (
+              <Text style={styles.recentTime}>No sales recorded today.</Text>
+            ) : (
+              recentlyPurchased.map((item, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.recentRow,
+                    i === recentlyPurchased.length - 1 && { marginBottom: 0, paddingBottom: 0, borderBottomWidth: 0 },
+                  ]}
+                >
+                  <View>
+                    <Text style={styles.recentName}>{item.name}</Text>
+                    <Text style={styles.recentTime}>{item.time}</Text>
+                  </View>
+                  <View style={styles.recentRight}>
+                    <Text style={styles.recentQty}>×{item.qty}</Text>
+                    <Text style={styles.recentTime}>{item.time}</Text>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+        </>
+      )}
 
       <View style={styles.forecastCard}>
         <Text style={styles.forecastTitle}>Demand forecast</Text>
@@ -176,199 +196,183 @@ export default function Insights({ route }) {
   );
 }
 
-const GREEN = "#004B49";
-
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: "#F9FAFB",
-  },
-  content: {
-    padding: 20,
-    paddingBottom: 40,
-  },
-  header: {
-    fontSize: 24,
-    fontWeight: "800",
-    marginBottom: 16,
-    color: "#111827",
-  },
-  segmentWrap: {
-    flexDirection: "row",
-    backgroundColor: "#fff",
-    borderRadius: 24,
-    padding: 4,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  segment: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 20,
-    alignItems: "center",
-  },
-  segmentActive: {
-    backgroundColor: GREEN,
-  },
-  segmentText: {
-    color: "#6B7280",
-    fontWeight: "600",
-  },
-  segmentTextActive: {
-    color: "#fff",
-  },
-  statsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 16,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 12,
-    marginRight: 8,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  statLabel: {
-    fontSize: 10,
-    color: "#6B7280",
-    marginBottom: 4,
-    fontWeight: "600",
-  },
-  statValue: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#111827",
-  },
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  cardTitle: {
-    fontWeight: "800",
-    marginBottom: 16,
-    color: "#111827",
-  },
-  chartRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-end",
-    height: 100,
-  },
-  barColumn: {
-    alignItems: "center",
-    justifyContent: "flex-end",
-    flex: 1,
-  },
-  bar: {
-    width: 10,
-    backgroundColor: GREEN,
-    borderRadius: 4,
-  },
-  barLabel: {
-    marginTop: 6,
-    fontSize: 12,
-    color: "#6B7280",
-    fontWeight: "600",
-  },
-  recentRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingBottom: 10,
-    marginBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
-  },
-  recentName: {
-    fontWeight: "700",
-    fontSize: 13,
-    color: "#111827",
-  },
-  recentTime: {
-    color: "#6B7280",
-    fontSize: 11,
-    marginTop: 2,
-  },
-  recentQty: {
-    fontWeight: "700",
-    color: GREEN,
-    fontSize: 14,
-  },
-  forecastCard: {
-    backgroundColor: "#E6F4F1",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-  },
-  forecastTitle: {
-    color: GREEN,
-    fontWeight: "800",
-    marginBottom: 8,
-  },
-  forecastText: {
-    color: "#374151",
-    lineHeight: 20,
-  },
-  bold: {
-    fontWeight: "700",
-  },
-  sectionLabel: {
-    fontSize: 12,
-    color: "#6B7280",
-    marginBottom: 10,
-    fontWeight: "700",
-  },
-  productCard: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  productName: {
-    fontWeight: "700",
-    marginBottom: 2,
-    color: "#111827",
-  },
-  productSold: {
-    color: "#6B7280",
-    fontSize: 12,
-    marginBottom: 10,
-  },
-  progressTrack: {
-    height: 6,
-    backgroundColor: "#E6F4F1",
-    borderRadius: 3,
-    overflow: "hidden",
-  },
-  progressFill: {
-    height: "100%",
-    backgroundColor: GREEN,
-  },
-  recentRight: {
-  flexDirection: "row",
-  alignItems: "center",
-  gap: 10,
-},
-reverseBtn: {
-  borderWidth: 1,
-  borderColor: "#DC2626",
-  borderRadius: 8,
-  paddingVertical: 4,
-  paddingHorizontal: 10,
-},
-reverseBtnText: {
-  color: "#DC2626",
-  fontSize: 11,
-  fontWeight: "700",
-},
-});
+const makeStyles = (colors) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    content: {
+      padding: 20,
+      paddingBottom: 40,
+    },
+    header: {
+      fontSize: 24,
+      fontWeight: "800",
+      marginBottom: 16,
+      color: colors.textPrimary,
+    },
+    segmentWrap: {
+      flexDirection: "row",
+      backgroundColor: colors.card,
+      borderRadius: 24,
+      padding: 4,
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    segment: {
+      flex: 1,
+      paddingVertical: 8,
+      borderRadius: 20,
+      alignItems: "center",
+    },
+    segmentActive: {
+      backgroundColor: BRAND_GREEN,
+    },
+    segmentText: {
+      color: colors.textMuted,
+      fontWeight: "600",
+    },
+    segmentTextActive: {
+      color: "#FFFFFF",
+    },
+    statsRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      marginBottom: 16,
+    },
+    statCard: {
+      flex: 1,
+      backgroundColor: colors.card,
+      borderRadius: 14,
+      padding: 12,
+      marginRight: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    statLabel: {
+      fontSize: 10,
+      color: colors.textMuted,
+      marginBottom: 4,
+      fontWeight: "600",
+    },
+    statValue: {
+      fontSize: 16,
+      fontWeight: "800",
+      color: colors.textPrimary,
+    },
+    card: {
+      backgroundColor: colors.card,
+      borderRadius: 16,
+      padding: 16,
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    cardTitle: {
+      fontWeight: "800",
+      marginBottom: 16,
+      color: colors.textPrimary,
+    },
+    chartRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "flex-end",
+      height: 110,
+    },
+    barColumn: {
+      alignItems: "center",
+      justifyContent: "flex-end",
+      flex: 1,
+    },
+    bar: {
+      width: 10,
+      backgroundColor: colors.primary,
+      borderRadius: 4,
+    },
+    barLabel: {
+      marginTop: 6,
+      fontSize: 12,
+      color: colors.textMuted,
+      fontWeight: "600",
+    },
+    recentRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      paddingBottom: 10,
+      marginBottom: 10,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    recentName: {
+      fontWeight: "700",
+      fontSize: 13,
+      color: colors.textPrimary,
+    },
+    recentTime: {
+      color: colors.textMuted,
+      fontSize: 11,
+      marginTop: 2,
+    },
+    recentQty: {
+      fontWeight: "700",
+      color: colors.primary,
+      fontSize: 14,
+    },
+    recentRight: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    forecastCard: {
+      backgroundColor: colors.primaryLight,
+      borderRadius: 16,
+      padding: 16,
+      marginBottom: 16,
+    },
+    forecastTitle: {
+      color: colors.primary,
+      fontWeight: "800",
+      marginBottom: 8,
+    },
+    forecastText: {
+      color: colors.textSecondary,
+      lineHeight: 20,
+    },
+    sectionLabel: {
+      fontSize: 12,
+      color: colors.textMuted,
+      marginBottom: 10,
+      fontWeight: "700",
+    },
+    productCard: {
+      backgroundColor: colors.card,
+      borderRadius: 14,
+      padding: 14,
+      marginBottom: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    productName: {
+      fontWeight: "700",
+      marginBottom: 2,
+      color: colors.textPrimary,
+    },
+    productSold: {
+      color: colors.textMuted,
+      fontSize: 12,
+      marginBottom: 10,
+    },
+    progressTrack: {
+      height: 6,
+      backgroundColor: colors.border,
+      borderRadius: 3,
+      overflow: "hidden",
+    },
+    progressFill: {
+      height: "100%",
+      backgroundColor: colors.primary,
+    },
+  });
