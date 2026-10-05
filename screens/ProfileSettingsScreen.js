@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -38,7 +38,7 @@ const FIELDS = [
 ];
 
 const getInitials = (name) =>
-  name
+  (name || '')
     .split(' ')
     .filter(Boolean)
     .slice(0, 2)
@@ -48,7 +48,10 @@ const getInitials = (name) =>
 export default function ProfileSettingsScreen() {
   const navigation = useNavigation();
   const { colors, spacing, radius, typography, isDark, toggleTheme } = useTheme();
-  const styles = makeStyles(colors, typography, spacing, radius);
+  const styles = useMemo(
+    () => makeStyles(colors, typography, spacing, radius),
+    [colors, typography, spacing, radius]
+  );
 
   const [profile, setProfile] = useState({
     ...DEFAULT_PROFILE,
@@ -68,23 +71,33 @@ export default function ProfileSettingsScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
 
+  // Keep a ref so the subscription doesn't restart every time editing toggles
+  const isEditingRef = useRef(false);
+  useEffect(() => {
+    isEditingRef.current = isEditing;
+  }, [isEditing]);
+
   useEffect(() => {
     const userId = auth.currentUser?.uid;
     if (!userId) return undefined;
-    return subscribeUserProfile(userId, (data) => {
-      if (!data) return;
-      const nextProfile = {
-        name: data.fullName || data.displayName || auth.currentUser?.displayName || '',
-        shopName: data.shopName || '',
-        phone: data.mobile || '',
-        email: data.email || auth.currentUser?.email || '',
-        location: data.location || '',
-        shopRegistration: data.shopRegistration || '',
-      };
-      setProfile(nextProfile);
-      if (!isEditing) setDraft(nextProfile);
-    }, (error) => console.warn('Profile subscription failed', error?.code, error?.message));
-  }, [isEditing]);
+    return subscribeUserProfile(
+      userId,
+      (data) => {
+        if (!data) return;
+        const nextProfile = {
+          name: data.fullName || data.displayName || auth.currentUser?.displayName || '',
+          shopName: data.shopName || '',
+          phone: data.mobile || '',
+          email: data.email || auth.currentUser?.email || '',
+          location: data.location || '',
+          shopRegistration: data.shopRegistration || '',
+        };
+        setProfile(nextProfile);
+        if (!isEditingRef.current) setDraft(nextProfile);
+      },
+      (error) => console.warn('Profile subscription failed', error?.code, error?.message)
+    );
+  }, []);
 
   const startEditing = () => {
     setDraft(profile);
@@ -194,7 +207,7 @@ export default function ProfileSettingsScreen() {
               Alert.alert('Change photo', "Photo upload isn't wired up in this prototype yet.")
             }
           >
-            <Ionicons name="pencil" size={14} color={colors.card} />
+            <Ionicons name="pencil" size={14} color={colors.primary} />
           </TouchableOpacity>
         </View>
 
@@ -237,10 +250,18 @@ export default function ProfileSettingsScreen() {
 
           {isEditing && (
             <View style={styles.editActionsRow}>
-              <TouchableOpacity style={[styles.editActionBtn, styles.cancelBtn]} onPress={cancelEditing} disabled={isSavingProfile}>
+              <TouchableOpacity
+                style={[styles.editActionBtn, styles.cancelBtn]}
+                onPress={cancelEditing}
+                disabled={isSavingProfile}
+              >
                 <Text style={styles.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.editActionBtn, styles.saveBtn]} onPress={saveEditing} disabled={isSavingProfile}>
+              <TouchableOpacity
+                style={[styles.editActionBtn, styles.saveBtn]}
+                onPress={saveEditing}
+                disabled={isSavingProfile}
+              >
                 <Text style={styles.saveBtnText}>{isSavingProfile ? 'Saving...' : 'Save'}</Text>
               </TouchableOpacity>
             </View>
@@ -282,7 +303,9 @@ export default function ProfileSettingsScreen() {
           <View style={styles.settingDivider} />
           <TouchableOpacity
             style={styles.settingRow}
-            onPress={() => Alert.alert('Language', "Language selection isn't wired up in this prototype yet.")}
+            onPress={() =>
+              Alert.alert('Language', "Language selection isn't wired up in this prototype yet.")
+            }
           >
             <View style={styles.settingLeft}>
               <Text style={styles.settingLabel}>Language</Text>
@@ -299,7 +322,9 @@ export default function ProfileSettingsScreen() {
         <View style={styles.settingsCard}>
           <TouchableOpacity
             style={styles.settingRow}
-            onPress={() => Alert.alert('Change PIN', "PIN management isn't wired up in this prototype yet.")}
+            onPress={() =>
+              Alert.alert('Change PIN', "PIN management isn't wired up in this prototype yet.")
+            }
           >
             <View style={styles.settingLeft}>
               <Text style={styles.settingLabel}>Change PIN</Text>
@@ -350,7 +375,9 @@ export default function ProfileSettingsScreen() {
           <View style={styles.deleteCard}>
             <Text style={styles.deleteTitle}>Permanently delete account?</Text>
             <Text style={styles.deleteDescription}>
-              This deletes the signed-in Firebase account, its user profile, store, products, customers, sales, credit records, repayment schedules, and operation records. The temporary top-level test collection is not deleted.
+              This deletes the signed-in Firebase account, its user profile, store, products,
+              customers, sales, credit records, repayment schedules, and operation records. The
+              temporary top-level test collection is not deleted.
             </Text>
             <Text style={styles.deleteLabel}>CURRENT PASSWORD</Text>
             <TextInput
@@ -373,7 +400,11 @@ export default function ProfileSettingsScreen() {
               autoCapitalize="characters"
               editable={!isDeletingAccount}
             />
-            {deleteError ? <Text accessibilityRole="alert" style={styles.deleteError}>{deleteError}</Text> : null}
+            {deleteError ? (
+              <Text accessibilityRole="alert" style={styles.deleteError}>
+                {deleteError}
+              </Text>
+            ) : null}
             <View style={styles.deleteActions}>
               <TouchableOpacity
                 style={styles.deleteCancelButton}
@@ -387,7 +418,9 @@ export default function ProfileSettingsScreen() {
                 onPress={confirmDeleteAccount}
                 disabled={isDeletingAccount || !deletePassword || deleteConfirmation !== 'DELETE'}
               >
-                <Text style={styles.deleteConfirmText}>{isDeletingAccount ? 'Deleting...' : 'Delete Account'}</Text>
+                <Text style={styles.deleteConfirmText}>
+                  {isDeletingAccount ? 'Deleting...' : 'Delete Account'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -408,7 +441,7 @@ function makeStyles(colors, typography, spacing, radius) {
       paddingVertical: spacing.md,
     },
     backButton: { padding: spacing.xs },
-    headerTitle: { ...typography.h2 },
+    headerTitle: { ...typography.h2, color: colors.textPrimary },
     helpText: { ...typography.body, color: colors.primary, fontWeight: '600' },
     scrollContent: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl * 2 },
 
@@ -426,10 +459,10 @@ function makeStyles(colors, typography, spacing, radius) {
       alignItems: 'center',
       justifyContent: 'center',
     },
-    avatarInitials: { color: colors.card, fontSize: 20, fontWeight: '700' },
+    avatarInitials: { color: '#FFFFFF', fontSize: 20, fontWeight: '700' },
     identityText: { flex: 1 },
-    identityName: { ...typography.h2 },
-    identitySub: { ...typography.small, marginTop: 2 },
+    identityName: { ...typography.h2, color: colors.textPrimary },
+    identitySub: { ...typography.small, color: colors.textMuted, marginTop: 2 },
     avatarEditBadge: {
       width: 30,
       height: 30,
@@ -453,10 +486,11 @@ function makeStyles(colors, typography, spacing, radius) {
       paddingVertical: spacing.sm,
     },
     fieldValueWrap: { flex: 1 },
-    fieldLabel: { ...typography.small },
-    fieldValue: { ...typography.body, marginTop: 2, fontWeight: '600' },
+    fieldLabel: { ...typography.small, color: colors.textMuted },
+    fieldValue: { ...typography.body, color: colors.textPrimary, marginTop: 2, fontWeight: '600' },
     fieldInput: {
       ...typography.body,
+      color: colors.textPrimary,
       marginTop: 2,
       paddingVertical: 4,
       borderBottomWidth: 1,
@@ -466,6 +500,7 @@ function makeStyles(colors, typography, spacing, radius) {
       flexDirection: 'row',
       gap: spacing.sm,
       marginTop: spacing.md,
+      marginBottom: spacing.md,
       width: '100%',
     },
     editActionBtn: {
@@ -475,9 +510,9 @@ function makeStyles(colors, typography, spacing, radius) {
       alignItems: 'center',
     },
     cancelBtn: { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
-    cancelBtnText: { ...typography.body, fontWeight: '600', color: colors.textSecondary },
+    cancelBtnText: { ...typography.body, fontWeight: '600', color: colors.textPrimary },
     saveBtn: { backgroundColor: colors.primary },
-    saveBtnText: { ...typography.body, fontWeight: '700', color: colors.card },
+    saveBtnText: { ...typography.body, fontWeight: '700', color: '#FFFFFF' },
 
     sectionTitle: {
       ...typography.small,
@@ -503,8 +538,8 @@ function makeStyles(colors, typography, spacing, radius) {
     },
     settingLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flex: 1 },
     settingTextCol: {},
-    settingLabel: { ...typography.body, fontWeight: '600' },
-    settingSubLabel: { ...typography.small, marginTop: 2 },
+    settingLabel: { ...typography.body, color: colors.textPrimary, fontWeight: '600' },
+    settingSubLabel: { ...typography.small, color: colors.textMuted, marginTop: 2 },
     settingRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     settingValueText: { ...typography.body, color: colors.textMuted },
     settingDivider: { height: 1, backgroundColor: colors.border },
@@ -531,27 +566,82 @@ function makeStyles(colors, typography, spacing, radius) {
       fontWeight: '700',
     },
     logoutBtnText: { ...typography.body, color: colors.danger, fontWeight: '700' },
-    logoutErrorText: { ...typography.small, color: colors.danger, textAlign: 'center', marginBottom: spacing.sm },
+    logoutErrorText: {
+      ...typography.small,
+      color: colors.danger,
+      textAlign: 'center',
+      marginBottom: spacing.sm,
+    },
     deleteAccountText: {
       ...typography.small,
       color: colors.danger,
       textAlign: 'center',
       marginBottom: spacing.md,
     },
-    deleteOverlay: { flex: 1, justifyContent: 'center', backgroundColor: 'rgba(17, 24, 39, 0.58)', padding: spacing.lg },
-    deleteCard: { width: '100%', maxWidth: 520, alignSelf: 'center', backgroundColor: colors.card, borderRadius: radius.md, padding: spacing.lg },
+    deleteOverlay: {
+      flex: 1,
+      justifyContent: 'center',
+      backgroundColor: 'rgba(17, 24, 39, 0.58)',
+      padding: spacing.lg,
+    },
+    deleteCard: {
+      width: '100%',
+      maxWidth: 520,
+      alignSelf: 'center',
+      backgroundColor: colors.card,
+      borderRadius: radius.md,
+      padding: spacing.lg,
+    },
     deleteTitle: { ...typography.h2, color: colors.danger, marginBottom: spacing.sm },
-    deleteDescription: { ...typography.small, lineHeight: 19, marginBottom: spacing.md },
-    deleteLabel: { ...typography.small, fontWeight: '700', marginBottom: spacing.xs, marginTop: spacing.sm },
-    deleteInput: { height: 44, borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, paddingHorizontal: spacing.md, color: colors.textPrimary },
+    deleteDescription: {
+      ...typography.small,
+      color: colors.textMuted,
+      lineHeight: 19,
+      marginBottom: spacing.md,
+    },
+    deleteLabel: {
+      ...typography.small,
+      color: colors.textMuted,
+      fontWeight: '700',
+      marginBottom: spacing.xs,
+      marginTop: spacing.sm,
+    },
+    deleteInput: {
+      height: 44,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+      borderRadius: radius.sm,
+      paddingHorizontal: spacing.md,
+      color: colors.textPrimary,
+    },
     deleteError: { ...typography.small, color: colors.danger, marginTop: spacing.sm },
-    deleteActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm, marginTop: spacing.lg },
-    deleteCancelButton: { minWidth: 90, paddingVertical: spacing.sm, borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, alignItems: 'center' },
-    deleteCancelText: { ...typography.body, fontWeight: '700' },
-    deleteConfirmButton: { minWidth: 130, paddingVertical: spacing.sm, backgroundColor: colors.danger, borderRadius: radius.sm, alignItems: 'center' },
+    deleteActions: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: spacing.sm,
+      marginTop: spacing.lg,
+    },
+    deleteCancelButton: {
+      minWidth: 90,
+      paddingVertical: spacing.sm,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: radius.sm,
+      alignItems: 'center',
+    },
+    deleteCancelText: { ...typography.body, fontWeight: '700', color: colors.textPrimary },
+    deleteConfirmButton: {
+      minWidth: 130,
+      paddingVertical: spacing.sm,
+      backgroundColor: colors.danger,
+      borderRadius: radius.sm,
+      alignItems: 'center',
+    },
     deleteConfirmText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
     versionText: {
       ...typography.small,
+      color: colors.textMuted,
       textAlign: 'center',
       marginTop: spacing.sm,
       marginBottom: spacing.xl,
