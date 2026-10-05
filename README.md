@@ -55,3 +55,7 @@ The app uses the authenticated Firebase user UID as the store ID. Store data liv
 - `components/`: reusable UI components
 - `firestore.rules`: store-scoped security rules
 - `firestore.indexes.json`: required Firestore indexes
+
+#DATASET ON INSIGHTS SCREEN
+ the workflow is: 
+when you edit data/sales_history.csv → run node scripts/parseCsvToInsights.js to reload the data on the application.
