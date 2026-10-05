@@ -24,6 +24,7 @@ import HomeScreen from '../screens/HomeScreen';
 import StockScreen from '../screens/StockScreen';
 import NewSaleScreen from '../screens/NewSaleScreen';
 import CreditLedgerScreen from '../screens/CreditLedgerScreen';
+import RepaymentTrackerScreen from '../screens/RepaymentTrackerScreen';
 import ProfileSettingsScreen from '../screens/ProfileSettingsScreen';
 import QRScannerScreen from '../screens/QRScannerScreen';
 import PlaceholderScreen from '../screens/PlaceholderScreen';
@@ -139,6 +140,11 @@ export default function App() {
                 <Stack.Screen name="Notifications" component={NotificationsScreen} />
                 <Stack.Screen name="Placeholder" component={PlaceholderScreen} />
                 <Stack.Screen name="Profile" component={ProfileSettingsScreen} />
+                <Stack.Screen
+                  name="RepaymentTracker"
+                  component={RepaymentTrackerScreen}
+                  options={{ headerShown: true, title: 'Repayment Tracker' }}
+                />
               </>
             ) : (
               <>
