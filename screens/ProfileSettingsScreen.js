@@ -151,17 +151,21 @@ export default function ProfileSettingsScreen() {
     setDeleteError('');
     try {
       await deleteCurrentAccount(deletePassword);
+      setDeleteModalVisible(false);
     } catch (error) {
       const code = error?.code;
       if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
         setDeleteError('The password is incorrect. Your account has not been deleted.');
-      } else if (code === 'functions/failed-precondition') {
+      } else if (code === 'auth/requires-recent-login') {
         setDeleteError('Please sign in again, then retry account deletion.');
-      } else if (code === 'functions/unauthenticated') {
-        setDeleteError('Your session expired. Sign in again before deleting the account.');
+      } else if (code === 'permission-denied') {
+        setDeleteError('Firestore denied the deletion. Check your account permissions and try again.');
+      } else if (code === 'failed-precondition') {
+        setDeleteError('The store setup is invalid for this account. Please contact support.');
       } else {
         setDeleteError(error?.message || 'Account deletion failed. Your account may still exist.');
       }
+    } finally {
       setIsDeletingAccount(false);
     }
   };

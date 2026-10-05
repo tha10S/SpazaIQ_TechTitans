@@ -7,6 +7,7 @@ service cloud.firestore {
     match /test/{documentId} {
       allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
       allow read: if signedIn() && resource.data.ownerUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
     }
 
     match /users/{userId} {
@@ -28,7 +29,7 @@ service cloud.firestore {
           'uid', 'email', 'displayName', 'fullName', 'mobile', 'shopName',
           'defaultStoreId', 'createdAt', 'updatedAt', 'location', 'shopRegistration'
         ]);
-      allow delete: if false;
+      allow delete: if signedIn() && request.auth.uid == userId;
     }
 
     match /stores/{storeId} {
@@ -45,7 +46,7 @@ service cloud.firestore {
           'ownerId', 'name', 'seedVersion', 'createdAt', 'updatedAt'
         ])
         && request.resource.data.createdAt == resource.data.createdAt;
-      allow delete: if false;
+      allow delete: if ownsStore(storeId);
 
       match /{collectionName}/{documentId} {
         allow read: if ownsStore(storeId);
@@ -53,8 +54,13 @@ service cloud.firestore {
         allow update: if ownsStore(storeId)
           && resource.data.storeId == storeId
           && request.resource.data.storeId == storeId;
-        allow delete: if ownsStore(storeId) && resource.data.storeId == storeId;
+        allow delete: if ownsStore(storeId);
+      }
+
+      // Nested subcollections at any depth: read and delete only
+      match /{path=**} {
+        allow read, delete: if ownsStore(storeId);
       }
     }
   }
-}
+} 

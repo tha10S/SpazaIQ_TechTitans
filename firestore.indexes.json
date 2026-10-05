@@ -1,13 +1,6 @@
 {
   "indexes": [
     {
-      "collectionGroup": "products",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "quantity", "order": "ASCENDING" }
-      ]
-    },
-    {
       "collectionGroup": "creditTransactions",
       "queryScope": "COLLECTION",
       "fields": [
