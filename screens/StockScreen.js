@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  StatusBar,
   Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -29,7 +28,10 @@ const EMPTY_PRODUCT = {
 
 export default function StockScreen({ navigation, route }) {
   const { colors, spacing, radius, typography } = useTheme();
-  const styles = makeStyles(colors, typography, spacing, radius);
+  const styles = useMemo(
+    () => makeStyles(colors, typography, spacing, radius),
+    [colors, typography, spacing, radius]
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [productFormVisible, setProductFormVisible] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
@@ -77,7 +79,7 @@ export default function StockScreen({ navigation, route }) {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F9FAFB" />
+      {/* Status bar is handled globally in App.js */}
 
       <View style={styles.container}>
         <ScrollView
@@ -92,22 +94,22 @@ export default function StockScreen({ navigation, route }) {
           {/* Search & Scan Row */}
           <View style={styles.searchRow}>
             <View style={styles.searchContainer}>
-              <Ionicons name="search" size={18} color="#9CA3AF" />
+              <Ionicons name="search" size={18} color={colors.textMuted} />
               <TextInput
                 placeholder="Search stock catalog..."
-                placeholderTextColor="#9CA3AF"
+                placeholderTextColor={colors.textMuted}
                 style={styles.searchInput}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
               />
               {searchQuery.length > 0 && (
                 <TouchableOpacity onPress={() => setSearchQuery('')}>
-                  <Ionicons name="close-circle" size={18} color="#9CA3AF" />
+                  <Ionicons name="close-circle" size={18} color={colors.textMuted} />
                 </TouchableOpacity>
               )}
             </View>
 
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.scanButton}
               onPress={() => navigation?.navigate('Scanner')}
               activeOpacity={0.85}
@@ -119,47 +121,47 @@ export default function StockScreen({ navigation, route }) {
           {/* Summary Cards */}
           <View style={styles.summaryRow}>
             <View style={styles.summaryCard}>
-              <View style={[styles.statIconBadge, { backgroundColor: '#EFF6FF' }]}>
-                <Ionicons name="cube" size={16} color="#2563EB" />
+              <View style={[styles.statIconBadge, { backgroundColor: 'rgba(59,130,246,0.15)' }]}>
+                <Ionicons name="cube" size={16} color="#3B82F6" />
               </View>
               <Text style={styles.summaryLabel}>Total Items</Text>
               <Text style={styles.summaryValue}>{totalQuantity}</Text>
             </View>
 
             <View style={styles.summaryCard}>
-              <View style={[styles.statIconBadge, { backgroundColor: '#FEE2E2' }]}>
-                <Ionicons name="warning" size={16} color="#DC2626" />
+              <View style={[styles.statIconBadge, { backgroundColor: 'rgba(220,38,38,0.15)' }]}>
+                <Ionicons name="warning" size={16} color={colors.danger} />
               </View>
               <Text style={styles.summaryLabel}>Low Stock</Text>
-              <Text style={[styles.summaryValue, { color: '#DC2626' }]}>{lowStockCount}</Text>
+              <Text style={[styles.summaryValue, { color: colors.danger }]}>{lowStockCount}</Text>
             </View>
 
             <View style={styles.summaryCard}>
-              <View style={[styles.statIconBadge, { backgroundColor: '#FFFBEB' }]}>
-                <Ionicons name="time" size={16} color="#D97706" />
+              <View style={[styles.statIconBadge, { backgroundColor: 'rgba(245,158,11,0.15)' }]}>
+                <Ionicons name="time" size={16} color="#F59E0B" />
               </View>
               <Text style={styles.summaryLabel}>Expiring</Text>
-              <Text style={[styles.summaryValue, { color: '#D97706' }]}>5</Text>
+              <Text style={[styles.summaryValue, { color: '#F59E0B' }]}>5</Text>
             </View>
           </View>
 
           {/* Quick Action Navigation */}
           <View style={styles.actionRow}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.actionButton}
               onPress={() => navigation?.navigate('Suppliers')}
               activeOpacity={0.85}
             >
-              <Ionicons name="people-outline" size={16} color="#004B49" style={{ marginRight: 6 }} />
+              <Ionicons name="people-outline" size={16} color={colors.primary} style={{ marginRight: 6 }} />
               <Text style={styles.actionText}>Suppliers</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.actionButton}
               onPress={() => navigation?.navigate('Suppliers', { screen: 'Reorder' })}
               activeOpacity={0.85}
             >
-              <Ionicons name="refresh-outline" size={16} color="#004B49" style={{ marginRight: 6 }} />
+              <Ionicons name="refresh-outline" size={16} color={colors.primary} style={{ marginRight: 6 }} />
               <Text style={styles.actionText}>Reorders</Text>
             </TouchableOpacity>
           </View>
@@ -223,7 +225,7 @@ export default function StockScreen({ navigation, route }) {
         </ScrollView>
 
         {/* Floating Action Buttons */}
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.addButton}
           activeOpacity={0.9}
           onPress={() => openProductForm()}
@@ -260,6 +262,7 @@ export default function StockScreen({ navigation, route }) {
                       onChangeText={(value) => setProductForm((current) => ({ ...current, [key]: value }))}
                       keyboardType={['unitPrice', 'costPrice', 'quantity', 'reorderLevel'].includes(key) ? 'decimal-pad' : 'default'}
                       autoCapitalize={key === 'sku' || key === 'barcode' ? 'characters' : 'sentences'}
+                      placeholderTextColor={colors.textMuted}
                       editable={!savingProduct}
                     />
                   </View>
@@ -283,36 +286,36 @@ export default function StockScreen({ navigation, route }) {
 }
 
 function makeStyles(colors, typography, spacing, radius) {
-  const emeraldPrimary = '#004B49';
+  const brandGreen = '#004B49'; // solid buttons stay brand green in both themes
 
   return StyleSheet.create({
-    safeArea: { flex: 1, backgroundColor: '#F9FAFB' },
-    container: { flex: 1, backgroundColor: '#F9FAFB' },
+    safeArea: { flex: 1, backgroundColor: colors.background },
+    container: { flex: 1, backgroundColor: colors.background },
     scrollContent: { padding: spacing.lg, paddingBottom: 120 },
 
     /* Header */
     headerRow: { marginBottom: spacing.md },
-    pageTitle: { fontSize: 24, fontWeight: '800', color: '#111827' },
+    pageTitle: { fontSize: 24, fontWeight: '800', color: colors.textPrimary },
 
     /* Search Bar */
     searchRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.md },
     searchContainer: {
       flex: 1,
       height: 44,
-      backgroundColor: '#FFFFFF',
+      backgroundColor: colors.card,
       borderRadius: 12,
       borderWidth: 1,
-      borderColor: '#E5E7EB',
+      borderColor: colors.border,
       flexDirection: 'row',
       alignItems: 'center',
       paddingHorizontal: 12,
     },
-    searchInput: { flex: 1, height: 44, marginLeft: 8, fontSize: 14, color: '#111827' },
+    searchInput: { flex: 1, height: 44, marginLeft: 8, fontSize: 14, color: colors.textPrimary },
     scanButton: {
       width: 44,
       height: 44,
       borderRadius: 12,
-      backgroundColor: emeraldPrimary,
+      backgroundColor: brandGreen,
       marginLeft: 10,
       alignItems: 'center',
       justifyContent: 'center',
@@ -322,11 +325,11 @@ function makeStyles(colors, typography, spacing, radius) {
     summaryRow: { flexDirection: 'row', gap: 10, marginBottom: spacing.md },
     summaryCard: {
       flex: 1,
-      backgroundColor: '#FFFFFF',
+      backgroundColor: colors.card,
       borderRadius: 14,
       padding: 12,
       borderWidth: 1,
-      borderColor: '#E5E7EB',
+      borderColor: colors.border,
     },
     statIconBadge: {
       width: 28,
@@ -336,8 +339,8 @@ function makeStyles(colors, typography, spacing, radius) {
       alignItems: 'center',
       marginBottom: 6,
     },
-    summaryLabel: { fontSize: 11, color: '#6B7280', fontWeight: '600' },
-    summaryValue: { fontSize: 18, fontWeight: '800', color: '#111827', marginTop: 2 },
+    summaryLabel: { fontSize: 11, color: colors.textMuted, fontWeight: '600' },
+    summaryValue: { fontSize: 18, fontWeight: '800', color: colors.textPrimary, marginTop: 2 },
 
     /* Action Buttons */
     actionRow: { flexDirection: 'row', gap: 10, marginBottom: spacing.md },
@@ -345,12 +348,12 @@ function makeStyles(colors, typography, spacing, radius) {
       flex: 1,
       height: 40,
       borderRadius: 12,
-      backgroundColor: '#E6F4F1',
+      backgroundColor: colors.primaryLight,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
     },
-    actionText: { color: emeraldPrimary, fontSize: 13, fontWeight: '700' },
+    actionText: { color: colors.primary, fontSize: 13, fontWeight: '700' },
 
     /* Catalog Section Header */
     catalogHeader: {
@@ -365,48 +368,49 @@ function makeStyles(colors, typography, spacing, radius) {
       flex: 1,
       fontSize: 12,
       fontWeight: '800',
-      color: '#6B7280',
+      color: colors.textMuted,
       letterSpacing: 0.5,
       marginRight: 8,
     },
     countBadge: {
-      backgroundColor: '#E5E7EB',
+      backgroundColor: colors.border,
       paddingHorizontal: 8,
       paddingVertical: 3,
       borderRadius: 8,
     },
-    catalogCount: { fontSize: 11, color: '#374151', fontWeight: '700' },
+    catalogCount: { fontSize: 11, color: colors.textPrimary, fontWeight: '700' },
 
     /* Product Items */
     productList: { gap: spacing.xs },
+    emptyText: { fontSize: 13, color: colors.textMuted, textAlign: 'center', paddingVertical: spacing.md },
     productCard: {
-      backgroundColor: '#FFFFFF',
+      backgroundColor: colors.card,
       borderRadius: 14,
       padding: spacing.md,
       borderWidth: 1,
-      borderColor: '#E5E7EB',
+      borderColor: colors.border,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       marginBottom: 8,
     },
     productInformation: { flex: 1, marginRight: spacing.sm },
-    productName: { fontSize: 14, fontWeight: '700', color: '#111827' },
+    productName: { fontSize: 14, fontWeight: '700', color: colors.textPrimary },
     detailsRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
-    productPrice: { fontSize: 13, fontWeight: '700', color: emeraldPrimary },
-    dotSeparator: { marginHorizontal: 6, color: '#9CA3AF' },
-    productQty: { fontSize: 12, color: '#6B7280' },
-    qtyBold: { fontWeight: '800', color: '#111827' },
+    productPrice: { fontSize: 13, fontWeight: '700', color: colors.primary },
+    dotSeparator: { marginHorizontal: 6, color: colors.textMuted },
+    productQty: { fontSize: 12, color: colors.textMuted },
+    qtyBold: { fontWeight: '800', color: colors.textPrimary },
 
     /* Badges */
     statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
     statusText: { fontSize: 11, fontWeight: '800' },
-    lowBadge: { backgroundColor: '#FEE2E2' },
-    lowText: { color: '#DC2626' },
-    stockBadge: { backgroundColor: '#ECFDF5' },
-    stockText: { color: '#059669' },
-    outBadge: { backgroundColor: '#F3F4F6' },
-    outText: { color: '#6B7280' },
+    lowBadge: { backgroundColor: 'rgba(220,38,38,0.15)' },
+    lowText: { color: colors.danger },
+    stockBadge: { backgroundColor: 'rgba(16,185,129,0.15)' },
+    stockText: { color: '#10B981' },
+    outBadge: { backgroundColor: colors.border },
+    outText: { color: colors.textMuted },
 
     /* Floating Buttons */
     addButton: {
@@ -416,7 +420,7 @@ function makeStyles(colors, typography, spacing, radius) {
       width: 48,
       height: 48,
       borderRadius: 24,
-      backgroundColor: emeraldPrimary,
+      backgroundColor: brandGreen,
       alignItems: 'center',
       justifyContent: 'center',
       elevation: 5,
@@ -425,18 +429,43 @@ function makeStyles(colors, typography, spacing, radius) {
       shadowRadius: 6,
       shadowOffset: { width: 0, height: 3 },
     },
+
+    /* Product form modal */
     formOverlay: { flex: 1, justifyContent: 'center', backgroundColor: 'rgba(17, 24, 39, 0.55)', padding: 18 },
     formScroll: { flexGrow: 1, justifyContent: 'center' },
-    formCard: { width: '100%', maxWidth: 520, alignSelf: 'center', maxHeight: '90%', backgroundColor: '#FFFFFF', borderRadius: 14, padding: 18 },
-    formTitle: { fontSize: 19, fontWeight: '800', color: '#111827', marginBottom: 14 },
+    formCard: {
+      width: '100%',
+      maxWidth: 520,
+      alignSelf: 'center',
+      maxHeight: '90%',
+      backgroundColor: colors.card,
+      borderRadius: 14,
+      padding: 18,
+    },
+    formTitle: { fontSize: 19, fontWeight: '800', color: colors.textPrimary, marginBottom: 14 },
     formField: { marginBottom: 10 },
-    formLabel: { fontSize: 12, fontWeight: '700', color: '#4B5563', marginBottom: 4 },
-    formInput: { height: 40, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, paddingHorizontal: 10, color: '#111827' },
-    formError: { color: '#B91C1C', fontSize: 12, marginTop: 4 },
+    formLabel: { fontSize: 12, fontWeight: '700', color: colors.textMuted, marginBottom: 4 },
+    formInput: {
+      height: 40,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      color: colors.textPrimary,
+    },
+    formError: { color: colors.danger, fontSize: 12, marginTop: 4 },
     formActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 12 },
-    formSecondaryButton: { minWidth: 94, paddingVertical: 11, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, alignItems: 'center' },
-    formSecondaryText: { color: '#4B5563', fontWeight: '700' },
-    formPrimaryButton: { minWidth: 120, paddingVertical: 11, backgroundColor: emeraldPrimary, borderRadius: 8, alignItems: 'center' },
+    formSecondaryButton: {
+      minWidth: 94,
+      paddingVertical: 11,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 8,
+      alignItems: 'center',
+    },
+    formSecondaryText: { color: colors.textPrimary, fontWeight: '700' },
+    formPrimaryButton: { minWidth: 120, paddingVertical: 11, backgroundColor: brandGreen, borderRadius: 8, alignItems: 'center' },
     formPrimaryText: { color: '#FFFFFF', fontWeight: '700' },
   });
 }

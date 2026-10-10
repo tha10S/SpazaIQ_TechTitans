@@ -73,8 +73,8 @@ export function useCustomerBalances(storeId) {
     }
   };
 
-  const recordPayment = useCallback(async ({ customerId, amount, note }) => {
-    const signature = JSON.stringify({ customerId, amount, note });
+  const recordPayment = useCallback(async ({ customerId, amount, note, paymentMethod, paymentDate }) => {
+    const signature = JSON.stringify({ customerId, amount, note, paymentMethod, paymentDate });
     if (!pendingPayment.current || pendingPayment.current.signature !== signature) {
       pendingPayment.current = {
         signature,
@@ -87,6 +87,8 @@ export function useCustomerBalances(storeId) {
         customerId,
         amount,
         note,
+        paymentMethod,
+        paymentDate,
         idempotencyKey: pendingPayment.current.idempotencyKey,
       });
       pendingPayment.current = null;

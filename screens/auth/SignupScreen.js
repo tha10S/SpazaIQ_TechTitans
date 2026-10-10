@@ -8,8 +8,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Alert,
 } from "react-native";
-import { getAuthErrorMessage, signUp } from "../../services/auth/firebaseAuth";
+import { sendEmailVerification } from "firebase/auth";
+import { getAuthErrorMessage, signUp, logOut } from "../../services/auth/firebaseAuth";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -51,11 +53,30 @@ export default function SignupScreen({ navigation }) {
     try {
       setError("");
       setIsSubmitting(true);
-      await signUp(normalizedEmail, password, {
+
+      // Create the account (signUp returns the new Firebase user)
+      const user = await signUp(normalizedEmail, password, {
         fullName: fullName.trim(),
         mobile: mobile.trim(),
         shopName: shopName.trim(),
       });
+
+      // Send the verification email, then sign out until they verify
+      let emailSent = true;
+      try {
+        await sendEmailVerification(user);
+      } catch (emailError) {
+        emailSent = false;
+      }
+      await logOut();
+
+      Alert.alert(
+        "Welcome to SpazaIQ!",
+        emailSent
+          ? `We've sent a verification link to ${normalizedEmail}. Verify your email, then log in. Check your spam folder if you don't see it.`
+          : "Your account was created, but we couldn't send the verification email. Log in and we'll send you a new link."
+      );
+      navigation.navigate("Login");
     } catch (error) {
       setError(getAuthErrorMessage(error));
     } finally {

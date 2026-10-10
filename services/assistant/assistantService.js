@@ -26,8 +26,40 @@ function detectIntent(message) {
     return { intent: 'LARGEST_BALANCE', confidence: 0.97, matches: 1 };
   }
 
-  if (/\b(how do i|how can i|where do i|how to|can i)\b/.test(text) && /\b(app|screen|scan|barcode|qr|add|create|record|sale|sell|customer|product|stock|credit|payment|supplier|reorder|report|insight)\b/.test(text)) {
+  if (/\b(who are|list|which|name)\b/.test(text) && /\bsuppliers?\b/.test(text)) {
+    return { intent: 'SUPPLIER_LIST', confidence: 0.96, matches: 1 };
+  }
+
+  if (/\b(where are|where can i find|open|go to|show me)\b/.test(text) && /\b(insights?|dashboard)\b/.test(text)) {
+    return { intent: 'APP_HELP', confidence: 0.94, matches: 1 };
+  }
+
+  if (/\binsights?\b/.test(text)) {
+    return { intent: 'BUSINESS_PERFORMANCE', confidence: 0.9, matches: 1 };
+  }
+
+  if (/\b(check|show|review|look at|see|summari[sz]e)\b/.test(text) && /\b(history|records|transactions)\b/.test(text)) {
+    return { intent: 'BUSINESS_PERFORMANCE', confidence: 0.86, matches: 1 };
+  }
+
+  if (/\b(how do i|how can i|where do i|how to|can i|can you help me|please help me)\b/.test(text) && /\b(app|screen|scan|barcode|qr|add|create|record|sale|sell|customer|product|stock|credit|payment|supplier|reorder|report|insight)\b/.test(text)) {
     return { intent: 'APP_HELP', confidence: 0.9, matches: 1 };
+  }
+
+  if (/\b(advice|advise|suggest|recommend|help me|stand out|attract customers|grow)\b/.test(text)) {
+    return { intent: 'BUSINESS_ADVICE', confidence: 0.84, matches: 1 };
+  }
+
+  if (/\b(what can i do|what should i do|how can i improve|how can i grow|i need help|can you help me|please help|i want to)\b/.test(text)) {
+    return { intent: 'BUSINESS_ADVICE', confidence: 0.8, matches: 1 };
+  }
+
+  if (/\b(sales?|revenue|turnover|income|takings|sold|made)\b/.test(text) && /\b(today|this day|for today|so far today)\b/.test(text)) {
+    return { intent: 'SALES_SUMMARY', confidence: 0.9, matches: 1 };
+  }
+
+  if (/\b(sales?|revenue|turnover|income|takings|sold|made)\b/.test(text) && /\b(currently|numbers?|amount|total|where are|how much|figure)\b/.test(text)) {
+    return { intent: 'SALES_SUMMARY', confidence: 0.88, matches: 1 };
   }
 
   let best = { intent: 'BUSINESS_ADVICE', confidence: 0.25, matches: 0 };
@@ -119,7 +151,7 @@ function findProductMention(question, products) {
 
 function appHelpResponse(question) {
   const text = normalizeText(question);
-  const asksHowTo = /\b(how do i|how can i|where do i|where can i|how to|how does|open|go to|navigate to|which screen|can i add|can i create|can i record)\b/.test(text);
+  const asksHowTo = /\b(how do i|how can i|where do i|where can i|where are|where can i find|how to|how does|open|go to|navigate to|which screen|can i add|can i create|can i record|can you help me|please help me)\b/.test(text);
   if (!asksHowTo) return null;
 
   if (/\b(scan|barcode|qr code)\b/.test(text)) return 'To scan a product, open Stock and tap the scan icon beside the search bar. You can also add or edit products from Stock Management.';
@@ -128,7 +160,7 @@ function appHelpResponse(question) {
   if (/\b(sale|sell|checkout|pos|purchase)\b/.test(text)) return 'Open Sell from the bottom navigation to start a sale. Add products to the cart, review the total, choose the payment method, and complete the sale.';
   if (/\b(credit|payment|repay|repayment)\b/.test(text)) return 'Open Credit from the bottom navigation. Select a customer to record credit, or use Make Payment on an account to record a repayment.';
   if (/\b(supplier|reorder|order)\b/.test(text)) return 'Open Suppliers from the bottom navigation to view the supplier and order screens. Supplier prices and purchase history are not connected to the assistant’s store data yet.';
-  if (/\b(report|insight|dashboard|performance)\b/.test(text)) return 'Open Home for today’s dashboard, or Insights from the bottom navigation for business summaries. You can also ask me for sales, stock, and credit figures.';
+  if (/\b(report|insights?|dashboard|performance)\b/.test(text)) return 'Open Home for today’s dashboard, or Insights from the bottom navigation for business summaries. You can also ask me for sales, stock, and credit figures.';
   return null;
 }
 
@@ -244,7 +276,7 @@ function generateGeneralResponse(data, question) {
     return `Hi! I’m SpazaIQ, ready to help your shop run smarter. ${productLine} ${greeting}`;
   }
 
-  return 'I can help with recorded sales, stock, customer credit, product performance, and using the app. I couldn’t match that question to connected data. Try asking “How much did I sell today?”, “What stock is running low?”, or “Who owes me the most?”';
+  return 'That question is not related to the SpazaIQ business records and app guidance I was assigned to answer. I can help with recorded sales, stock, customer credit, product performance, business advice, and using the app. Try asking “How much did I sell today?”, “What stock is running low?”, or “Who owes me the most?”';
 }
 
 function generateAnswer(intent, data, question) {
@@ -287,6 +319,12 @@ function generateAnswer(intent, data, question) {
   if (intent === 'LARGEST_BALANCE') {
     const largest = [...balances].sort((a, b) => b.balance - a.balance)[0];
     return largest ? `${largest.name} has the largest balance at ${money(largest.balance)}.` : 'There are no outstanding customer balances in the connected data.';
+  }
+
+  if (intent === 'SUPPLIER_LIST') {
+    const suppliers = Array.isArray(data.suppliers) ? data.suppliers : [];
+    if (!suppliers.length) return 'No supplier records are available in the connected Suppliers & Orders data.';
+    return `Your recorded suppliers are: ${suppliers.map((supplier) => `${supplier.name} (${supplier.category || 'General'}; ${supplier.phone || 'phone not recorded'})`).join('; ')}.`;
   }
 
   if (intent === 'OVERDUE_CREDIT') {
@@ -426,12 +464,21 @@ function generateAnswer(intent, data, question) {
   }
 
   if (intent === 'BUSINESS_ADVICE') {
+    if (/\b(stand out|market|attract|grow|customer)\b/.test(normalizeText(question))) {
+      const stockAction = lowStock.length
+        ? `Keep the ${lowStock.slice(0, 3).map((product) => product.name).join(', ')} stocked because they are at or below the reorder level.`
+        : 'Keep your essential products and popular sellers consistently in stock.';
+      return `To stand out in your market, use SpazaIQ to keep reliable prices, maintain stock on everyday essentials, and record every sale so you can identify what customers buy most. ${stockAction} Build repeat business by serving customers quickly, tracking credit responsibly, and using the sales and stock insights to make weekly improvements.`;
+    }
     const actions = [];
-    if (balances.length) actions.push(`follow up on ${balances.length} customer balance${balances.length === 1 ? '' : 's'}`);
-    if ((data.sales ?? []).length === 0) actions.push('record sales consistently so trends can be measured');
+    if (balances.length) actions.push(`follow up on ${balances.length} customer balance${balances.length === 1 ? '' : 's'} in Credit`);
+    if ((data.sales ?? []).length === 0) actions.push('record each sale in Sell so the assistant can measure trends and identify your best sellers');
     if (!inventory.length) actions.push('enter stock quantities and reorder levels to get restock alerts');
-    else if (lowStock.length) actions.push(`review ${lowStock.length} product${lowStock.length === 1 ? '' : 's'} at or below the reorder level`);
-    return actions.length ? `Based on the data available, focus on: ${actions.join('; ')}.` : 'I need more connected business data before making recommendations.';
+    else if (lowStock.length) {
+      const priority = lowStock.slice(0, 3).map((product) => `${product.name} (${product.quantity} left; reorder level ${product.reorderLevel})`).join(', ');
+      actions.push(`open Stock Management and review ${priority}`);
+    }
+    return actions.length ? `Based on the data available, start with this plan: ${actions.join('. Then ')}.` : 'I need more connected business data before making recommendations.';
   }
 
   const catalogExample = findCatalogExample(intent);
@@ -442,8 +489,18 @@ export async function answerSpazaIQQuestion({ message, storeId }) {
   const question = String(message || '').trim();
   if (!question) throw new Error('Enter a question first.');
 
-  const data = await fetchSpazaIQData(storeId);
   const detected = detectIntent(question);
+  const staticResponse = detected.intent === 'APP_HELP' ? appHelpResponse(question) : null;
+  if (staticResponse) {
+    return {
+      intent: detected.intent,
+      response: staticResponse,
+      dataUsed: [],
+      confidence: detected.confidence,
+    };
+  }
+
+  const data = await fetchSpazaIQData(storeId);
   const response = detected.matches === 0
     ? generateGeneralResponse(data, question)
     : generateAnswer(detected.intent, data, question);

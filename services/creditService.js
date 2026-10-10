@@ -3,6 +3,7 @@ export {
   fetchCustomerBalances,
   subscribeCustomerBalances,
   fetchLedgerEntries,
+  fetchRepaymentTrackerData,
   addCreditTransaction,
   makePayment,
 } from './firestore/creditRepository';

@@ -11,6 +11,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRoute, useNavigation } from '@react-navigation/native';
+// NOTE: keep this path exactly as it was in your original file.
+// If this file lives in screens/dashboard/, the path is '../../config/ThemeContext'.
 import { useTheme } from '../config/ThemeContext';
 
 
@@ -76,11 +78,24 @@ const orders = [
   },
 ];
 
+// Fallbacks protect against theme keys that may not exist in config/ThemeContext
 function getStatusMeta(colors) {
   return {
-    delivered: { label: 'Delivered', color: colors.success, bg: colors.successBg },
-    pending: { label: 'Pending', color: colors.pending, bg: colors.pendingBg },
-    cancelled: { label: 'Cancelled', color: colors.danger, bg: colors.dangerBg },
+    delivered: {
+      label: 'Delivered',
+      color: colors.success || '#10B981',
+      bg: colors.successBg || 'rgba(16, 185, 129, 0.15)',
+    },
+    pending: {
+      label: 'Pending',
+      color: colors.pending || '#F59E0B',
+      bg: colors.pendingBg || 'rgba(245, 158, 11, 0.15)',
+    },
+    cancelled: {
+      label: 'Cancelled',
+      color: colors.danger,
+      bg: colors.dangerBg || 'rgba(220, 38, 38, 0.15)',
+    },
   };
 }
 
@@ -88,8 +103,11 @@ export default function SuppliersOrdersScreen() {
   const route = useRoute();
   const navigation = useNavigation();
   const { colors, spacing, radius, typography } = useTheme();
-  const styles = makeStyles(colors, typography, spacing, radius);
-  const STATUS_META = getStatusMeta(colors);
+  const styles = useMemo(
+    () => makeStyles(colors, typography, spacing, radius),
+    [colors, typography, spacing, radius]
+  );
+  const STATUS_META = useMemo(() => getStatusMeta(colors), [colors]);
 
   const initialTab = route.params?.initialTab === 'orders' ? 'orders' : 'suppliers';
 
@@ -226,7 +244,7 @@ function makeStyles(colors, typography, spacing, radius) {
       paddingVertical: spacing.md,
     },
     backButton: { padding: spacing.xs },
-    headerTitle: { ...typography.h2 },
+    headerTitle: { ...typography.h2, color: colors.textPrimary },
     toggleWrap: {
       flexDirection: 'row',
       backgroundColor: colors.card,
@@ -253,9 +271,9 @@ function makeStyles(colors, typography, spacing, radius) {
       paddingHorizontal: spacing.md,
       gap: spacing.sm,
     },
-    searchInput: { flex: 1, paddingVertical: spacing.sm, ...typography.body },
+    searchInput: { flex: 1, paddingVertical: spacing.sm, ...typography.body, color: colors.textPrimary },
     listContent: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl * 2 },
-    emptyText: { ...typography.label, textAlign: 'center', marginTop: spacing.xl },
+    emptyText: { ...typography.label, color: colors.textMuted, textAlign: 'center', marginTop: spacing.xl },
     supplierCard: {
       backgroundColor: colors.card,
       borderRadius: radius.md,
@@ -265,8 +283,8 @@ function makeStyles(colors, typography, spacing, radius) {
       marginBottom: spacing.md,
     },
     supplierHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-    supplierName: { ...typography.h2, fontSize: 16 },
-    supplierLocation: { ...typography.small, marginTop: spacing.xs, marginBottom: spacing.sm },
+    supplierName: { ...typography.h2, fontSize: 16, color: colors.textPrimary },
+    supplierLocation: { ...typography.small, color: colors.textMuted, marginTop: spacing.xs, marginBottom: spacing.sm },
     productsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
     productPill: {
       backgroundColor: colors.primaryLight,
@@ -274,7 +292,7 @@ function makeStyles(colors, typography, spacing, radius) {
       paddingVertical: 4,
       paddingHorizontal: spacing.sm,
     },
-    productPillText: { ...typography.small, color: colors.primaryDark, fontWeight: '600' },
+    productPillText: { ...typography.small, color: colors.primary, fontWeight: '600' },
     orderCard: {
       backgroundColor: colors.card,
       borderRadius: radius.md,
@@ -289,13 +307,13 @@ function makeStyles(colors, typography, spacing, radius) {
       alignItems: 'center',
       marginBottom: spacing.xs,
     },
-    orderSupplier: { ...typography.h2, fontSize: 16 },
+    orderSupplier: { ...typography.h2, fontSize: 16, color: colors.textPrimary, flex: 1, marginRight: spacing.sm },
     statusBadge: { borderRadius: radius.pill, paddingVertical: 4, paddingHorizontal: spacing.sm },
     statusBadgeText: { ...typography.small, fontWeight: '700' },
     orderItems: { ...typography.body, color: colors.textSecondary, marginBottom: spacing.sm },
     orderFooterRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.md },
-    orderDate: { ...typography.small },
-    orderTotal: { ...typography.body, fontWeight: '700' },
+    orderDate: { ...typography.small, color: colors.textMuted },
+    orderTotal: { ...typography.body, color: colors.textPrimary, fontWeight: '700' },
     reorderBtn: {
       flexDirection: 'row',
       alignItems: 'center',

@@ -53,6 +53,9 @@ export function mapLedgerEntry(snapshot) {
     type: data.type ?? (Number(data.amount) < 0 ? 'payment' : 'credit'),
     amount: Number(data.amount ?? 0),
     dueDate: data.dueDate ?? data.due_date ?? null,
+    paymentMethod: data.paymentMethod ?? data.payment_method ?? null,
+    paymentDate: data.paymentDate ?? data.payment_date ?? null,
+    scheduleAllocations: data.scheduleAllocations ?? data.schedule_allocations ?? [],
     idempotencyKey: data.idempotencyKey ?? null,
     createdAt: timestampToIso(data.createdAt ?? data.created_at),
   };
