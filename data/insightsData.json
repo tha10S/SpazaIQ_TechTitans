@@ -1,0 +1,158 @@
+{
+  "generatedAt": "2026-10-05T20:15:17.699Z",
+  "anchorDate": "2026-10-02",
+  "periodData": {
+    "Today": {
+      "stats": {
+        "revenue": "R1,762",
+        "profit": "R399",
+        "itemsSold": 64
+      },
+      "salesByDay": [
+        {
+          "day": "Today",
+          "value": 100
+        }
+      ],
+      "topProducts": [
+        {
+          "name": "Omo Washing Powder 500g",
+          "sold": 16,
+          "fill": 1
+        },
+        {
+          "name": "Peermont Cigarettes Single",
+          "sold": 9,
+          "fill": 0.56
+        },
+        {
+          "name": "Tastic Rice 2kg",
+          "sold": 8,
+          "fill": 0.5
+        }
+      ]
+    },
+    "Week": {
+      "stats": {
+        "revenue": "R10,959",
+        "profit": "R2,482",
+        "itemsSold": 440
+      },
+      "salesByDay": [
+        {
+          "day": "Sun",
+          "value": 88
+        },
+        {
+          "day": "Mon",
+          "value": 49
+        },
+        {
+          "day": "Tue",
+          "value": 58
+        },
+        {
+          "day": "Wed",
+          "value": 45
+        },
+        {
+          "day": "Thu",
+          "value": 88
+        },
+        {
+          "day": "Fri",
+          "value": 100
+        },
+        {
+          "day": "Sat",
+          "value": 82
+        }
+      ],
+      "topProducts": [
+        {
+          "name": "Peermont Cigarettes Single",
+          "sold": 39,
+          "fill": 1
+        },
+        {
+          "name": "Coca-Cola 500ml",
+          "sold": 35,
+          "fill": 0.9
+        },
+        {
+          "name": "Tastic Rice 2kg",
+          "sold": 35,
+          "fill": 0.9
+        }
+      ]
+    },
+    "Month": {
+      "stats": {
+        "revenue": "R39,249",
+        "profit": "R8,678",
+        "itemsSold": 1483
+      },
+      "salesByDay": [
+        {
+          "day": "Week 1",
+          "value": 84
+        },
+        {
+          "day": "Week 2",
+          "value": 85
+        },
+        {
+          "day": "Week 3",
+          "value": 90
+        },
+        {
+          "day": "Week 4",
+          "value": 100
+        }
+      ],
+      "topProducts": [
+        {
+          "name": "Tastic Rice 2kg",
+          "sold": 104,
+          "fill": 1
+        },
+        {
+          "name": "Coca-Cola 500ml",
+          "sold": 104,
+          "fill": 1
+        },
+        {
+          "name": "Nescafe Ricoffy 250g",
+          "sold": 93,
+          "fill": 0.89
+        }
+      ]
+    }
+  },
+  "recentlyPurchased": [
+    {
+      "name": "Boxer Sugar 2kg",
+      "qty": 2,
+      "time": "9:50:25 AM · 2026/10/03"
+    },
+    {
+      "name": "Nescafe Ricoffy 250g",
+      "qty": 2,
+      "time": "9:40:01 AM · 2026/10/03"
+    },
+    {
+      "name": "Coca-Cola 500ml",
+      "qty": 3,
+      "time": "9:08:13 AM · 2026/10/03"
+    },
+    {
+      "name": "Tastic Rice 2kg",
+      "qty": 5,
+      "time": "8:55:39 AM · 2026/10/03"
+    }
+  ],
+  "forecastProducts": [
+    "Peermont Cigarettes Single",
+    "Coca-Cola 500ml"
+  ]
+}

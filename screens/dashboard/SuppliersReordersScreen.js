@@ -585,4 +585,4 @@ const makeStyles = (colors) =>
       paddingVertical: 8,
     },
     deliverButtonText: { color: "#FFFFFF", fontWeight: "700", fontSize: 13 },
-  });git remote set-url origin https://github.com/tha10S/SpazaIQ_TechTitans.git
+  });

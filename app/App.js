@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { ThemeProvider, useTheme } from '../config/ThemeContext';
 import { TechTitansAssistant } from '../components/TechTitansAssistant';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 // Firebase auth
 import { watchAuth } from '../services/auth/firebaseAuth';
@@ -25,6 +26,7 @@ import HomeScreen from '../screens/HomeScreen';
 import StockScreen from '../screens/StockScreen';
 import NewSaleScreen from '../screens/NewSaleScreen';
 import CreditLedgerScreen from '../screens/CreditLedgerScreen';
+import RepaymentTrackerScreen from '../screens/RepaymentTrackerScreen';
 import ProfileSettingsScreen from '../screens/ProfileSettingsScreen';
 import QRScannerScreen from '../screens/QRScannerScreen';
 import PlaceholderScreen from '../screens/PlaceholderScreen';
@@ -42,6 +44,17 @@ const icons = {
   Suppliers: 'people',
   Insights: 'stats-chart',
 };
+
+function OfflineDemoScreen() {
+  return (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 28, backgroundColor: '#F2F2F2' }}>
+      <Text style={{ fontSize: 28, fontWeight: '700', color: '#16834D', marginBottom: 12 }}>SpazaIQ Offline Demo</Text>
+      <Text style={{ fontSize: 16, textAlign: 'center', color: '#475569', lineHeight: 24 }}>
+        Your local shop assistant is ready. Open the chat button to ask about sales, stock, customer credit, products, or how to use the app.
+      </Text>
+    </View>
+  );
+}
 
 function MainTabs({ route }) {
   const account = route?.params || {};
@@ -87,6 +100,7 @@ function AppContent() {
   const { isDark, colors } = useTheme();
   const [user, setUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
+  const [offlineDemo, setOfflineDemo] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -94,6 +108,7 @@ function AppContent() {
     const unsubscribe = watchAuth(async (u) => {
       setUser(u);
       setUserProfile(null);
+      setOfflineDemo(false);
       if (!u) {
         setLoading(false);
         return;
@@ -153,25 +168,35 @@ function AppContent() {
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <NavigationContainer theme={navTheme}>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
-          {user ? (
+          {offlineDemo ? (
+            <Stack.Screen name="OfflineDemo" component={OfflineDemoScreen} />
+          ) : user ? (
             <>
               <Stack.Screen
                 name="MainTabs"
                 component={MainTabs}
                 initialParams={{
-                  storeId: userProfile?.defaultStoreId || user.uid,
-                  userName: userProfile?.fullName || user.displayName || user.email,
-                  shopName: userProfile?.shopName || user.displayName || 'My Shop',
+                  storeId: offlineDemo ? 'mock-store-1' : userProfile?.defaultStoreId || user.uid,
+                  userName: offlineDemo ? 'Demo Shopkeeper' : userProfile?.fullName || user.displayName || user.email,
+                  shopName: offlineDemo ? 'SpazaIQ Offline Demo' : userProfile?.shopName || user.displayName || 'My Shop',
                 }}
               />
               <Stack.Screen name="Scanner" component={QRScannerScreen} />
               <Stack.Screen name="Notifications" component={NotificationsScreen} />
               <Stack.Screen name="Placeholder" component={PlaceholderScreen} />
               <Stack.Screen name="Profile" component={ProfileSettingsScreen} />
+              <Stack.Screen
+                name="RepaymentTracker"
+                component={RepaymentTrackerScreen}
+                options={{ headerShown: true, title: 'Repayment Tracker' }}
+              />
             </>
           ) : (
             <>
-              <Stack.Screen name="Login" component={LoginScreen} />
+              <Stack.Screen
+                name="Login"
+                children={(props) => <LoginScreen {...props} onOfflineDemo={() => setOfflineDemo(true)} />}
+              />
               <Stack.Screen name="Signup" component={SignupScreen} />
             </>
           )}
@@ -182,11 +207,11 @@ function AppContent() {
           />
         </Stack.Navigator>
       </NavigationContainer>
-      {user && (
+      {(user || offlineDemo) && (
         <TechTitansAssistant
-          storeId={userProfile?.defaultStoreId || user.uid}
-          userName={userProfile?.fullName || user.displayName || user.email}
-          shopName={userProfile?.shopName || user.displayName || 'My Shop'}
+          storeId={offlineDemo ? 'mock-store-1' : userProfile?.defaultStoreId || user.uid}
+          userName={offlineDemo ? 'Demo Shopkeeper' : userProfile?.fullName || user.displayName || user.email}
+          shopName={offlineDemo ? 'SpazaIQ Offline Demo' : userProfile?.shopName || user.displayName || 'My Shop'}
         />
       )}
     </View>
@@ -195,8 +220,10 @@ function AppContent() {
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <AppContent />
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <AppContent />
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }
