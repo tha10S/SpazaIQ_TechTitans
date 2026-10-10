@@ -12,6 +12,16 @@ import {
 import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath } from './paths';
 import { mapCustomer, mapLedgerEntry } from './mappers';
+import {
+  enqueueOfflineOperation,
+  getOfflineOperations,
+  isDeviceOffline,
+  isNetworkError,
+  readPosCreditSnapshot,
+  registerOfflineOperationHandler,
+  savePosCreditSnapshot,
+  subscribeOfflineOperations,
+} from '../offline/posCreditQueue';
 
 function customersCollection(storeId) {
   return collection(db, ...storeCollectionPath(storeId, 'customers'));
@@ -25,17 +35,133 @@ function operationRef(storeId, key) {
   return doc(db, ...storeCollectionPath(storeId, 'operations'), key);
 }
 
+function pendingBalanceChange(operation, customerId) {
+  if (operation.status === 'failed') return 0;
+  const payload = operation.payload;
+  if (operation.type === 'makePayment' && payload.customerId === customerId) return -Number(payload.amount);
+  if (operation.type === 'addCreditTransaction' && payload.customerId === customerId) return Number(payload.amount);
+  if (operation.type === 'recordSale' && payload.customerId === customerId) return Number(payload.creditAmount || 0);
+  return 0;
+}
+
+function applyPendingBalances(customers, operations) {
+  return customers.map((customer) => {
+    const change = operations.reduce((total, operation) =>
+      total + pendingBalanceChange(operation, customer.id), 0);
+    return change ? { ...customer, balance: Number(customer.balance || 0) + change, pendingSync: true } : customer;
+  });
+}
+
+function pendingLedgerEntries(operations) {
+  return operations
+    .filter((operation) => operation.status !== 'failed')
+    .flatMap((operation) => {
+      const payload = operation.payload;
+      if (operation.type === 'makePayment') {
+        return [{
+          id: operation.id,
+          customerId: payload.customerId,
+          type: 'payment',
+          amount: -Number(payload.amount),
+          paymentMethod: payload.paymentMethod || 'Cash',
+          paymentDate: payload.paymentDate || operation.createdAt.slice(0, 10),
+          idempotencyKey: operation.id,
+          createdAt: operation.createdAt,
+          pendingSync: true,
+        }];
+      }
+      if (operation.type === 'addCreditTransaction') {
+        return [{
+          id: operation.id,
+          customerId: payload.customerId,
+          type: 'credit',
+          amount: Number(payload.amount),
+          dueDate: payload.dueDate || null,
+          idempotencyKey: operation.id,
+          createdAt: operation.createdAt,
+          pendingSync: true,
+        }];
+      }
+      if (operation.type === 'recordSale' && Number(payload.creditAmount) > 0) {
+        return [{
+          id: operation.id,
+          customerId: payload.customerId,
+          type: 'credit',
+          amount: Number(payload.creditAmount),
+          dueDate: payload.dueDate || null,
+          idempotencyKey: operation.id,
+          createdAt: operation.createdAt,
+          pendingSync: true,
+        }];
+      }
+      return [];
+    });
+}
+
+function timestampToIso(value) {
+  if (!value) return null;
+  if (typeof value.toDate === 'function') return value.toDate().toISOString();
+  if (value instanceof Date) return value.toISOString();
+  return String(value);
+}
+
 export async function fetchCustomerBalances(storeId) {
   const authenticatedStoreId = assertStoreId(storeId);
-  const snapshot = await getDocs(query(customersCollection(authenticatedStoreId), orderBy('name')));
-  return snapshot.docs.map(mapCustomer);
+  try {
+    const snapshot = await getDocs(query(customersCollection(authenticatedStoreId), orderBy('name')));
+    const customers = snapshot.docs.map(mapCustomer);
+    await savePosCreditSnapshot(authenticatedStoreId, 'customers', customers);
+    return applyPendingBalances(customers, await getOfflineOperations(authenticatedStoreId));
+  } catch (error) {
+    if (!isNetworkError(error)) throw error;
+    const customers = await readPosCreditSnapshot(authenticatedStoreId, 'customers');
+    if (!Array.isArray(customers)) throw error;
+    return applyPendingBalances(customers, await getOfflineOperations(authenticatedStoreId));
+  }
 }
 
 export function subscribeCustomerBalances(storeId, onData, onError) {
   const authenticatedStoreId = assertStoreId(storeId);
-  return onSnapshot(query(customersCollection(authenticatedStoreId), orderBy('name')), (snapshot) => {
-    onData(snapshot.docs.map(mapCustomer));
-  }, onError);
+  let active = true;
+  let cachedCustomers = null;
+  let queuedOperations = [];
+  let unsubscribeSnapshot = () => {};
+  let unsubscribeQueue = () => {};
+  const publishCustomers = (customers) => onData(applyPendingBalances(customers, queuedOperations));
+  const start = async () => {
+    try {
+      cachedCustomers = await readPosCreditSnapshot(authenticatedStoreId, 'customers');
+      if (cachedCustomers !== null && !Array.isArray(cachedCustomers)) {
+        throw new Error('The saved offline customer list is invalid.');
+      }
+      if (active && cachedCustomers) publishCustomers(cachedCustomers);
+    } catch (error) {
+      if (active) onError(error);
+    }
+    if (!active) return;
+    unsubscribeQueue = subscribeOfflineOperations(authenticatedStoreId, (operations) => {
+      queuedOperations = operations;
+      if (cachedCustomers && active) publishCustomers(cachedCustomers);
+    }, onError);
+    unsubscribeSnapshot = onSnapshot(query(customersCollection(authenticatedStoreId), orderBy('name')), (snapshot) => {
+      if (snapshot.metadata.fromCache && cachedCustomers?.length) return;
+      const customers = snapshot.docs.map(mapCustomer);
+      if (!snapshot.metadata.fromCache) {
+        savePosCreditSnapshot(authenticatedStoreId, 'customers', customers).catch(onError);
+      }
+      cachedCustomers = customers;
+      publishCustomers(customers);
+    }, (error) => {
+      if (cachedCustomers) publishCustomers(cachedCustomers);
+      onError(error);
+    });
+  };
+  start();
+  return () => {
+    active = false;
+    unsubscribeSnapshot();
+    unsubscribeQueue();
+  };
 }
 
 export async function fetchLedgerEntries(storeId, customerId) {
@@ -45,31 +171,76 @@ export async function fetchLedgerEntries(storeId, customerId) {
     where('customerId', '==', customerId),
     orderBy('createdAt', 'desc')
   );
-  const snapshot = await getDocs(ledgerQuery);
-  return snapshot.docs.map(mapLedgerEntry);
+  try {
+    const snapshot = await getDocs(ledgerQuery);
+    const entries = snapshot.docs.map(mapLedgerEntry);
+    await savePosCreditSnapshot(authenticatedStoreId, `ledger:${customerId}`, entries);
+    return [...pendingLedgerEntries(await getOfflineOperations(authenticatedStoreId))
+      .filter((entry) => entry.customerId === customerId), ...entries];
+  } catch (error) {
+    if (!isNetworkError(error)) throw error;
+    const entries = await readPosCreditSnapshot(authenticatedStoreId, `ledger:${customerId}`);
+    if (!Array.isArray(entries)) throw error;
+    return [...pendingLedgerEntries(await getOfflineOperations(authenticatedStoreId))
+      .filter((entry) => entry.customerId === customerId), ...entries];
+  }
 }
 
 export async function fetchRepaymentTrackerData(storeId) {
   const authenticatedStoreId = assertStoreId(storeId);
-  const [customersSnapshot, schedulesSnapshot, ledgerSnapshot] = await Promise.all([
-    getDocs(query(customersCollection(authenticatedStoreId), orderBy('name'))),
-    getDocs(collection(db, ...storeCollectionPath(authenticatedStoreId, 'repaymentSchedules'))),
-    getDocs(query(ledgerCollection(authenticatedStoreId), orderBy('createdAt', 'desc'))),
-  ]);
-
-  return {
-    customers: customersSnapshot.docs.map(mapCustomer),
-    schedules: schedulesSnapshot.docs.map((snapshot) => ({ id: snapshot.id, ...snapshot.data() })),
-    ledgerEntries: ledgerSnapshot.docs.map(mapLedgerEntry),
-  };
+  try {
+    const [customersSnapshot, schedulesSnapshot, ledgerSnapshot] = await Promise.all([
+      getDocs(query(customersCollection(authenticatedStoreId), orderBy('name'))),
+      getDocs(collection(db, ...storeCollectionPath(authenticatedStoreId, 'repaymentSchedules'))),
+      getDocs(query(ledgerCollection(authenticatedStoreId), orderBy('createdAt', 'desc'))),
+    ]);
+    const data = {
+      customers: customersSnapshot.docs.map(mapCustomer),
+      schedules: schedulesSnapshot.docs.map((snapshot) => {
+        const schedule = snapshot.data();
+        return {
+          id: snapshot.id,
+          ...schedule,
+          createdAt: timestampToIso(schedule.createdAt),
+          dueDate: timestampToIso(schedule.dueDate),
+        };
+      }),
+      ledgerEntries: ledgerSnapshot.docs.map(mapLedgerEntry),
+    };
+    await savePosCreditSnapshot(authenticatedStoreId, 'repaymentData', data);
+    const operations = await getOfflineOperations(authenticatedStoreId);
+    return {
+      ...data,
+      customers: applyPendingBalances(data.customers, operations),
+      ledgerEntries: [...pendingLedgerEntries(operations), ...data.ledgerEntries],
+    };
+  } catch (error) {
+    if (!isNetworkError(error)) throw error;
+    const data = await readPosCreditSnapshot(authenticatedStoreId, 'repaymentData');
+    if (!data || !Array.isArray(data.customers) || !Array.isArray(data.schedules) || !Array.isArray(data.ledgerEntries)) {
+      throw error;
+    }
+    const operations = await getOfflineOperations(authenticatedStoreId);
+    return {
+      ...data,
+      customers: applyPendingBalances(data.customers, operations),
+      ledgerEntries: [...pendingLedgerEntries(operations), ...data.ledgerEntries],
+    };
+  }
 }
 
-export async function makePayment({ storeId, customerId, amount, idempotencyKey, note = '', paymentMethod = 'Cash', paymentDate }) {
-  const authenticatedStoreId = assertStoreId(storeId);
+function validatePaymentInput({ customerId, amount, idempotencyKey }) {
   const numericAmount = Number(amount);
   if (!customerId || !Number.isFinite(numericAmount) || numericAmount <= 0) {
     throw new Error('Enter a valid customer and payment amount.');
   }
+  if (!idempotencyKey) throw new Error('A payment idempotency key is required.');
+  return numericAmount;
+}
+
+async function makePaymentOnline({ storeId, customerId, amount, idempotencyKey, note = '', paymentMethod = 'Cash', paymentDate }) {
+  const authenticatedStoreId = assertStoreId(storeId);
+  const numericAmount = validatePaymentInput({ customerId, amount, idempotencyKey });
 
   return runTransaction(db, async (transaction) => {
     const operation = await transaction.get(operationRef(authenticatedStoreId, idempotencyKey));
@@ -144,10 +315,29 @@ export async function makePayment({ storeId, customerId, amount, idempotencyKey,
   });
 }
 
-export async function addCreditTransaction({ storeId, customerId, customerName, newCustomer, amount, dueDate, idempotencyKey, schedule }) {
-  const authenticatedStoreId = assertStoreId(storeId);
+export async function makePayment(input) {
+  const authenticatedStoreId = assertStoreId(input.storeId);
+  const payload = { ...input, storeId: authenticatedStoreId };
+  const numericAmount = validatePaymentInput(payload);
+  const result = { id: payload.idempotencyKey, customerId: payload.customerId, amount: -numericAmount };
+  if (await isDeviceOffline()) {
+    await enqueueOfflineOperation(authenticatedStoreId, 'makePayment', payload);
+    return { ...result, pendingSync: true };
+  }
+
+  try {
+    return await makePaymentOnline(payload);
+  } catch (error) {
+    if (!isNetworkError(error)) throw error;
+    await enqueueOfflineOperation(authenticatedStoreId, 'makePayment', payload);
+    return { ...result, pendingSync: true };
+  }
+}
+
+function validateCreditInput({ customerId, customerName, newCustomer, amount, idempotencyKey, schedule }) {
   const numericAmount = Number(amount);
   if (!customerId || !Number.isFinite(numericAmount) || numericAmount <= 0) throw new Error('Enter a valid credit amount.');
+  if (!idempotencyKey) throw new Error('A credit idempotency key is required.');
   const newCustomerData = customerId === 'new'
     ? {
         name: String(newCustomer?.name || customerName || '').trim(),
@@ -179,6 +369,13 @@ export async function addCreditTransaction({ storeId, customerId, customerName, 
     totalPayments: periodCount,
     installmentAmount: Number((numericAmount / periodCount).toFixed(2)),
   } : null;
+  return { numericAmount, repaymentSchedule, newCustomerData };
+}
+
+async function addCreditTransactionOnline(input) {
+  const { storeId, customerId, customerName, newCustomer, amount, dueDate, idempotencyKey, schedule } = input;
+  const authenticatedStoreId = assertStoreId(storeId);
+  const { numericAmount, repaymentSchedule, newCustomerData } = validateCreditInput(input);
 
   return runTransaction(db, async (transaction) => {
     const operation = await transaction.get(operationRef(authenticatedStoreId, idempotencyKey));
@@ -247,3 +444,30 @@ export async function addCreditTransaction({ storeId, customerId, customerName, 
     return result;
   });
 }
+
+export async function addCreditTransaction(input) {
+  const authenticatedStoreId = assertStoreId(input.storeId);
+  const payload = { ...input, storeId: authenticatedStoreId };
+  const { numericAmount, repaymentSchedule } = validateCreditInput(payload);
+  payload.schedule = repaymentSchedule;
+  const result = {
+    id: payload.idempotencyKey,
+    customerId: payload.customerId,
+    amount: numericAmount,
+  };
+  if (await isDeviceOffline()) {
+    await enqueueOfflineOperation(authenticatedStoreId, 'addCreditTransaction', payload);
+    return { ...result, pendingSync: true };
+  }
+
+  try {
+    return await addCreditTransactionOnline(payload);
+  } catch (error) {
+    if (!isNetworkError(error)) throw error;
+    await enqueueOfflineOperation(authenticatedStoreId, 'addCreditTransaction', payload);
+    return { ...result, pendingSync: true };
+  }
+}
+
+registerOfflineOperationHandler('makePayment', makePaymentOnline);
+registerOfflineOperationHandler('addCreditTransaction', addCreditTransactionOnline);

@@ -18,6 +18,7 @@ import { useTheme } from '../config/ThemeContext';
 import { useCustomerBalances } from '../hooks/useCustomerBalances';
 import { getAuthenticatedStoreId } from '../services/firestore/paths';
 import { createCustomer } from '../services/creditService';
+import { OfflineSyncNotice } from '../components/OfflineSyncNotice';
 
 const BRAND_GREEN = '#004B49'; // solid buttons and hero card keep brand green in both themes
 
@@ -192,10 +193,11 @@ export default function CreditLedgerScreen({ route, navigation }) {
 
     setSaving(true);
     try {
+      let result;
       if (modalMode === 'payment') {
-        await recordPayment({ customerId: activeCustomer.id, amount, note: 'Payment recorded in credit ledger' });
+        result = await recordPayment({ customerId: activeCustomer.id, amount, note: 'Payment recorded in credit ledger' });
       } else {
-        await confirmCredit({
+        result = await confirmCredit({
           customer: activeCustomer,
           amount,
           dueDate: pendingDueDate.trim(),
@@ -215,6 +217,12 @@ export default function CreditLedgerScreen({ route, navigation }) {
       setDurationMonths('');
       setDurationWeeks('');
       setActiveCustomer(null);
+      if (result?.pendingSync) {
+        Alert.alert(
+          modalMode === 'payment' ? 'Payment saved offline' : 'Credit entry saved offline',
+          'This change is stored on this device and will sync when the connection returns. The server will validate it then.'
+        );
+      }
     } catch (err) {
       Alert.alert(modalMode === 'payment' ? 'Could not make payment' : 'Could not log credit', err.message);
     } finally {
@@ -296,6 +304,7 @@ export default function CreditLedgerScreen({ route, navigation }) {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        <OfflineSyncNotice storeId={storeId} />
         {/* Header Section */}
         <View style={styles.headerRow}>
           <View>

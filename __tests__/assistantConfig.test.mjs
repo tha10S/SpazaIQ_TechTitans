@@ -126,6 +126,15 @@ test('assistant summarises the business when asked for insights', async () => {
 
 test('assistant understands natural sales-today wording and gives a useful month-to-date fallback', async () => {
   await resetMockData();
+  const state = await getState();
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  state.sales = [{
+    id: 'yesterday-sale',
+    created_at: yesterday.toISOString(),
+    total: 1015,
+    items: [],
+  }];
 
   const result = await answerSpazaIQQuestion({
     message: 'How much did I sell today?',
@@ -136,6 +145,25 @@ test('assistant understands natural sales-today wording and gives a useful month
   assert.match(result.response.toLowerCase(), /no sales have been recorded today/);
   assert.match(result.response, /1\s*015/);
   assert.doesNotMatch(result.response.toLowerCase(), /focus on/);
+});
+
+test('assistant includes a sale with the POS repository createdAt timestamp in today’s totals', async () => {
+  await resetMockData();
+  const state = await getState();
+  state.sales = [{
+    id: 'today-sale',
+    createdAt: new Date().toISOString(),
+    total: 125,
+    items: [],
+  }];
+
+  const result = await answerSpazaIQQuestion({
+    message: 'How much did I sell today?',
+    storeId: 'mock-store-1',
+  });
+
+  assert.equal(result.intent, 'SALES_SUMMARY');
+  assert.match(result.response, /1 sale totalling R125/);
 });
 
 test('assistant understands sales wording with words between the topic and time period', async () => {

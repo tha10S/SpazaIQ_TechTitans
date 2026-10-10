@@ -349,13 +349,6 @@ export default function ProfileSettingsScreen() {
           </View>
         </View>
 
-        <TouchableOpacity
-          style={styles.firebaseTestButton}
-          onPress={() => navigation.navigate('FirebaseTest')}
-        >
-          <Text style={styles.firebaseTestButtonText}>Open Firebase Test</Text>
-        </TouchableOpacity>
-
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} disabled={isLoggingOut}>
           <Ionicons name="log-out-outline" size={18} color={colors.danger} />
           <Text style={styles.logoutBtnText}>{isLoggingOut ? 'Signing out...' : 'Log Out'}</Text>
@@ -558,16 +551,6 @@ function makeStyles(colors, typography, spacing, radius) {
       borderRadius: radius.pill,
       paddingVertical: spacing.md,
       marginBottom: spacing.md,
-    },
-    firebaseTestButton: {
-      alignItems: 'center',
-      paddingVertical: spacing.sm,
-      marginBottom: spacing.sm,
-    },
-    firebaseTestButtonText: {
-      ...typography.small,
-      color: colors.primary,
-      fontWeight: '700',
     },
     logoutBtnText: { ...typography.body, color: colors.danger, fontWeight: '700' },
     logoutErrorText: {

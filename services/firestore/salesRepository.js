@@ -11,6 +11,16 @@ import {
 import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath } from './paths';
 import { mapSale } from './mappers';
+import {
+  enqueueOfflineOperation,
+  getOfflineOperations,
+  isDeviceOffline,
+  isNetworkError,
+  readPosCreditSnapshot,
+  registerOfflineOperationHandler,
+  savePosCreditSnapshot,
+  subscribeOfflineOperations,
+} from '../offline/posCreditQueue';
 
 function salesCollection(storeId) {
   return collection(db, ...storeCollectionPath(storeId, 'sales'));
@@ -20,27 +30,102 @@ function operationRef(storeId, key) {
   return doc(db, ...storeCollectionPath(storeId, 'operations'), key);
 }
 
+function mergePendingSales(sales, operations) {
+  const pendingSales = operations
+    .filter((operation) => operation.type === 'recordSale' && operation.status !== 'failed')
+    .map((operation) => ({
+      id: operation.id,
+      paymentMethod: operation.payload.paymentMethod,
+      total: Number(operation.payload.total),
+      paidAmount: Number(operation.payload.paidAmount),
+      creditAmount: Number(operation.payload.creditAmount),
+      customerId: operation.payload.customerId || null,
+      items: operation.payload.cart,
+      createdAt: operation.createdAt,
+      pendingSync: true,
+    }));
+  const knownIds = new Set(sales.map((sale) => sale.id));
+  return [...pendingSales.filter((sale) => !knownIds.has(sale.id)), ...sales];
+}
+
 export async function fetchSales(storeId) {
   const authenticatedStoreId = assertStoreId(storeId);
-  const snapshot = await getDocs(query(salesCollection(authenticatedStoreId), orderBy('createdAt', 'desc')));
-  return snapshot.docs.map(mapSale);
+  let sales;
+  try {
+    const snapshot = await getDocs(query(salesCollection(authenticatedStoreId), orderBy('createdAt', 'desc')));
+    sales = snapshot.docs.map(mapSale);
+    await savePosCreditSnapshot(authenticatedStoreId, 'sales', sales);
+  } catch (error) {
+    if (!isNetworkError(error)) throw error;
+    sales = await readPosCreditSnapshot(authenticatedStoreId, 'sales');
+    if (!Array.isArray(sales)) throw error;
+  }
+  return mergePendingSales(sales, await getOfflineOperations(authenticatedStoreId));
 }
 
 export function subscribeSales(storeId, onData, onError) {
   const authenticatedStoreId = assertStoreId(storeId);
-  return onSnapshot(query(salesCollection(authenticatedStoreId), orderBy('createdAt', 'desc')), (snapshot) => {
-    onData(snapshot.docs.map(mapSale));
-  }, onError);
+  let active = true;
+  let cachedSales = null;
+  let queuedOperations = [];
+  let unsubscribeSnapshot = () => {};
+  let unsubscribeQueue = () => {};
+  const publishSales = (sales, operations = []) => {
+    onData(mergePendingSales(sales, operations));
+  };
+  const start = async () => {
+    try {
+      cachedSales = await readPosCreditSnapshot(authenticatedStoreId, 'sales');
+      if (cachedSales !== null && !Array.isArray(cachedSales)) {
+        throw new Error('The saved offline sales list is invalid.');
+      }
+      if (active && cachedSales) publishSales(cachedSales);
+    } catch (error) {
+      if (active) onError(error);
+    }
+    if (!active) return;
+    unsubscribeQueue = subscribeOfflineOperations(authenticatedStoreId, (operations) => {
+      queuedOperations = operations;
+      if (active) publishSales(cachedSales || [], queuedOperations);
+    }, onError);
+    unsubscribeSnapshot = onSnapshot(query(salesCollection(authenticatedStoreId), orderBy('createdAt', 'desc')), (snapshot) => {
+      if (snapshot.metadata.fromCache && cachedSales?.length) return;
+      const sales = snapshot.docs.map(mapSale);
+      if (!snapshot.metadata.fromCache) {
+        cachedSales = sales;
+        savePosCreditSnapshot(authenticatedStoreId, 'sales', sales).catch(onError);
+      }
+      cachedSales = sales;
+      publishSales(sales, queuedOperations);
+    }, (error) => {
+      if (cachedSales) publishSales(cachedSales);
+      onError(error);
+    });
+  };
+  start();
+  return () => {
+    active = false;
+    unsubscribeSnapshot();
+    unsubscribeQueue();
+  };
 }
 
-export async function recordSale({ storeId, cart, paymentMethod, total, customerId, creditAmount = 0, paidAmount = total, dueDate, schedule, idempotencyKey }) {
-  const authenticatedStoreId = assertStoreId(storeId);
+function validateSaleInput({ cart, total, creditAmount = 0, paidAmount = total, customerId, idempotencyKey }) {
   if (!cart?.length) throw new Error('Add at least one product to the cart.');
+  if (!idempotencyKey) throw new Error('A sale idempotency key is required.');
   const numericTotal = Number(total);
   const numericCredit = Number(creditAmount || 0);
   const numericPaid = Number(paidAmount || 0);
   if (Math.abs(numericPaid + numericCredit - numericTotal) > 0.01) throw new Error('Payment amounts must equal the sale total.');
   if (numericCredit > 0 && !customerId) throw new Error('Select a customer for credit payment.');
+  return { numericTotal, numericCredit, numericPaid };
+}
+
+async function recordSaleOnline({ storeId, cart, paymentMethod, total, customerId, creditAmount = 0, paidAmount = total, dueDate, schedule, idempotencyKey }) {
+  const authenticatedStoreId = assertStoreId(storeId);
+  const { numericTotal, numericCredit, numericPaid } = validateSaleInput({
+    cart, total, creditAmount, paidAmount, customerId, idempotencyKey,
+  });
 
   return runTransaction(db, async (transaction) => {
     const operation = await transaction.get(operationRef(authenticatedStoreId, idempotencyKey));
@@ -137,3 +222,23 @@ export async function recordSale({ storeId, cart, paymentMethod, total, customer
     return saleResult;
   });
 }
+
+export async function recordSale(input) {
+  const authenticatedStoreId = assertStoreId(input.storeId);
+  const payload = { ...input, storeId: authenticatedStoreId };
+  const { numericTotal } = validateSaleInput(payload);
+  if (await isDeviceOffline()) {
+    await enqueueOfflineOperation(authenticatedStoreId, 'recordSale', payload);
+    return { id: payload.idempotencyKey, total: numericTotal, pendingSync: true };
+  }
+
+  try {
+    return await recordSaleOnline(payload);
+  } catch (error) {
+    if (!isNetworkError(error)) throw error;
+    await enqueueOfflineOperation(authenticatedStoreId, 'recordSale', payload);
+    return { id: payload.idempotencyKey, total: numericTotal, pendingSync: true };
+  }
+}
+
+registerOfflineOperationHandler('recordSale', recordSaleOnline);

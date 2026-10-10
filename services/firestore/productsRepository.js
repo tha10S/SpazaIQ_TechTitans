@@ -13,6 +13,13 @@ import {
 import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath } from './paths';
 import { mapProduct } from './mappers';
+import {
+  getOfflineOperations,
+  isNetworkError,
+  readPosCreditSnapshot,
+  savePosCreditSnapshot,
+  subscribeOfflineOperations,
+} from '../offline/posCreditQueue';
 
 function matchesSearch(product, term) {
   return !term || [product.name, product.sku, product.barcode]
@@ -22,6 +29,18 @@ function matchesSearch(product, term) {
 
 function productsCollection(storeId) {
   return collection(db, ...storeCollectionPath(storeId, 'products'));
+}
+
+function applyPendingStock(products, operations) {
+  return products.map((product) => {
+    const reserved = operations
+      .filter((operation) => operation.type === 'recordSale' && operation.status !== 'failed')
+      .reduce((quantity, operation) => {
+        const item = operation.payload.cart.find((cartItem) => cartItem.id === product.id);
+        return quantity + Number(item?.qty || 0);
+      }, 0);
+    return reserved ? { ...product, quantity: Math.max(0, product.quantity - reserved) } : product;
+  });
 }
 
 export async function createProduct(storeId, input) {
@@ -76,22 +95,68 @@ export async function updateProduct(storeId, productId, input) {
 
 export async function fetchProducts(storeId, searchTerm = '') {
   const authenticatedStoreId = assertStoreId(storeId);
-  const snapshot = await getDocs(query(productsCollection(authenticatedStoreId), orderBy('name')));
-  const products = snapshot.docs.map(mapProduct);
+  let products;
+  try {
+    const snapshot = await getDocs(query(productsCollection(authenticatedStoreId), orderBy('name')));
+    products = snapshot.docs.map(mapProduct);
+    await savePosCreditSnapshot(authenticatedStoreId, 'products', products);
+  } catch (error) {
+    if (!isNetworkError(error)) throw error;
+    products = await readPosCreditSnapshot(authenticatedStoreId, 'products');
+    if (!Array.isArray(products)) throw error;
+  }
+  const operations = await getOfflineOperations(authenticatedStoreId);
   const term = searchTerm.trim().toLowerCase();
-  return products.filter((product) => matchesSearch(product, term));
+  return applyPendingStock(products, operations).filter((product) => matchesSearch(product, term));
 }
 
 export function subscribeProducts(storeId, searchTerm, onData, onError) {
   const authenticatedStoreId = assertStoreId(storeId);
   const term = searchTerm.trim().toLowerCase();
   const productsQuery = query(productsCollection(authenticatedStoreId), orderBy('name'));
-  return onSnapshot(productsQuery, (snapshot) => {
-    const products = snapshot.docs.map(mapProduct).filter((product) =>
-      matchesSearch(product, term)
-    );
-    onData(products);
-  }, onError);
+  let active = true;
+  let cachedProducts = null;
+  let queuedOperations = [];
+  let unsubscribe = () => {};
+  let unsubscribeQueue = () => {};
+  const publishProducts = (products) => onData(
+    applyPendingStock(products, queuedOperations).filter((product) => matchesSearch(product, term))
+  );
+  const start = async () => {
+    try {
+      cachedProducts = await readPosCreditSnapshot(authenticatedStoreId, 'products');
+      if (cachedProducts !== null && !Array.isArray(cachedProducts)) {
+        throw new Error('The saved offline product list is invalid.');
+      }
+      if (active && cachedProducts) publishProducts(cachedProducts);
+    } catch (error) {
+      if (active) onError(error);
+    }
+    if (!active) return;
+    unsubscribeQueue = subscribeOfflineOperations(authenticatedStoreId, (operations) => {
+      queuedOperations = operations;
+      if (active && cachedProducts) publishProducts(cachedProducts);
+    }, onError);
+    unsubscribe = onSnapshot(productsQuery, (snapshot) => {
+      if (snapshot.metadata.fromCache && cachedProducts?.length) return;
+      const products = snapshot.docs.map(mapProduct);
+      if (!snapshot.metadata.fromCache) {
+        cachedProducts = products;
+        savePosCreditSnapshot(authenticatedStoreId, 'products', products).catch(onError);
+      }
+      cachedProducts = products;
+      publishProducts(products);
+    }, (error) => {
+      if (cachedProducts) publishProducts(cachedProducts);
+      onError(error);
+    });
+  };
+  start();
+  return () => {
+    active = false;
+    unsubscribe();
+    unsubscribeQueue();
+  };
 }
 
 export function subscribeLowStockProducts(storeId, onData, onError) {

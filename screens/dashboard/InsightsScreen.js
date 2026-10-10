@@ -4,32 +4,25 @@ import { getAuthenticatedStoreId } from '../../services/firestore/paths';
 import { subscribeSales } from '../../services/firestore/salesRepository';
 
 function getPeriodData(sales, period) {
-  const fallback = insightsData?.periodData?.[period] || {
-    stats: { revenue: "R0.00", profit: "R0.00", itemsSold: 0 },
-    salesByDay: [],
-    topProducts: [],
-  };
-
-  if (!Array.isArray(sales) || sales.length === 0) {
-    return {
-      stats: fallback.stats,
-      salesByDay: fallback.salesByDay || [],
-      topProducts: fallback.topProducts || [],
-      filteredSales: [],
-    };
-  }
-
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let end = new Date(start);
+  end.setDate(end.getDate() + 1);
 
   if (period === "Week") {
     start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+    end = new Date(start);
+    end.setDate(end.getDate() + 7);
   } else if (period === "Month") {
     start.setDate(1);
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
   }
 
   const filteredSales = sales.filter(
-    (sale) => sale.createdAt && new Date(sale.createdAt) >= start
+    (sale) => {
+      const createdAt = sale.createdAt ? new Date(sale.createdAt) : null;
+      return createdAt && !Number.isNaN(createdAt.getTime()) && createdAt >= start && createdAt < end;
+    }
   );
 
   const productTotals = new Map();
@@ -38,10 +31,11 @@ function getPeriodData(sales, period) {
 
   filteredSales.forEach((sale) =>
     (sale.items || []).forEach((item) => {
-      const quantity = Number(item.qty || 0);
-      const key = item.id || item.name;
+      const quantity = Number(item.qty ?? item.quantity ?? 0);
+      const name = item.name || item.productName || "Product";
+      const key = item.id || name;
       const total = productTotals.get(key) || {
-        name: item.name || "Product",
+        name,
         sold: 0,
       };
 
@@ -49,9 +43,10 @@ function getPeriodData(sales, period) {
       productTotals.set(key, total);
       itemsSold += quantity;
 
-      const cost = Number(item.costPrice);
-      if (Number.isFinite(cost)) {
-        profit += (Number(item.unitPrice || 0) - cost) * quantity;
+      const cost = Number(item.costPrice ?? item.cost_price);
+      const unitPrice = Number(item.unitPrice ?? item.unit_price ?? 0);
+      if (Number.isFinite(cost) && Number.isFinite(unitPrice)) {
+        profit += (unitPrice - cost) * quantity;
       }
     })
   );
@@ -67,16 +62,17 @@ function getPeriodData(sales, period) {
     });
   }
 
-  const buckets =
-    period === "Week"
-      ? Array.from({ length: 7 }, (_, index) => ({
-          day: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][index],
-          value: 0,
-        }))
-      : Array.from({ length: Math.ceil(now.getDate() / 7) }, (_, index) => ({
+  const buckets = period === "Week"
+    ? Array.from({ length: 7 }, (_, index) => ({
+        day: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][index],
+        value: 0,
+      }))
+    : period === "Month"
+      ? Array.from({ length: Math.ceil(now.getDate() / 7) }, (_, index) => ({
           day: `Week ${index + 1}`,
           value: 0,
-        }));
+        }))
+      : [{ day: "Today", value: 0 }];
 
   filteredSales.forEach((sale) => {
     const date = new Date(sale.createdAt);
@@ -105,45 +101,50 @@ function getPeriodData(sales, period) {
 }
 
 export default function Insights({ route }) {
-  const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
-
   const [period, setPeriod] = useState("Today");
   const [sales, setSales] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [salesError, setSalesError] = useState(null);
   const storeId = route?.params?.storeId || getAuthenticatedStoreId();
 
   useEffect(() => {
+    setSales([]);
+    setLoading(true);
+    setSalesError(null);
     if (!storeId) {
+      setLoading(false);
       return undefined;
     }
 
     return subscribeSales(
       storeId,
-      setSales,
-      (error) => console.warn("Insights sales subscription failed", error?.code)
+      (nextSales) => {
+        setSales(nextSales);
+        setLoading(false);
+        setSalesError(null);
+      },
+      (error) => {
+        console.warn("Insights sales subscription failed", error);
+        setLoading(false);
+        setSalesError(error?.message || "Sales data could not be loaded.");
+      }
     );
   }, [storeId]);
 
   const data = getPeriodData(sales, period);
-  const recentlyPurchased = data.filteredSales.length
-    ? [...data.filteredSales]
-        .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))
-        .flatMap((sale) =>
-          (sale.items || []).map((item) => ({
-            name: item.name || "Product",
-            qty: item.qty,
-            time: new Date(sale.createdAt).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
-          }))
-        )
-        .slice(0, 4)
-    : (insightsData.recentlyPurchased || []).slice(0, 4);
-
-  const forecastProducts = data.topProducts.length
-    ? data.topProducts.map((product) => product.name)
-    : insightsData.forecastProducts || [];
+  const recentlyPurchased = [...data.filteredSales]
+    .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))
+    .flatMap((sale) =>
+      (sale.items || []).map((item) => ({
+        name: item.name || item.productName || "Product",
+        qty: item.qty ?? item.quantity ?? 0,
+        time: new Date(sale.createdAt).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      }))
+    )
+    .slice(0, 4);
 
   // Scale chart bars so large rand values don't overflow the chart area
   const maxBarValue = Math.max(1, ...data.salesByDay.map((d) => d.value));
@@ -151,6 +152,9 @@ export default function Insights({ route }) {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={styles.header}>Analytics & Forecasts</Text>
+      {salesError ? (
+        <Text style={styles.errorText}>Could not load sales: {salesError}</Text>
+      ) : null}
 
       <View style={styles.segmentWrap}>
         {["Today", "Week", "Month"].map((label) => (
@@ -187,67 +191,75 @@ export default function Insights({ route }) {
       </View>
 
       {period !== "Today" && (
-  <View style={styles.card}>
-    <Text style={styles.cardTitle}>Sales by Day of Week</Text>
-    <View style={styles.chartRow}>
-      {data.salesByDay.map((d, i) => (
-        <View key={i} style={styles.barColumn}>
-          <View style={[styles.bar, { height: d.value }]} />
-          <Text style={styles.barLabel}>{d.day}</Text>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>
+            {period === "Week" ? "Sales by Day" : "Sales by Week"}
+          </Text>
+          <View style={styles.chartRow}>
+            {data.salesByDay.map((day) => (
+              <View key={day.day} style={styles.barColumn}>
+                <View
+                  style={[
+                    styles.bar,
+                    { height: day.value ? Math.max(4, (day.value / maxBarValue) * 80) : 0 },
+                  ]}
+                />
+                <Text style={styles.barLabel}>{day.day}</Text>
+              </View>
+            ))}
+          </View>
         </View>
-      ))}
-    </View>
-  </View>
-)}
+      )}
 
-        {period === "Today" && (
-      <><Text style={styles.sectionLabel}>RECENTLY PURCHASED</Text><View style={styles.card}>
-          {recentlyPurchased.length === 0 ? <Text style={styles.recentTime}>No sales recorded today.</Text> : recentlyPurchased.map((item, i) => (
-            <View
-              key={i}
-              style={[
-                styles.recentRow,
-                i === recentlyPurchased.length - 1 && { marginBottom: 0, paddingBottom: 0, borderBottomWidth: 0 },
-              ]}
-            >
-              <View>
-                <Text style={styles.recentName}>{item.name}</Text>
-                <Text style={styles.recentTime}>{item.time}</Text>
-              </View>
-              <View style={styles.recentRight}>
-                <Text style={styles.recentQty}>×{item.qty}</Text>
-                <Text style={styles.recentTime}>{item.time}</Text>
-              </View>
-            </View>
-          ))}
-        </View></>
-
-        
-  ) }
+      {period === "Today" && (
+        <>
+          <Text style={styles.sectionLabel}>RECENTLY SOLD</Text>
+          <View style={styles.card}>
+            {loading ? (
+              <Text style={styles.recentTime}>Loading sales...</Text>
+            ) : recentlyPurchased.length === 0 ? (
+              <Text style={styles.recentTime}>No sales recorded today.</Text>
+            ) : (
+              recentlyPurchased.map((item, index) => (
+                <View
+                  key={`${item.name}-${item.time}-${index}`}
+                  style={[
+                    styles.recentRow,
+                    index === recentlyPurchased.length - 1 && {
+                      marginBottom: 0,
+                      paddingBottom: 0,
+                      borderBottomWidth: 0,
+                    },
+                  ]}
+                >
+                  <View>
+                    <Text style={styles.recentName}>{item.name}</Text>
+                    <Text style={styles.recentTime}>{item.time}</Text>
+                  </View>
+                  <Text style={styles.recentQty}>×{item.qty}</Text>
+                </View>
+              ))
+            )}
+          </View>
+        </>
+      )}
 
 
       <View style={styles.forecastCard}>
-        <Text style={styles.forecastTitle}>Demand forecast</Text>
+        <Text style={styles.forecastTitle}>Sales insight</Text>
         <Text style={styles.forecastText}>
           {data.topProducts.length ? (
             `Most sold in this period: ${data.topProducts.map((product) => product.name).join(", ")}.`
           ) : (
-            <>
-              “Based on the last 7 days of sales, consider ordering more{" "}
-              {forecastProducts.map((name, index) => (
-                <Text key={name} style={styles.bold}>
-                  {name}
-                  {index < forecastProducts.length - 1 ? " and " : ""}
-                </Text>
-              ))}
-              {" "}ahead of the next few days.”
-            </>
+            loading ? "Loading sales data..." : "Record sales to see which products sell best in this period."
           )}
         </Text>
       </View>
 
       <Text style={styles.sectionLabel}>TOP 3 BEST SELLING PRODUCTS</Text>
-      {data.topProducts.map((p, i) => (
+      {data.topProducts.length === 0 && !loading ? (
+        <Text style={styles.recentTime}>No products sold in this period.</Text>
+      ) : data.topProducts.map((p, i) => (
         <View key={`${p.name}-${i}`} style={styles.productCard}>
           <View>
             <Text style={styles.productName}>{p.name}</Text>
@@ -382,6 +394,10 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     fontSize: 11,
     marginTop: 2,
+  },
+  errorText: {
+    color: "#B91C1C",
+    marginBottom: 12,
   },
   recentQty: {
     fontWeight: "700",

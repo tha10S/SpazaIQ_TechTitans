@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { fetchRepaymentTrackerData, makePayment } from '../services/creditService';
 import { getAuthenticatedStoreId } from '../services/firestore/paths';
 import { buildRepaymentTracker } from '../services/repaymentTracker';
+import { OfflineSyncNotice } from '../components/OfflineSyncNotice';
 
 const PAYMENT_METHODS = ['Cash', 'EFT', 'Card'];
 const STATUS_STYLES = {
@@ -105,7 +106,7 @@ export default function RepaymentTrackerScreen({ route }) {
 
     setSaving(true);
     try {
-      await makePayment({
+      const result = await makePayment({
         storeId,
         customerId: activeCustomer.id,
         amount,
@@ -116,7 +117,12 @@ export default function RepaymentTrackerScreen({ route }) {
       });
       setActiveCustomer(null);
       await refresh();
-      Alert.alert('Payment saved', 'The repayment has been recorded.');
+      Alert.alert(
+        result?.pendingSync ? 'Payment saved offline' : 'Payment saved',
+        result?.pendingSync
+          ? 'The payment is stored on this device and will sync when the connection returns. The server will validate the balance then.'
+          : 'The repayment has been recorded.'
+      );
     } catch (error) {
       Alert.alert('Could not record payment', error?.message || 'Please try again.');
     } finally {
@@ -148,6 +154,7 @@ export default function RepaymentTrackerScreen({ route }) {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        <OfflineSyncNotice storeId={storeId} />
         <View style={styles.headingRow}>
           <View style={styles.headingIcon}>
             <Ionicons name="calendar" size={20} color={COLORS.emerald} />

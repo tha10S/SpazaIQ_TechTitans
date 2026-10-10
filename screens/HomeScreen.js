@@ -7,6 +7,7 @@ import { subscribeCustomers } from '../services/firestore/customersRepository';
 import { getAuthenticatedStoreId } from '../services/firestore/paths';
 import { subscribeProducts } from '../services/firestore/productsRepository';
 import { subscribeSales } from '../services/firestore/salesRepository';
+import { OfflineSyncNotice } from '../components/OfflineSyncNotice';
 
 function getGreeting() {
   const hour = new Date().getHours();
@@ -27,8 +28,7 @@ export default function HomeScreen({ navigation, route }) {
   const [customers, setCustomers] = useState([]);
   const storeId = route?.params?.storeId || getAuthenticatedStoreId();
 
-  // Weather state placeholder (ready for your weather API fetch)
-  const [weather, setWeather] = useState({ temp: '18°C', condition: '☀️' });
+  const weather = { temp: '18°C' };
 
   // Real-time clock trigger
   useEffect(() => {
@@ -93,24 +93,31 @@ export default function HomeScreen({ navigation, route }) {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <OfflineSyncNotice storeId={storeId} />
 
         {/* Header with Greeting, Shop Name, Real-time Clock & Weather API Chip */}
         <View style={styles.header}>
           <View style={styles.headerMain}>
             <Text style={styles.greeting}>
-              {getGreeting()}, {route?.params?.userName || 'Thabo'} 👋
+              {getGreeting()}, {route?.params?.userName || 'Thabo'}
             </Text>
             <View style={styles.shopBadge}>
               <Text style={styles.shopBadgeText}>
                 {route?.params?.shopName || "Thabo's Mini Mart"}
               </Text>
             </View>
-            <Text style={styles.clockText}>🕒 {formattedDateTime}</Text>
+            <View style={styles.clockRow}>
+              <Ionicons name="time-outline" size={14} color={colors.textMuted} />
+              <Text style={styles.clockText}>{formattedDateTime}</Text>
+            </View>
           </View>
 
           <View style={styles.headerRightCol}>
             <View style={styles.weatherChip}>
-              <Text style={styles.weatherText}>{weather.condition} {weather.temp}</Text>
+              <View style={styles.weatherRow}>
+                <Ionicons name="sunny-outline" size={15} color={colors.warning} />
+                <Text style={styles.weatherText}>{weather.temp}</Text>
+              </View>
               <Text style={styles.locationText}>Joburg</Text>
             </View>
           </View>
@@ -191,7 +198,10 @@ export default function HomeScreen({ navigation, route }) {
             return (
               <View key={item.key} style={styles.stockCard}>
                 <View style={styles.stockInfo}>
-                  <Text style={styles.stockName}>‼️ {item.name}</Text>
+                  <View style={styles.stockNameRow}>
+                    <Ionicons name="alert-circle-outline" size={15} color={colors.warning} />
+                    <Text style={styles.stockName} numberOfLines={1}>{item.name}</Text>
+                  </View>
                   <Text style={styles.supplierText}>{item.supplier}</Text>
 
                   <View style={styles.progressTrack}>
@@ -241,7 +251,8 @@ function makeStyles(colors, typography, spacing, radius) {
       marginBottom: 4,
     },
     shopBadgeText: { fontSize: 12, color: colors.textPrimary, fontWeight: '700' },
-    clockText: { fontSize: 12, fontWeight: '600', color: colors.textMuted, marginTop: 2 },
+    clockRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
+    clockText: { fontSize: 12, fontWeight: '600', color: colors.textMuted },
     weatherChip: {
       alignItems: 'center',
       backgroundColor: colors.card,
@@ -252,6 +263,7 @@ function makeStyles(colors, typography, spacing, radius) {
       borderColor: colors.border,
     },
     weatherText: { fontSize: 12, fontWeight: '700', color: colors.textPrimary },
+    weatherRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     locationText: { fontSize: 10, color: colors.textMuted },
 
     /* Hero Sales Card */
@@ -350,7 +362,8 @@ function makeStyles(colors, typography, spacing, radius) {
       borderColor: colors.border,
     },
     stockInfo: { flex: 1, marginRight: spacing.md },
-    stockName: { fontSize: 14, fontWeight: '700', color: colors.textPrimary },
+    stockNameRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    stockName: { flexShrink: 1, fontSize: 14, fontWeight: '700', color: colors.textPrimary },
     supplierText: { fontSize: 11, color: colors.textMuted, marginBottom: 6, marginTop: 2 },
     progressTrack: { height: 5, backgroundColor: colors.border, borderRadius: 3, width: '100%', overflow: 'hidden' },
     fillBar: { height: '100%', backgroundColor: colors.danger, borderRadius: 3 },

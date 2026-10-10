@@ -1,27 +1,21 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, ActivityIndicator, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
+import { useNetworkState } from 'expo-network';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme } from '../config/ThemeContext';
 import { TechTitansAssistant } from '../components/TechTitansAssistant';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
-
-// Firebase auth
 import { watchAuth } from '../services/auth/firebaseAuth';
 import { ensureStoreSeed } from '../services/firestore/seedRepository';
 import { getUserProfile } from '../services/firestore/usersRepository';
-
-// User authentication
 import LoginScreen from '../screens/auth/LoginScreen';
 import SignupScreen from '../screens/auth/SignupScreen';
-
 import Insights from '../screens/dashboard/InsightsScreen';
 import SuppliersOrders from '../screens/dashboard/SuppliersReordersScreen';
-
-// Team member files
 import HomeScreen from '../screens/HomeScreen';
 import StockScreen from '../screens/StockScreen';
 import NewSaleScreen from '../screens/NewSaleScreen';
@@ -62,7 +56,7 @@ function MainTabs({ route }) {
 
   return (
     <Tab.Navigator
-      screenOptions={({ route, navigation }) => ({
+      screenOptions={({ route: screenRoute, navigation }) => ({
         headerShown: true,
         headerStyle: { backgroundColor: colors.card },
         headerTintColor: colors.textPrimary,
@@ -82,7 +76,7 @@ function MainTabs({ route }) {
         tabBarInactiveTintColor: colors.textMuted,
         tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
         tabBarIcon: ({ color, size }) => (
-          <Ionicons name={icons[route.name]} size={size} color={color} />
+          <Ionicons name={icons[screenRoute.name]} size={size} color={color} />
         ),
       })}
     >
@@ -98,35 +92,25 @@ function MainTabs({ route }) {
 
 function AppContent() {
   const { isDark, colors } = useTheme();
+  const networkState = useNetworkState();
   const [user, setUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [offlineDemo, setOfflineDemo] = useState(false);
   const [loading, setLoading] = useState(true);
+  const isOffline = networkState.isConnected === false || networkState.isInternetReachable === false;
 
   useEffect(() => {
     let active = true;
-    const unsubscribe = watchAuth(async (u) => {
-      setUser(u);
+    const unsubscribe = watchAuth(async (authenticatedUser) => {
+      if (!active) return;
+      setUser(authenticatedUser);
       setUserProfile(null);
       setOfflineDemo(false);
-      if (!u) {
+      if (!authenticatedUser) {
         setLoading(false);
         return;
       }
-
       setLoading(true);
-      try {
-        await ensureStoreSeed(u.uid, {
-          email: u.email,
-          displayName: u.displayName,
-        });
-        const profile = await getUserProfile(u.uid);
-        if (active) setUserProfile(profile);
-      } catch (error) {
-        console.warn('Could not load authenticated store profile', error);
-      } finally {
-        if (active) setLoading(false);
-      }
     });
     return () => {
       active = false;
@@ -134,7 +118,37 @@ function AppContent() {
     };
   }, []);
 
-  // Navigation theme built from the app's own colors
+  useEffect(() => {
+    if (!user) return undefined;
+    let active = true;
+    if (isOffline) {
+      setLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    async function loadProfile() {
+      try {
+        await ensureStoreSeed(user.uid, {
+          email: user.email,
+          displayName: user.displayName,
+        });
+        const profile = await getUserProfile(user.uid);
+        if (active) setUserProfile(profile);
+      } catch (error) {
+        console.warn('Could not load authenticated store profile', error);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    loadProfile();
+    return () => {
+      active = false;
+    };
+  }, [user, isOffline]);
+
   const baseTheme = isDark ? DarkTheme : DefaultTheme;
   const navTheme = {
     ...baseTheme,
@@ -147,6 +161,9 @@ function AppContent() {
       border: colors.border,
     },
   };
+  const storeId = userProfile?.defaultStoreId || user?.uid;
+  const userName = userProfile?.fullName || user?.displayName || user?.email;
+  const shopName = userProfile?.shopName || user?.displayName || 'My Shop';
 
   if (loading) {
     return (
@@ -166,6 +183,13 @@ function AppContent() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
+      {isOffline ? (
+        <View style={{ paddingVertical: 7, paddingHorizontal: 12, backgroundColor: colors.warningBg }}>
+          <Text style={{ color: colors.warning, textAlign: 'center', fontSize: 12, fontWeight: '600' }}>
+            Offline — saved POS and credit changes will sync when you reconnect.
+          </Text>
+        </View>
+      ) : null}
       <NavigationContainer theme={navTheme}>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           {offlineDemo ? (
