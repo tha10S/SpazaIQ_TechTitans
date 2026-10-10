@@ -44,14 +44,24 @@ function DueDateField({ value, onChange, colors, styles, disabled }) {
     return (
       <View style={styles.inputWrapper}>
         <Ionicons name="calendar-outline" size={18} color={colors.textMuted} style={styles.inputIcon} />
-        <TextInput
-          style={styles.modalInput}
-          type="date"
-          accessibilityLabel="Due date"
-          value={value}
-          onChangeText={onChange}
-          editable={!disabled}
-        />
+        {React.createElement('input', {
+          type: 'date',
+          'aria-label': 'Due date',
+          value,
+          onChange: (event) => onChange(event.target.value),
+          disabled,
+          style: {
+            flex: 1,
+            minWidth: 0,
+            height: '100%',
+            border: 0,
+            outline: 'none',
+            backgroundColor: 'transparent',
+            color: colors.textPrimary,
+            fontSize: 14,
+            fontWeight: 600,
+          },
+        })}
       </View>
     );
   }
