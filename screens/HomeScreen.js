@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../config/ThemeContext';
@@ -7,13 +7,30 @@ import { subscribeCustomers } from '../services/firestore/customersRepository';
 import { getAuthenticatedStoreId } from '../services/firestore/paths';
 import { subscribeProducts } from '../services/firestore/productsRepository';
 import { subscribeSales } from '../services/firestore/salesRepository';
+import { buildHomeFeed, countNeedsAttention } from '../services/feed/homeFeed';
 import { OfflineSyncNotice } from '../components/OfflineSyncNotice';
+
+// Shop location isn't stored yet, so weather is for Johannesburg.
+const WEATHER_URL =
+  'https://api.open-meteo.com/v1/forecast?latitude=-26.2041&longitude=28.0473&current=temperature_2m,weather_code&timezone=auto';
 
 function getGreeting() {
   const hour = new Date().getHours();
   if (hour < 12) return 'Good morning';
   if (hour < 17) return 'Good afternoon';
   return 'Good evening';
+}
+
+// WMO weather codes from Open-Meteo
+function describeWeather(code) {
+  if (code === 0) return { icon: 'sunny-outline', label: 'Clear' };
+  if (code <= 3) return { icon: 'partly-sunny-outline', label: 'Partly cloudy' };
+  if (code <= 48) return { icon: 'cloud-outline', label: 'Fog' };
+  if (code <= 67) return { icon: 'rainy-outline', label: 'Rain' };
+  if (code <= 77) return { icon: 'snow-outline', label: 'Snow' };
+  if (code <= 82) return { icon: 'rainy-outline', label: 'Showers' };
+  if (code <= 86) return { icon: 'snow-outline', label: 'Snow showers' };
+  return { icon: 'thunderstorm-outline', label: 'Storm' };
 }
 
 export default function HomeScreen({ navigation, route }) {
@@ -26,14 +43,34 @@ export default function HomeScreen({ navigation, route }) {
   const [sales, setSales] = useState([]);
   const [products, setProducts] = useState([]);
   const [customers, setCustomers] = useState([]);
+  const [weather, setWeather] = useState(null);
+  const [feedVisible, setFeedVisible] = useState(false);
   const storeId = route?.params?.storeId || getAuthenticatedStoreId();
-
-  const weather = { temp: '18°C' };
 
   // Real-time clock trigger
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  // Live weather. If it fails (offline), the chip just shows "--".
+  useEffect(() => {
+    let active = true;
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    fetch(WEATHER_URL, { signal: controller?.signal })
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error('Weather unavailable'))))
+      .then((data) => {
+        if (!active || !data?.current) return;
+        setWeather({
+          temp: Math.round(data.current.temperature_2m),
+          ...describeWeather(data.current.weather_code),
+        });
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+      controller?.abort();
+    };
   }, []);
 
   useEffect(() => {
@@ -90,22 +127,47 @@ export default function HomeScreen({ navigation, route }) {
   const maxHourlySale = Math.max(1, ...todayHourlySales.map((d) => d.value));
   const peakHour = todayHourlySales.reduce((prev, current) => (prev.value > current.value ? prev : current));
 
+  // Shop news. Recomputed when data changes or the day rolls over, not every clock tick.
+  const dayKey = now.toDateString();
+  const feed = useMemo(
+    () => buildHomeFeed({ products, customers, sales, now: new Date() }),
+    [products, customers, sales, dayKey]
+  );
+  const attentionCount = countNeedsAttention(feed);
+
+  const feedTones = {
+    danger: { color: colors.danger, bg: 'rgba(220,38,38,0.15)' },
+    warning: { color: colors.warning, bg: 'rgba(245,158,11,0.15)' },
+    info: { color: colors.primary, bg: colors.primaryLight },
+  };
+
+  const openFeedItem = (item) => {
+    setFeedVisible(false);
+    if (item.target) navigation.navigate(item.target);
+  };
+
+  // Opens the scanner; the scanned code is handed to Sell, which adds the product to the cart.
+  const openScanner = () => navigation.navigate('Scanner', { returnTo: 'Sell' });
+
+  const userName = route?.params?.userName;
+  const shopName = route?.params?.shopName;
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <OfflineSyncNotice storeId={storeId} />
 
-        {/* Header with Greeting, Shop Name, Real-time Clock & Weather API Chip */}
+        {/* Header with Greeting, Shop Name, Real-time Clock, Weather and Shop news */}
         <View style={styles.header}>
           <View style={styles.headerMain}>
             <Text style={styles.greeting}>
-              {getGreeting()}, {route?.params?.userName || 'Thabo'}
+              {getGreeting()}{userName ? `, ${userName}` : ''}
             </Text>
-            <View style={styles.shopBadge}>
-              <Text style={styles.shopBadgeText}>
-                {route?.params?.shopName || "Thabo's Mini Mart"}
-              </Text>
-            </View>
+            {shopName ? (
+              <View style={styles.shopBadge}>
+                <Text style={styles.shopBadgeText}>{shopName}</Text>
+              </View>
+            ) : null}
             <View style={styles.clockRow}>
               <Ionicons name="time-outline" size={14} color={colors.textMuted} />
               <Text style={styles.clockText}>{formattedDateTime}</Text>
@@ -115,11 +177,27 @@ export default function HomeScreen({ navigation, route }) {
           <View style={styles.headerRightCol}>
             <View style={styles.weatherChip}>
               <View style={styles.weatherRow}>
-                <Ionicons name="sunny-outline" size={15} color={colors.warning} />
-                <Text style={styles.weatherText}>{weather.temp}</Text>
+                <Ionicons name={weather?.icon || 'cloud-outline'} size={15} color={colors.warning} />
+                <Text style={styles.weatherText}>{weather ? `${weather.temp}°C` : '--'}</Text>
               </View>
-              <Text style={styles.locationText}>Joburg</Text>
+              <Text style={styles.locationText}>{weather ? `${weather.label} • Joburg` : 'Joburg'}</Text>
             </View>
+
+            <TouchableOpacity
+              style={styles.newsButton}
+              onPress={() => setFeedVisible(true)}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={`Shop news${attentionCount ? `, ${attentionCount} need attention` : ''}`}
+            >
+              <Ionicons name="newspaper-outline" size={16} color={colors.primary} />
+              <Text style={styles.newsButtonText}>News</Text>
+              {attentionCount > 0 && (
+                <View style={styles.newsBadge}>
+                  <Text style={styles.newsBadgeText}>{attentionCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -134,14 +212,26 @@ export default function HomeScreen({ navigation, route }) {
           </View>
           <Text style={styles.heroValue}>R {todayRevenue.toFixed(2)}</Text>
 
-          <TouchableOpacity
-            style={styles.quickSellBtn}
-            activeOpacity={0.85}
-            onPress={() => navigation.navigate('Sell')}
-          >
-            <Ionicons name="flash" size={18} color="#004B49" style={{ marginRight: 6 }} />
-            <Text style={styles.quickSellText}>Open POS / Start Sale</Text>
-          </TouchableOpacity>
+          <View style={styles.heroActions}>
+            <TouchableOpacity
+              style={styles.quickSellBtn}
+              activeOpacity={0.85}
+              onPress={() => navigation.navigate('Sell')}
+            >
+              <Ionicons name="flash" size={18} color="#004B49" style={{ marginRight: 6 }} />
+              <Text style={styles.quickSellText}>Open POS / Start Sale</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.scanBtn}
+              activeOpacity={0.85}
+              onPress={openScanner}
+              accessibilityRole="button"
+              accessibilityLabel="Scan a product barcode"
+            >
+              <Ionicons name="barcode-outline" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Visual Stats Cards (Profit, Stock Value, Credit Out) */}
@@ -164,10 +254,16 @@ export default function HomeScreen({ navigation, route }) {
         </View>
 
         <View style={styles.chartCard}>
-          <Text style={styles.chartSubtext}>Peak trade time: <Text style={styles.boldText}>{peakHour.time} (R {peakHour.value})</Text></Text>
+          <Text style={styles.chartSubtext}>
+            {peakHour.value > 0 ? (
+              <>Peak trade time: <Text style={styles.boldText}>{peakHour.time} (R {peakHour.value})</Text></>
+            ) : (
+              'No sales yet today. Your busiest hour will show here.'
+            )}
+          </Text>
           <View style={styles.chartRow}>
             {todayHourlySales.map((d) => {
-              const isPeak = d.time === peakHour.time;
+              const isPeak = peakHour.value > 0 && d.time === peakHour.time;
               return (
                 <View key={d.time} style={styles.chartBarWrap}>
                   <View
@@ -193,6 +289,13 @@ export default function HomeScreen({ navigation, route }) {
         </View>
 
         <View style={styles.stockList}>
+          {lowStockItems.length === 0 && (
+            <Text style={styles.emptyNote}>
+              {products.length === 0
+                ? 'Add products in Stock and low stock alerts will show here.'
+                : 'Nothing is running low.'}
+            </Text>
+          )}
           {lowStockItems.map((item) => {
             const stockRatio = (item.remaining / item.total) * 100;
             return (
@@ -226,6 +329,68 @@ export default function HomeScreen({ navigation, route }) {
         </View>
 
       </ScrollView>
+
+      {/* Shop news popup: important info pulled from Stock, Credit and Insights */}
+      <Modal
+        visible={feedVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setFeedVisible(false)}
+      >
+        <View style={styles.sheetOverlay}>
+          <TouchableOpacity
+            style={styles.sheetBackdrop}
+            activeOpacity={1}
+            onPress={() => setFeedVisible(false)}
+            accessibilityLabel="Close shop news"
+          />
+          <View style={styles.sheet}>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>Shop news</Text>
+              <TouchableOpacity
+                onPress={() => setFeedVisible(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityLabel="Close"
+              >
+                <Ionicons name="close-circle" size={26} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetContent}>
+              {feed.length === 0 ? (
+                <View style={styles.feedEmpty}>
+                  <Ionicons name="newspaper-outline" size={32} color={colors.textMuted} />
+                  <Text style={styles.feedEmptyTitle}>Nothing to report yet</Text>
+                  <Text style={styles.feedEmptyText}>
+                    Record a sale or add stock, and updates about your shop will show up here.
+                  </Text>
+                </View>
+              ) : (
+                feed.map((item) => {
+                  const tone = feedTones[item.severity] || feedTones.info;
+                  return (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={styles.feedRow}
+                      activeOpacity={0.75}
+                      onPress={() => openFeedItem(item)}
+                    >
+                      <View style={[styles.feedIcon, { backgroundColor: tone.bg }]}>
+                        <Ionicons name={item.icon} size={18} color={tone.color} />
+                      </View>
+                      <View style={styles.feedTextWrap}>
+                        <Text style={styles.feedTitle}>{item.title}</Text>
+                        <Text style={styles.feedDetail}>{item.detail}</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -266,6 +431,30 @@ function makeStyles(colors, typography, spacing, radius) {
     weatherRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     locationText: { fontSize: 10, color: colors.textMuted },
 
+    /* Shop news button */
+    newsButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      backgroundColor: colors.card,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    newsButtonText: { fontSize: 12, fontWeight: '700', color: colors.textPrimary },
+    newsBadge: {
+      minWidth: 18,
+      height: 18,
+      borderRadius: 9,
+      paddingHorizontal: 4,
+      backgroundColor: colors.danger,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    newsBadgeText: { fontSize: 11, fontWeight: '800', color: '#FFFFFF' },
+
     /* Hero Sales Card */
     heroCard: {
       backgroundColor: brandGreen,
@@ -280,16 +469,26 @@ function makeStyles(colors, typography, spacing, radius) {
     liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10B981', marginRight: 5 },
     heroBadge: { fontSize: 10, color: '#FFFFFF', fontWeight: '800' },
     heroValue: { fontSize: 38, fontWeight: '800', color: '#FFFFFF', marginVertical: 6 },
+    heroActions: { flexDirection: 'row', gap: 10, marginTop: spacing.xs },
     quickSellBtn: {
+      flex: 1,
       flexDirection: 'row',
       backgroundColor: '#FFFFFF',
       borderRadius: 12,
       paddingVertical: 12,
       justifyContent: 'center',
       alignItems: 'center',
-      marginTop: spacing.xs,
     },
     quickSellText: { color: brandGreen, fontWeight: '800', fontSize: 14 },
+    scanBtn: {
+      width: 48,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.4)',
+      backgroundColor: 'rgba(255,255,255,0.18)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
 
     /* Stat Cards */
     statsRow: {
@@ -351,6 +550,7 @@ function makeStyles(colors, typography, spacing, radius) {
 
     /* Low Stock List */
     stockList: { gap: spacing.sm },
+    emptyNote: { fontSize: 13, color: colors.textMuted, paddingVertical: spacing.sm },
     stockCard: {
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -379,5 +579,39 @@ function makeStyles(colors, typography, spacing, radius) {
       borderRadius: 8,
     },
     reorderText: { fontSize: 12, color: colors.textPrimary, fontWeight: '700' },
+
+    /* Shop news popup */
+    sheetOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(15,23,42,0.5)' },
+    sheetBackdrop: { ...StyleSheet.absoluteFillObject },
+    sheet: {
+      maxHeight: '75%',
+      backgroundColor: colors.card,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.lg,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md },
+    sheetTitle: { fontSize: 20, fontWeight: '800', color: colors.textPrimary },
+    sheetContent: { paddingBottom: spacing.xl, gap: spacing.sm },
+    feedRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      backgroundColor: colors.background,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: spacing.md,
+    },
+    feedIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+    feedTextWrap: { flex: 1 },
+    feedTitle: { fontSize: 14, fontWeight: '700', color: colors.textPrimary },
+    feedDetail: { fontSize: 12, color: colors.textMuted, marginTop: 2, lineHeight: 17 },
+    feedEmpty: { alignItems: 'center', paddingVertical: spacing.xl, gap: 6 },
+    feedEmptyTitle: { fontSize: 15, fontWeight: '700', color: colors.textPrimary, marginTop: 4 },
+    feedEmptyText: { fontSize: 13, color: colors.textMuted, textAlign: 'center', paddingHorizontal: spacing.lg },
   });
 }

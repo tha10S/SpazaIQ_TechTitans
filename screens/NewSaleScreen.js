@@ -8,10 +8,11 @@ import {
   StyleSheet,
   SafeAreaView,
   ActivityIndicator,
-  Alert,
+  Modal,
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNetworkState } from 'expo-network';
 import QRScannerScreen from './QRScannerScreen';
 import { useTheme } from '../config/ThemeContext';
 import { useCart } from '../hooks/useCart';
@@ -30,8 +31,9 @@ const PAYMENT_METHODS = [
 const BRAND_GREEN = '#004B49'; // solid buttons keep brand green in both themes
 
 const formatR = (n) => `R ${Number(n || 0).toFixed(2)}`;
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export default function NewSaleScreen({ route }) {
+export default function NewSaleScreen({ route, navigation }) {
   const { colors } = useTheme();
 
   // Same names as the old static COLORS object, now driven by the theme
@@ -67,20 +69,38 @@ export default function NewSaleScreen({ route }) {
     completeSale,
   } = useCart(storeId);
 
+  const networkState = useNetworkState();
+  const isOffline = networkState.isConnected === false || networkState.isInternetReachable === false;
+
   const [payment, setPayment] = useState('Cash');
   const [customers, setCustomers] = useState([]);
-  const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [splitPaidAmount, setSplitPaidAmount] = useState('');
-  const [dueDate, setDueDate] = useState('');
-  const [scheduleFrequency, setScheduleFrequency] = useState('one_time');
   const [scannerVisible, setScannerVisible] = useState(false);
   const [scanError, setScanError] = useState('');
+  // { type: 'success' | 'error', text }. Shown inline because Alert.alert shows nothing on web.
+  const [notice, setNotice] = useState(null);
+  // null | { phase: 'processing' | 'approved' | 'failed', total, message }
+  const [cardState, setCardState] = useState(null);
 
   useEffect(() => {
     return subscribeCustomers(storeId, setCustomers, (error) => setScanError(error.message));
   }, [storeId]);
 
+  // Success messages clear themselves after a few seconds
+  useEffect(() => {
+    if (notice?.type !== 'success') return undefined;
+    const timer = setTimeout(() => setNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
   const totalItemsCount = cart.reduce((sum, item) => sum + item.qty, 0);
+  const splitPaid = Number(splitPaidAmount || 0);
+  const creditAmount = payment === 'Credit'
+    ? subtotal
+    : payment === 'Split'
+      ? Math.max(0, subtotal - splitPaid)
+      : 0;
+  const paidAmount = subtotal - creditAmount;
 
   const handleBarcodeScanned = async (value) => {
     setScannerVisible(false);
@@ -116,51 +136,126 @@ export default function NewSaleScreen({ route }) {
     }
   };
 
-  const handleCompleteSale = async () => {
-    if (cart.length === 0) {
-      Alert.alert('Cart Empty', 'Add at least one item to proceed.');
-      return;
+  // Home's scan button sends the scanned code here
+  const scannedCode = route?.params?.scannedCode;
+  useEffect(() => {
+    if (!scannedCode) return;
+    navigation?.setParams({ scannedCode: undefined });
+    handleBarcodeScanned(String(scannedCode));
+  }, [scannedCode]);
+
+  // Simulated card payment: processing, then approved, then the sale is recorded like a cash sale.
+  // The sale is saved while the "processing" screen shows, so a stock problem is reported as a failed payment.
+  const payByCard = async () => {
+    const total = subtotal;
+    setCardState({ phase: 'processing', total });
+    try {
+      const [result] = await Promise.all([
+        completeSale({ paymentMethod: 'card', paidAmount: total, creditAmount: 0 }),
+        wait(2200),
+      ]);
+      setCardState({ phase: 'approved', total });
+      await wait(1300);
+      setCardState(null);
+      setNotice({
+        type: 'success',
+        text: result?.pendingSync
+          ? `Card sale of ${formatR(total)} saved on this device. It will sync when you're back online.`
+          : `Card payment of ${formatR(total)} approved. Sale recorded.`,
+      });
+    } catch (err) {
+      setCardState({ phase: 'failed', total, message: err.message || 'The payment could not be completed.' });
     }
-    const creditAmount = payment === 'Credit'
-      ? subtotal
-      : payment === 'Split'
-        ? Math.max(0, subtotal - Number(splitPaidAmount || 0))
-        : 0;
-    const paidAmount = subtotal - creditAmount;
-    if (creditAmount > 0 && !selectedCustomerId) {
-      Alert.alert('Customer required', 'Select a customer for the credit amount.');
-      return;
-    }
-    if (creditAmount > 0 && !dueDate.trim()) {
-      Alert.alert('Due date required', 'Enter a due date for the credit amount.');
-      return;
-    }
-    if (payment === 'Split' && paidAmount <= 0) {
-      Alert.alert('Invalid split', 'Enter a cash/card amount smaller than the sale total.');
-      return;
-    }
+  };
+
+  // The Credit screen hands back the customer and repayment plan, then the sale is recorded here
+  // in one go: sale, stock, credit ledger and repayment schedule.
+  const finishCreditSale = async ({ customerId, dueDate, schedule }) => {
+    const total = subtotal;
+    const customer = customers.find((item) => item.id === customerId);
     try {
       const result = await completeSale({
         paymentMethod: payment.toLowerCase(),
         paidAmount,
         creditAmount,
-        customerId: creditAmount > 0 ? selectedCustomerId : null,
-        dueDate: creditAmount > 0 ? dueDate.trim() : null,
-        schedule: creditAmount > 0 ? { frequency: scheduleFrequency } : null,
+        customerId,
+        dueDate,
+        schedule,
       });
-      Alert.alert(
-        result?.pendingSync ? 'Sale saved offline' : 'Success',
-        result?.pendingSync
-          ? `Sale of ${formatR(subtotal)} was saved on this device and will sync when the connection returns. Stock and credit limits will be checked then.`
-          : `Sale of ${formatR(subtotal)} completed.`
-      );
-      setSelectedCustomerId('');
       setSplitPaidAmount('');
-      setDueDate('');
+      setNotice({
+        type: 'success',
+        text: result?.pendingSync
+          ? `Credit sale of ${formatR(total)} saved on this device. It will sync when you're back online.`
+          : `Sale of ${formatR(total)} recorded. ${formatR(creditAmount)} is on credit${customer ? ` for ${customer.name}` : ''}.`,
+      });
     } catch (err) {
-      Alert.alert('Error', err.message);
+      setNotice({ type: 'error', text: err.message || 'The credit sale could not be recorded.' });
     }
   };
+
+  const creditSelection = route?.params?.creditSelection;
+  useEffect(() => {
+    if (!creditSelection) return;
+    navigation?.setParams({ creditSelection: undefined });
+    if (cart.length === 0) {
+      setNotice({ type: 'error', text: 'The cart is empty, so there is no credit sale to record.' });
+      return;
+    }
+    finishCreditSale(creditSelection);
+  }, [creditSelection]);
+
+  const handleCompleteSale = async () => {
+    setNotice(null);
+    if (cart.length === 0) {
+      setNotice({ type: 'error', text: 'Add at least one item to the cart first.' });
+      return;
+    }
+    if (payment === 'Split' && !(splitPaid > 0 && splitPaid < subtotal)) {
+      setNotice({
+        type: 'error',
+        text: 'For a split payment, enter an amount paid now that is more than R 0.00 and less than the total.',
+      });
+      return;
+    }
+
+    if (payment === 'Card') {
+      if (isOffline) {
+        setNotice({ type: 'error', text: 'Card payments need an internet connection. Use cash or credit instead.' });
+        return;
+      }
+      payByCard();
+      return;
+    }
+
+    if (creditAmount > 0) {
+      // Credit and Split sales are finished on the Credit screen, where the customer and plan are chosen
+      navigation.navigate('Credit', {
+        saleDraft: { creditAmount, total: subtotal, itemCount: totalItemsCount, paymentMethod: payment },
+      });
+      return;
+    }
+
+    const total = subtotal;
+    try {
+      const result = await completeSale({ paymentMethod: 'cash', paidAmount: total, creditAmount: 0 });
+      setNotice({
+        type: 'success',
+        text: result?.pendingSync
+          ? `Sale of ${formatR(total)} saved on this device. It will sync when you're back online.`
+          : `Sale of ${formatR(total)} recorded.`,
+      });
+    } catch (err) {
+      setNotice({ type: 'error', text: err.message || 'The sale could not be recorded.' });
+    }
+  };
+
+  const ctaLabel = payment === 'Card'
+    ? 'Pay by Card'
+    : payment === 'Credit' || payment === 'Split'
+      ? 'Continue to Credit'
+      : 'Complete Sale';
+  const ctaIcon = payment === 'Credit' || payment === 'Split' ? 'arrow-forward-circle' : 'checkmark-circle';
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -176,6 +271,22 @@ export default function NewSaleScreen({ route }) {
             <Text style={styles.badgeText}>{totalItemsCount} {totalItemsCount === 1 ? 'item' : 'items'}</Text>
           </View>
         </View>
+
+        {notice && (
+          <View style={[styles.noticeCard, notice.type === 'error' ? styles.noticeError : styles.noticeSuccess]}>
+            <Ionicons
+              name={notice.type === 'error' ? 'alert-circle' : 'checkmark-circle'}
+              size={18}
+              color={notice.type === 'error' ? COLORS.danger : COLORS.primary}
+            />
+            <Text style={[styles.noticeText, { color: notice.type === 'error' ? COLORS.danger : COLORS.primary }]}>
+              {notice.text}
+            </Text>
+            <TouchableOpacity onPress={() => setNotice(null)} accessibilityLabel="Dismiss message">
+              <Ionicons name="close" size={16} color={notice.type === 'error' ? COLORS.danger : COLORS.primary} />
+            </TouchableOpacity>
+          </View>
+        )}
 
         <View style={styles.searchRow}>
           <View style={styles.searchInputWrap}>
@@ -337,24 +448,19 @@ export default function NewSaleScreen({ route }) {
           })}
         </View>
 
+        {payment === 'Card' && (
+          <View style={styles.infoCard}>
+            <Ionicons name="information-circle-outline" size={18} color={COLORS.primary} />
+            <Text style={styles.infoText}>
+              {isOffline
+                ? 'Card payments need an internet connection. Use cash or credit while offline.'
+                : 'Card payments are simulated. No real card is charged.'}
+            </Text>
+          </View>
+        )}
+
         {(payment === 'Credit' || payment === 'Split') && (
           <View style={styles.creditOptionsCard}>
-            <Text style={styles.creditOptionsTitle}>CREDIT DETAILS</Text>
-            <Text style={styles.creditOptionsLabel}>CUSTOMER</Text>
-            <View style={styles.customerOptions}>
-              {customers.map((customer) => (
-                <TouchableOpacity
-                  key={customer.id}
-                  style={[styles.customerOption, selectedCustomerId === customer.id && styles.customerOptionSelected]}
-                  onPress={() => setSelectedCustomerId(customer.id)}
-                >
-                  <Text style={[styles.customerOptionText, selectedCustomerId === customer.id && styles.customerOptionTextSelected]}>
-                    {customer.name}
-                  </Text>
-                  <Text style={styles.customerBalanceText}>R {Number(customer.balance || 0).toFixed(2)} owed</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
             {payment === 'Split' && (
               <>
                 <Text style={styles.creditOptionsLabel}>PAID NOW (R)</Text>
@@ -368,29 +474,11 @@ export default function NewSaleScreen({ route }) {
                 />
               </>
             )}
-            <Text style={styles.creditSummaryText}>
-              Credit balance: {formatR(payment === 'Credit' ? subtotal : Math.max(0, subtotal - Number(splitPaidAmount || 0)))}
-            </Text>
-            <Text style={styles.creditOptionsLabel}>DUE DATE</Text>
-            <TextInput
-              style={styles.creditTextInput}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor={COLORS.textMuted}
-              value={dueDate}
-              onChangeText={setDueDate}
-            />
-            <View style={styles.scheduleRow}>
-              {['one_time', 'weekly', 'monthly'].map((frequency) => (
-                <TouchableOpacity
-                  key={frequency}
-                  style={[styles.scheduleOption, scheduleFrequency === frequency && styles.scheduleOptionSelected]}
-                  onPress={() => setScheduleFrequency(frequency)}
-                >
-                  <Text style={[styles.scheduleOptionText, scheduleFrequency === frequency && styles.scheduleOptionTextSelected]}>
-                    {frequency === 'one_time' ? 'Once' : frequency[0].toUpperCase() + frequency.slice(1)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+            <View style={styles.infoRow}>
+              <Ionicons name="wallet-outline" size={18} color={COLORS.primary} />
+              <Text style={styles.infoText}>
+                {formatR(creditAmount)} goes on credit. You'll choose the customer and repayment plan on the Credit screen.
+              </Text>
             </View>
           </View>
         )}
@@ -399,15 +487,15 @@ export default function NewSaleScreen({ route }) {
           style={[styles.completeCta, cart.length === 0 && styles.disabledCta]}
           onPress={handleCompleteSale}
           activeOpacity={0.88}
-          disabled={submitting || cart.length === 0}
+          disabled={submitting || !!cardState || cart.length === 0}
         >
           {submitting ? (
             <ActivityIndicator color="#FFFFFF" size="small" />
           ) : (
             <View style={styles.ctaContent}>
               <View style={styles.ctaLeft}>
-                <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
-                <Text style={styles.ctaText}>Complete Sale</Text>
+                <Ionicons name={ctaIcon} size={20} color="#FFFFFF" />
+                <Text style={styles.ctaText}>{ctaLabel}</Text>
               </View>
               <View style={styles.ctaBadge}>
                 <Text style={styles.ctaBadgeText}>{formatR(subtotal)}</Text>
@@ -422,467 +510,57 @@ export default function NewSaleScreen({ route }) {
         onClose={() => setScannerVisible(false)}
         onScanned={handleBarcodeScanned}
       />
+
+      {/* Simulated card payment */}
+      <Modal
+        visible={!!cardState}
+        transparent
+        animationType="fade"
+        onRequestClose={() => cardState?.phase === 'failed' && setCardState(null)}
+      >
+        <View style={styles.cardOverlay}>
+          <View style={styles.cardModal}>
+            {cardState?.phase === 'processing' && (
+              <>
+                <ActivityIndicator size="large" color={COLORS.primary} />
+                <Text style={styles.cardModalTitle}>Processing card payment</Text>
+                <Text style={styles.cardModalAmount}>{formatR(cardState.total)}</Text>
+                <Text style={styles.cardModalText}>Please wait. This only takes a moment.</Text>
+              </>
+            )}
+            {cardState?.phase === 'approved' && (
+              <>
+                <Ionicons name="checkmark-circle" size={72} color="#10B981" />
+                <Text style={styles.cardModalTitle}>Payment approved</Text>
+                <Text style={styles.cardModalAmount}>{formatR(cardState.total)}</Text>
+                <Text style={styles.cardModalText}>Recording your sale.</Text>
+              </>
+            )}
+            {cardState?.phase === 'failed' && (
+              <>
+                <Ionicons name="close-circle" size={72} color={COLORS.danger} />
+                <Text style={styles.cardModalTitle}>Payment not completed</Text>
+                <Text style={styles.cardModalText}>{cardState.message}</Text>
+                <View style={styles.cardModalActions}>
+                  <TouchableOpacity
+                    style={[styles.cardModalBtn, styles.cardModalBtnSecondary]}
+                    onPress={() => setCardState(null)}
+                  >
+                    <Text style={styles.cardModalBtnSecondaryText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.cardModalBtn, styles.cardModalBtnPrimary]} onPress={payByCard}>
+                    <Text style={styles.cardModalBtnPrimaryText}>Try again</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+            <Text style={styles.cardModalFooter}>Test mode. No real card is charged.</Text>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
-
-const COLORS = {
-  primary: '#004B49',
-  primaryBg: '#E6F4F1',
-  bg: '#F9FAFB',
-  cardBg: '#FFFFFF',
-  textDark: '#111827',
-  textMuted: '#6B7280',
-  border: '#E5E7EB',
-  danger: '#DC2626',
-  dangerBg: '#FEE2E2',
-};
-
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: COLORS.bg,
-  },
-  container: {
-    padding: 16,
-    paddingBottom: 32,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: COLORS.textDark,
-    letterSpacing: -0.3,
-  },
-  subtitle: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  badgeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.primaryBg,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
-  },
-  badgeText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.primary,
-    marginLeft: 5,
-  },
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-    gap: 8,
-  },
-  searchInputWrap: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.cardBg,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 46,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  searchIcon: {
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 14,
-    color: COLORS.textDark,
-  },
-  scanButton: {
-    height: 46,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    backgroundColor: COLORS.primary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  scanButtonText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  errorCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.dangerBg,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#FCA5A5',
-    gap: 8,
-  },
-  scanErrorText: {
-    color: COLORS.danger,
-    fontSize: 12,
-    fontWeight: '600',
-    flex: 1,
-  },
-  resultsCard: {
-    backgroundColor: COLORS.cardBg,
-    borderRadius: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    overflow: 'hidden',
-  },
-  resultRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  resultInfo: {
-    flex: 1,
-  },
-  resultName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textDark,
-  },
-  resultSku: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  resultPrice: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.textDark,
-    marginRight: 8,
-  },
-  addIcon: {
-    marginLeft: 4,
-  },
-  emptyResultsText: {
-    padding: 16,
-    textAlign: 'center',
-    fontSize: 13,
-    color: COLORS.textMuted,
-  },
-  sectionTitle: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: COLORS.textMuted,
-    letterSpacing: 0.8,
-    marginBottom: 8,
-    marginTop: 6,
-  },
-  cartCard: {
-    backgroundColor: COLORS.cardBg,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  emptyCartContainer: {
-    paddingVertical: 24,
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textDark,
-    marginTop: 8,
-  },
-  emptySubtext: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  cartRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  cartRowDivider: {
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  cartItemDetails: {
-    flex: 1,
-    paddingRight: 8,
-  },
-  cartItemName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textDark,
-  },
-  cartItemUnitPrice: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  qtyContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.bg,
-    borderRadius: 8,
-    padding: 2,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    marginRight: 12,
-  },
-  qtyBtn: {
-    width: 26,
-    height: 26,
-    borderRadius: 6,
-    backgroundColor: COLORS.cardBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  qtyText: {
-    width: 28,
-    textAlign: 'center',
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.textDark,
-  },
-  cartItemTotalWrap: {
-    minWidth: 65,
-    alignItems: 'flex-end',
-  },
-  cartItemTotalText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.textDark,
-  },
-  summaryCard: {
-    backgroundColor: COLORS.cardBg,
-    borderRadius: 14,
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 4,
-  },
-  summaryLabel: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: COLORS.textMuted,
-    flex: 1,
-    marginRight: 16,
-  },
-  summarySubtotalValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textDark,
-    textAlign: 'right',
-  },
-  summaryDivider: {
-    height: 1,
-    backgroundColor: COLORS.border,
-    marginVertical: 12,
-  },
-  summaryTotalLabelGroup: {
-    flex: 1,
-    marginRight: 16,
-  },
-  summaryTotalLabel: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.textDark,
-  },
-  taxInclusiveText: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  summaryTotalValue: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: COLORS.primary,
-    textAlign: 'right',
-  },
-  paymentGrid: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 20,
-  },
-  paymentCard: {
-    flex: 1,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: COLORS.cardBg,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  paymentCardSelected: {
-    borderColor: COLORS.primary,
-    backgroundColor: COLORS.primaryBg,
-  },
-  paymentCardLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.textMuted,
-  },
-  paymentCardLabelSelected: {
-    color: COLORS.primary,
-    fontWeight: '700',
-  },
-  creditOptionsCard: {
-    backgroundColor: COLORS.cardBg,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 20,
-  },
-  creditOptionsTitle: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: COLORS.textMuted,
-    letterSpacing: 0.8,
-    marginBottom: 12,
-  },
-  creditOptionsLabel: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: COLORS.textMuted,
-    marginBottom: 6,
-    marginTop: 4,
-  },
-  customerOptions: {
-    gap: 8,
-    marginBottom: 10,
-  },
-  customerOption: {
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 10,
-    padding: 10,
-  },
-  customerOptionSelected: {
-    borderColor: COLORS.primary,
-    backgroundColor: COLORS.primaryBg,
-  },
-  customerOptionText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.textDark,
-  },
-  customerOptionTextSelected: {
-    color: COLORS.primary,
-  },
-  customerBalanceText: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  creditTextInput: {
-    height: 44,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    fontSize: 14,
-    color: COLORS.textDark,
-    marginBottom: 8,
-  },
-  creditSummaryText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: COLORS.primary,
-    marginVertical: 8,
-  },
-  scheduleRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 4,
-  },
-  scheduleOption: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 10,
-    paddingVertical: 9,
-    alignItems: 'center',
-  },
-  scheduleOptionSelected: {
-    borderColor: COLORS.primary,
-    backgroundColor: COLORS.primaryBg,
-  },
-  scheduleOptionText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: COLORS.textMuted,
-  },
-  scheduleOptionTextSelected: {
-    color: COLORS.primary,
-  },
-  completeCta: {
-    height: 52,
-    borderRadius: 14,
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 16,
-    justifyContent: 'center',
-    ...Platform.select({
-      ios: { shadowColor: COLORS.primary, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.25, shadowRadius: 5 },
-      android: { elevation: 3 },
-    }),
-  },
-  disabledCta: {
-    backgroundColor: '#94A3B8',
-    elevation: 0,
-    shadowOpacity: 0,
-  },
-  ctaContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  ctaLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  ctaText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  ctaBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 8,
-  },
-  ctaBadgeText: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-});
 
 const makeStyles = (COLORS) =>
   StyleSheet.create({
@@ -925,6 +603,33 @@ const makeStyles = (COLORS) =>
       color: COLORS.primary,
       marginLeft: 5,
     },
+
+    /* Inline result message */
+    noticeCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      borderRadius: 10,
+      marginBottom: 12,
+      borderWidth: 1,
+      gap: 8,
+    },
+    noticeSuccess: {
+      backgroundColor: COLORS.primaryBg,
+      borderColor: COLORS.primary,
+    },
+    noticeError: {
+      backgroundColor: COLORS.dangerBg,
+      borderColor: COLORS.dangerBorder,
+    },
+    noticeText: {
+      flex: 1,
+      fontSize: 13,
+      fontWeight: '600',
+      lineHeight: 18,
+    },
+
     searchRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -1197,6 +902,34 @@ const makeStyles = (COLORS) =>
       color: COLORS.primary,
       fontWeight: '700',
     },
+
+    /* Card and credit notes under the payment methods */
+    infoCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: COLORS.primaryBg,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      marginBottom: 20,
+    },
+    infoRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: COLORS.primaryBg,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    infoText: {
+      flex: 1,
+      fontSize: 12,
+      fontWeight: '600',
+      lineHeight: 17,
+      color: COLORS.primary,
+    },
     creditOptionsCard: {
       backgroundColor: COLORS.cardBg,
       borderWidth: 1,
@@ -1205,46 +938,12 @@ const makeStyles = (COLORS) =>
       padding: 14,
       marginBottom: 20,
     },
-    creditOptionsTitle: {
-      fontSize: 11,
-      fontWeight: '800',
-      color: COLORS.textMuted,
-      letterSpacing: 0.8,
-      marginBottom: 12,
-    },
     creditOptionsLabel: {
       fontSize: 10,
       fontWeight: '800',
       color: COLORS.textMuted,
       marginBottom: 6,
       marginTop: 4,
-    },
-    customerOptions: {
-      gap: 8,
-      marginBottom: 10,
-    },
-    customerOption: {
-      borderWidth: 1,
-      borderColor: COLORS.border,
-      borderRadius: 10,
-      padding: 10,
-    },
-    customerOptionSelected: {
-      borderColor: COLORS.primary,
-      backgroundColor: COLORS.primaryBg,
-    },
-    customerOptionText: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: COLORS.textDark,
-    },
-    customerOptionTextSelected: {
-      color: COLORS.primary,
-    },
-    customerBalanceText: {
-      fontSize: 11,
-      color: COLORS.textMuted,
-      marginTop: 2,
     },
     creditTextInput: {
       height: 44,
@@ -1255,38 +954,7 @@ const makeStyles = (COLORS) =>
       paddingHorizontal: 12,
       fontSize: 14,
       color: COLORS.textDark,
-      marginBottom: 8,
-    },
-    creditSummaryText: {
-      fontSize: 13,
-      fontWeight: '800',
-      color: COLORS.primary,
-      marginVertical: 8,
-    },
-    scheduleRow: {
-      flexDirection: 'row',
-      gap: 8,
-      marginTop: 4,
-    },
-    scheduleOption: {
-      flex: 1,
-      borderWidth: 1,
-      borderColor: COLORS.border,
-      borderRadius: 10,
-      paddingVertical: 9,
-      alignItems: 'center',
-    },
-    scheduleOptionSelected: {
-      borderColor: COLORS.primary,
-      backgroundColor: COLORS.primaryBg,
-    },
-    scheduleOptionText: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: COLORS.textMuted,
-    },
-    scheduleOptionTextSelected: {
-      color: COLORS.primary,
+      marginBottom: 10,
     },
     completeCta: {
       height: 52,
@@ -1330,85 +998,79 @@ const makeStyles = (COLORS) =>
       fontWeight: '800',
       color: '#FFFFFF',
     },
-    scannerModalContainer: {
+
+    /* Simulated card payment */
+    cardOverlay: {
       flex: 1,
-      backgroundColor: '#0F172A',
-    },
-    scannerHeader: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      paddingHorizontal: 20,
-      paddingVertical: 16,
-    },
-    scannerHeaderTitle: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: '#FFFFFF',
-    },
-    scannerCloseBtn: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: 'rgba(255, 255, 255, 0.15)',
-      alignItems: 'center',
+      backgroundColor: 'rgba(15, 23, 42, 0.6)',
       justifyContent: 'center',
-    },
-    scannerViewport: {
-      flex: 1,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    scannerOverlay: {
-      width: 240,
-      height: 240,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    scannerFinder: {
-      width: '100%',
-      height: '100%',
-      position: 'relative',
-    },
-    corner: {
-      position: 'absolute',
-      width: 24,
-      height: 24,
-      borderColor: '#2DD4BF',
-    },
-    topLeft: {
-      top: 0,
-      left: 0,
-      borderTopWidth: 4,
-      borderLeftWidth: 4,
-    },
-    topRight: {
-      top: 0,
-      right: 0,
-      borderTopWidth: 4,
-      borderRightWidth: 4,
-    },
-    bottomLeft: {
-      bottom: 0,
-      left: 0,
-      borderBottomWidth: 4,
-      borderLeftWidth: 4,
-    },
-    bottomRight: {
-      bottom: 0,
-      right: 0,
-      borderBottomWidth: 4,
-      borderRightWidth: 4,
-    },
-    scannerFooter: {
       padding: 24,
+    },
+    cardModal: {
+      backgroundColor: COLORS.cardBg,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: COLORS.border,
+      paddingVertical: 28,
+      paddingHorizontal: 22,
+      alignItems: 'center',
+      gap: 8,
+      width: '100%',
+      maxWidth: 380,
+      alignSelf: 'center',
+    },
+    cardModalTitle: {
+      fontSize: 18,
+      fontWeight: '800',
+      color: COLORS.textDark,
+      marginTop: 8,
+      textAlign: 'center',
+    },
+    cardModalAmount: {
+      fontSize: 28,
+      fontWeight: '800',
+      color: COLORS.primary,
+    },
+    cardModalText: {
+      fontSize: 13,
+      lineHeight: 19,
+      color: COLORS.textMuted,
+      textAlign: 'center',
+    },
+    cardModalFooter: {
+      fontSize: 11,
+      color: COLORS.textMuted,
+      marginTop: 12,
+    },
+    cardModalActions: {
       flexDirection: 'row',
+      gap: 12,
+      marginTop: 12,
+      width: '100%',
+    },
+    cardModalBtn: {
+      flex: 1,
+      height: 46,
+      borderRadius: 12,
       alignItems: 'center',
       justifyContent: 'center',
-      gap: 8,
     },
-    scannerFooterText: {
-      fontSize: 13,
-      color: '#94A3B8',
+    cardModalBtnSecondary: {
+      backgroundColor: COLORS.bg,
+      borderWidth: 1,
+      borderColor: COLORS.border,
+    },
+    cardModalBtnSecondaryText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: COLORS.textMuted,
+    },
+    cardModalBtnPrimary: {
+      backgroundColor: BRAND_GREEN,
+    },
+    cardModalBtnPrimaryText: {
+      fontSize: 14,
+      fontWeight: '800',
+      color: '#FFFFFF',
     },
   });

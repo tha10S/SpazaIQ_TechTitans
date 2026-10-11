@@ -1,8 +1,22 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../config/ThemeContext";
+import { getAuthenticatedStoreId } from "../../services/firestore/paths";
+import { subscribeProducts } from "../../services/firestore/productsRepository";
+import {
+  createOrder,
+  createSupplier,
+  deleteSupplier,
+  markOrderDelivered,
+  subscribeOrders,
+  subscribeSuppliers,
+  updateSupplierItems,
+} from "../../services/firestore/suppliersRepository";
+import { normalizePhoneZA, openWhatsApp, supplierOrderMessage } from "../../services/whatsapp";
 
 const BRAND_GREEN = "#004B49"; // solid buttons keep brand green in both themes
+const WHATSAPP_GREEN = "#25D366";
 
 const CATEGORIES = ["Groceries", "Beverages", "Bakery", "Snacks"];
 
@@ -23,63 +37,7 @@ function getStatusColors(colors) {
   };
 }
 
-const initialSuppliers = [
-  {
-    name: "Sizwe Wholesalers",
-    category: "Groceries",
-    phone: "082 345 6712",
-    items: [
-      { name: "Maize Meal 5kg", qty: 1, selected: true },
-      { name: "Sugar 2.5kg", qty: 1, selected: true },
-      { name: "Cooking Oil 750ml", qty: 1, selected: true },
-    ],
-  },
-  {
-    name: "Cape Cold Drinks Co.",
-    category: "Beverages",
-    phone: "071 902 4483",
-    items: [
-      { name: "Coca-Cola 500ml", qty: 1, selected: true },
-      { name: "Sprite 500ml", qty: 1, selected: true },
-    ],
-  },
-  {
-    name: "Fresh Bake Distributors",
-    category: "Bakery",
-    phone: "083 221 0099",
-    items: [{ name: "Albany White Bread", qty: 1, selected: true }],
-  },
-];
-
-const initialOrders = [
-  {
-    id: "ORD-1042",
-    date: "28 Aug 2026",
-    supplier: "Fresh Bake Distributors",
-    items: [{ name: "Albany White Bread", qty: 40 }],
-    total: 640,
-    status: "Delivered",
-  },
-  {
-    id: "ORD-1039",
-    date: "24 Aug 2026",
-    supplier: "Cape Cold Drinks Co.",
-    items: [{ name: "Coca-Cola 500ml", qty: 96 }],
-    total: 1152,
-    status: "Delivered",
-  },
-  {
-    id: "ORD-1031",
-    date: "15 Aug 2026",
-    supplier: "Sizwe Wholesalers",
-    items: [
-      { name: "Maize Meal 5kg", qty: 20 },
-      { name: "Sugar 2.5kg", qty: 15 },
-    ],
-    total: 890,
-    status: "Pending",
-  },
-];
+const formatR = (value) => `R${Number(value || 0).toFixed(2)}`;
 
 // Small helper so every component below gets theme colors + styles
 function useThemedStyles() {
@@ -88,16 +46,68 @@ function useThemedStyles() {
   return { colors, styles };
 }
 
-export default function SuppliersAndReorders() {
-  const { styles } = useThemedStyles();
+function isOfflineError(error) {
+  return String(error?.code).includes("unavailable") || /offline|network/i.test(error?.message || "");
+}
+
+export default function SuppliersAndReorders({ route }) {
+  const { colors, styles } = useThemedStyles();
+  const storeId = route?.params?.storeId || getAuthenticatedStoreId();
+  const shopName = route?.params?.shopName;
+
   const [tab, setTab] = useState("Suppliers");
   const [query, setQuery] = useState("");
-  const [suppliers, setSuppliers] = useState(initialSuppliers);
-  const [orders, setOrders] = useState(initialOrders);
+  const [suppliers, setSuppliers] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [loaded, setLoaded] = useState({ suppliers: false, orders: false });
+  // { type: 'success' | 'error', text }. Shown inline because Alert.alert shows nothing on web.
+  const [notice, setNotice] = useState(null);
+
+  useEffect(() => {
+    if (!storeId) return undefined;
+    const fail = (what) => (error) =>
+      setNotice({ type: "error", text: `Could not load ${what}: ${error?.message || "unknown error"}` });
+    const subscriptions = [
+      subscribeSuppliers(storeId, (data) => {
+        setSuppliers(data);
+        setLoaded((current) => ({ ...current, suppliers: true }));
+      }, fail("suppliers")),
+      subscribeOrders(storeId, (data) => {
+        setOrders(data);
+        setLoaded((current) => ({ ...current, orders: true }));
+      }, fail("orders")),
+      subscribeProducts(storeId, "", setProducts, (error) => console.warn("Suppliers products subscription failed", error?.code)),
+    ];
+    return () => subscriptions.forEach((unsubscribe) => unsubscribe());
+  }, [storeId]);
+
+  // Success messages clear themselves after a few seconds
+  useEffect(() => {
+    if (notice?.type !== "success") return undefined;
+    const timer = setTimeout(() => setNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.header}>Suppliers</Text>
+
+      {notice && (
+        <View style={[styles.noticeCard, notice.type === "error" ? styles.noticeError : styles.noticeSuccess]}>
+          <Ionicons
+            name={notice.type === "error" ? "alert-circle" : "checkmark-circle"}
+            size={18}
+            color={notice.type === "error" ? colors.danger : colors.primary}
+          />
+          <Text style={[styles.noticeText, { color: notice.type === "error" ? colors.danger : colors.primary }]}>
+            {notice.text}
+          </Text>
+          <Pressable onPress={() => setNotice(null)} accessibilityLabel="Dismiss message">
+            <Ionicons name="close" size={16} color={notice.type === "error" ? colors.danger : colors.primary} />
+          </Pressable>
+        </View>
+      )}
 
       <View style={styles.segmentWrap}>
         {["Suppliers", "Orders"].map((label) => (
@@ -123,16 +133,28 @@ export default function SuppliersAndReorders() {
           query={query}
           setQuery={setQuery}
           suppliers={suppliers}
-          setSuppliers={setSuppliers}
+          products={products}
+          loaded={loaded.suppliers}
+          storeId={storeId}
+          shopName={shopName}
+          setNotice={setNotice}
+          goToOrders={() => setTab("Orders")}
         />
       ) : (
-        <OrdersTab orders={orders} setOrders={setOrders} />
+        <OrdersTab
+          orders={orders}
+          suppliers={suppliers}
+          loaded={loaded.orders}
+          storeId={storeId}
+          shopName={shopName}
+          setNotice={setNotice}
+        />
       )}
     </ScrollView>
   );
 }
 
-function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
+function SuppliersTab({ query, setQuery, suppliers, products, loaded, storeId, shopName, setNotice, goToOrders }) {
   const { colors, styles } = useThemedStyles();
   const categoryColors = useMemo(() => getCategoryColors(colors), [colors]);
 
@@ -140,68 +162,133 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
   const [newName, setNewName] = useState("");
   const [newCategory, setNewCategory] = useState(CATEGORIES[0]);
   const [newPhone, setNewPhone] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const [addItemFor, setAddItemFor] = useState(null);
-  const [newItemName, setNewItemName] = useState("");
+  const [productSearch, setProductSearch] = useState("");
+  const [pickedProduct, setPickedProduct] = useState(null);
   const [newItemQty, setNewItemQty] = useState("");
+
+  const [busySupplierId, setBusySupplierId] = useState(null);
 
   const filtered = suppliers.filter((s) =>
     s.name.toLowerCase().includes(query.toLowerCase()),
   );
 
-  function submitSupplier() {
-    if (!newName.trim()) return;
-    setSuppliers((prev) => [
-      ...prev,
-      { name: newName.trim(), category: newCategory, phone: newPhone.trim(), items: [] },
-    ]);
-    setNewName("");
-    setNewPhone("");
-    setNewCategory(CATEGORIES[0]);
-    setShowAddSupplier(false);
+  const productMatches = products
+    .filter((product) => product.name.toLowerCase().includes(productSearch.trim().toLowerCase()))
+    .slice(0, 5);
+
+  const selectedItems = (supplier) => supplier.items.filter((item) => item.selected !== false);
+
+  async function submitSupplier() {
+    if (!newName.trim()) {
+      setNotice({ type: "error", text: "Enter the supplier name." });
+      return;
+    }
+    if (newPhone.trim() && !normalizePhoneZA(newPhone)) {
+      setNotice({ type: "error", text: "That phone number does not look right. Use the full number, for example 082 123 4567." });
+      return;
+    }
+    setSaving(true);
+    try {
+      await createSupplier(storeId, { name: newName, category: newCategory, phone: newPhone });
+      setNotice({ type: "success", text: `${newName.trim()} added.` });
+      setNewName("");
+      setNewPhone("");
+      setNewCategory(CATEGORIES[0]);
+      setShowAddSupplier(false);
+    } catch (error) {
+      setNotice({ type: "error", text: error.message || "Could not save the supplier." });
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function submitItem(supplierName) {
-    if (!newItemName.trim()) return;
-    setSuppliers((prev) =>
-      prev.map((s) =>
-        s.name === supplierName
-          ? {
-              ...s,
-              items: [
-                ...s.items,
-                {
-                  name: newItemName.trim(),
-                  qty: Number(newItemQty) || 1,
-                  selected: true,
-                },
-              ],
-            }
-          : s,
-      ),
-    );
-    setNewItemName("");
+  function openAddItem(supplier) {
+    setAddItemFor((current) => (current === supplier.id ? null : supplier.id));
+    setProductSearch("");
+    setPickedProduct(null);
     setNewItemQty("");
-    setAddItemFor(null);
   }
 
-  function toggleItem(supplierName, itemIndex) {
-    setSuppliers((prev) =>
-      prev.map((s) =>
-        s.name === supplierName
-          ? {
-              ...s,
-              items: s.items.map((it, j) =>
-                j === itemIndex ? { ...it, selected: !it.selected } : it,
-              ),
-            }
-          : s,
-      ),
+  async function submitItem(supplier) {
+    const qty = Number(newItemQty);
+    if (!pickedProduct) {
+      setNotice({ type: "error", text: "Pick a product from your stock first." });
+      return;
+    }
+    if (!Number.isInteger(qty) || qty < 1) {
+      setNotice({ type: "error", text: "Enter a whole number quantity of 1 or more." });
+      return;
+    }
+    const item = {
+      productId: pickedProduct.id,
+      name: pickedProduct.name,
+      qty,
+      unitCost: pickedProduct.cost_price || 0,
+      selected: true,
+    };
+    const others = supplier.items.filter((existing) => existing.productId !== item.productId);
+    try {
+      await updateSupplierItems(storeId, supplier.id, [...others, item]);
+      setAddItemFor(null);
+      setPickedProduct(null);
+      setProductSearch("");
+      setNewItemQty("");
+    } catch (error) {
+      setNotice({ type: "error", text: error.message || "Could not add the item." });
+    }
+  }
+
+  async function toggleItem(supplier, itemIndex) {
+    const items = supplier.items.map((item, index) =>
+      index === itemIndex ? { ...item, selected: item.selected === false } : item,
     );
+    try {
+      await updateSupplierItems(storeId, supplier.id, items);
+    } catch (error) {
+      setNotice({ type: "error", text: error.message || "Could not update the item." });
+    }
   }
 
-  function removeSupplier(supplierName) {
-    setSuppliers((prev) => prev.filter((s) => s.name !== supplierName));
+  async function removeSupplier(supplier) {
+    try {
+      await deleteSupplier(storeId, supplier.id);
+      setNotice({ type: "success", text: `${supplier.name} removed.` });
+    } catch (error) {
+      setNotice({ type: "error", text: error.message || "Could not remove the supplier." });
+    }
+  }
+
+  async function newOrder(supplier) {
+    const items = selectedItems(supplier);
+    if (!items.length) {
+      setNotice({ type: "error", text: "Tick at least one preset item, or add one, before ordering." });
+      return;
+    }
+    setBusySupplierId(supplier.id);
+    try {
+      const { orderNumber } = await createOrder(storeId, supplier, items);
+      setNotice({ type: "success", text: `Order ${orderNumber} created for ${supplier.name}. Send it on WhatsApp from here.` });
+      goToOrders();
+    } catch (error) {
+      setNotice({ type: "error", text: error.message || "Could not create the order." });
+    } finally {
+      setBusySupplierId(null);
+    }
+  }
+
+  // Opens WhatsApp straight from the tap. Don't put an await before this call.
+  function whatsAppSupplier(supplier) {
+    if (!supplier.phone) {
+      setNotice({ type: "error", text: `${supplier.name} has no phone number saved. Remove the supplier and add them again with a number.` });
+      return;
+    }
+    const message = supplierOrderMessage({ supplierName: supplier.name, items: selectedItems(supplier), shopName });
+    openWhatsApp(supplier.phone, message).then((result) => {
+      if (!result.ok) setNotice({ type: "error", text: result.error });
+    });
   }
 
   return (
@@ -234,7 +321,7 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
           />
           <TextInput
             style={styles.formInput}
-            placeholder="Phone number"
+            placeholder="Phone number (used for WhatsApp)"
             placeholderTextColor={colors.textMuted}
             value={newPhone}
             onChangeText={setNewPhone}
@@ -262,19 +349,31 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
               </Pressable>
             ))}
           </View>
-          <Pressable style={styles.formSubmit} onPress={submitSupplier}>
-            <Text style={styles.formSubmitText}>Save Supplier</Text>
+          <Pressable style={styles.formSubmit} onPress={submitSupplier} disabled={saving}>
+            <Text style={styles.formSubmitText}>{saving ? "Saving..." : "Save Supplier"}</Text>
           </Pressable>
         </View>
       )}
 
-      {filtered.map((s, i) => {
+      {!loaded ? (
+        <Text style={styles.emptyText}>Loading suppliers...</Text>
+      ) : filtered.length === 0 ? (
+        <View style={styles.emptyCard}>
+          <Text style={styles.emptyTitle}>{suppliers.length === 0 ? "No suppliers yet" : "No suppliers match your search"}</Text>
+          {suppliers.length === 0 && (
+            <Text style={styles.emptyText}>Add your first supplier, then list the products you buy from them.</Text>
+          )}
+        </View>
+      ) : null}
+
+      {filtered.map((s) => {
         const catStyle = categoryColors[s.category] ?? {
           bg: colors.border,
           text: colors.textMuted,
         };
+        const presetTotal = selectedItems(s).reduce((sum, item) => sum + item.qty * (item.unitCost || 0), 0);
         return (
-          <View key={i} style={styles.card}>
+          <View key={s.id} style={styles.card}>
             <View style={styles.cardTopRow}>
               <Text style={styles.itemTitle}>{s.name}</Text>
               <View style={[styles.badge, { backgroundColor: catStyle.bg }]}>
@@ -284,74 +383,121 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
               </View>
             </View>
 
-            <Text style={styles.phoneText}>{s.phone}</Text>
+            <Text style={styles.phoneText}>{s.phone || "No phone number"}</Text>
 
             <Text style={styles.presetLabel}>PRESET ITEMS</Text>
-            <View style={styles.tagRow}>
-              {s.items.map((item, j) => (
-                <Pressable
-                  key={j}
-                  onPress={() => toggleItem(s.name, j)}
-                  style={[styles.tag, !item.selected && styles.tagUnselected]}
-                >
-                  <Text
-                    style={[
-                      styles.tagText,
-                      !item.selected && styles.tagTextUnselected,
-                    ]}
+            {s.items.length === 0 ? (
+              <Text style={styles.emptyText}>No items yet. Add products you buy from this supplier.</Text>
+            ) : (
+              <View style={styles.tagRow}>
+                {s.items.map((item, j) => (
+                  <Pressable
+                    key={item.productId || j}
+                    onPress={() => toggleItem(s, j)}
+                    style={[styles.tag, item.selected === false && styles.tagUnselected]}
                   >
-                    {item.name}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
+                    <Text
+                      style={[
+                        styles.tagText,
+                        item.selected === false && styles.tagTextUnselected,
+                      ]}
+                    >
+                      {item.name} × {item.qty}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+            {presetTotal > 0 && (
+              <Text style={styles.itemSub}>Selected items cost about {formatR(presetTotal)}</Text>
+            )}
 
-            {addItemFor === s.name && (
-              <View style={styles.formCard}>
-                <TextInput
-                  style={styles.formInput}
-                  placeholder="Item name"
-                  placeholderTextColor={colors.textMuted}
-                  value={newItemName}
-                  onChangeText={setNewItemName}
-                />
-                <TextInput
-                  style={styles.formInput}
-                  placeholder="Quantity"
-                  placeholderTextColor={colors.textMuted}
-                  value={newItemQty}
-                  onChangeText={setNewItemQty}
-                  keyboardType="number-pad"
-                />
-                <Pressable
-                  style={styles.formSubmit}
-                  onPress={() => submitItem(s.name)}
-                >
-                  <Text style={styles.formSubmitText}>Add Item</Text>
-                </Pressable>
+            {addItemFor === s.id && (
+              <View style={[styles.formCard, styles.addItemForm]}>
+                {products.length === 0 ? (
+                  <Text style={styles.emptyText}>
+                    Your Stock is empty. Add the product in Stock first (quantity 0 is fine), then add it here.
+                  </Text>
+                ) : (
+                  <>
+                    {pickedProduct ? (
+                      <Pressable style={styles.pickedChip} onPress={() => setPickedProduct(null)}>
+                        <Text style={styles.pickedChipText}>{pickedProduct.name}</Text>
+                        <Ionicons name="close-circle" size={16} color={colors.primary} />
+                      </Pressable>
+                    ) : (
+                      <>
+                        <TextInput
+                          style={styles.formInput}
+                          placeholder="Search your stock..."
+                          placeholderTextColor={colors.textMuted}
+                          value={productSearch}
+                          onChangeText={setProductSearch}
+                        />
+                        {productMatches.map((product) => (
+                          <Pressable
+                            key={product.id}
+                            style={styles.productResult}
+                            onPress={() => setPickedProduct(product)}
+                          >
+                            <Text style={styles.productResultName}>{product.name}</Text>
+                            <Text style={styles.itemSub}>
+                              Cost {formatR(product.cost_price)} · {product.quantity} in stock
+                            </Text>
+                          </Pressable>
+                        ))}
+                        {productMatches.length === 0 && (
+                          <Text style={styles.emptyText}>No product in your Stock matches that.</Text>
+                        )}
+                      </>
+                    )}
+                    <TextInput
+                      style={[styles.formInput, styles.qtyInput]}
+                      placeholder="Quantity to order"
+                      placeholderTextColor={colors.textMuted}
+                      value={newItemQty}
+                      onChangeText={setNewItemQty}
+                      keyboardType="number-pad"
+                    />
+                    <Pressable style={styles.formSubmit} onPress={() => submitItem(s)}>
+                      <Text style={styles.formSubmitText}>Add Item</Text>
+                    </Pressable>
+                  </>
+                )}
               </View>
             )}
 
             <View style={styles.cardBottomRow}>
-              <Pressable
-                onPress={() =>
-                  setAddItemFor((cur) => (cur === s.name ? null : s.name))
-                }
-              >
+              <Pressable onPress={() => openAddItem(s)}>
                 <Text style={styles.addItemText}>
-                  {addItemFor === s.name ? "Cancel" : "+ Add Item"}
+                  {addItemFor === s.id ? "Cancel" : "+ Add Item"}
                 </Text>
               </Pressable>
-              <Pressable onPress={() => removeSupplier(s.name)}>
+              <Pressable onPress={() => removeSupplier(s)}>
                 <Text style={styles.removeText}>Remove Supplier</Text>
               </Pressable>
             </View>
 
-            <Pressable style={styles.newOrderButton}>
-              <Text style={styles.newOrderButtonText}>
-                New Order from {s.name.split(" ")[0]}
-              </Text>
-            </Pressable>
+            <View style={styles.supplierActions}>
+              <Pressable
+                style={[styles.newOrderButton, styles.newOrderGrow]}
+                onPress={() => newOrder(s)}
+                disabled={busySupplierId === s.id}
+              >
+                <Text style={styles.newOrderButtonText}>
+                  {busySupplierId === s.id ? "Creating..." : `New Order from ${s.name.split(" ")[0]}`}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={styles.whatsappButton}
+                onPress={() => whatsAppSupplier(s)}
+                accessibilityRole="button"
+                accessibilityLabel={`WhatsApp ${s.name}`}
+              >
+                <Ionicons name="logo-whatsapp" size={18} color={WHATSAPP_GREEN} />
+                <Text style={styles.whatsappButtonText}>WhatsApp</Text>
+              </Pressable>
+            </View>
           </View>
         );
       })}
@@ -359,30 +505,85 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
   );
 }
 
-function OrdersTab({ orders, setOrders }) {
+function OrdersTab({ orders, suppliers, loaded, storeId, shopName, setNotice }) {
   const { colors, styles } = useThemedStyles();
   const statusColors = useMemo(() => getStatusColors(colors), [colors]);
+  const [busyId, setBusyId] = useState(null);
 
-  function markDelivered(orderId) {
-    setOrders((prev) =>
-      prev.map((o) => (o.id === orderId ? { ...o, status: "Delivered" } : o)),
-    );
+  async function markDelivered(order) {
+    setBusyId(order.id);
+    try {
+      const { updated, skipped } = await markOrderDelivered(storeId, order.id);
+      const stockText = updated
+        ? `Stock updated for ${updated} ${updated === 1 ? "item" : "items"}.`
+        : "No stock was changed.";
+      const skippedText = skipped.length
+        ? ` Not in Stock any more, so skipped: ${skipped.join(", ")}.`
+        : "";
+      setNotice({ type: "success", text: `Order ${order.orderNumber} delivered. ${stockText}${skippedText}` });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        text: isOfflineError(error)
+          ? "Marking an order delivered needs an internet connection, so stock stays correct. Try again when you're online."
+          : error.message || "Could not mark the order delivered.",
+      });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // Opens WhatsApp straight from the tap. Don't put an await before this call.
+  function sendWhatsApp(order) {
+    const phone = order.supplierPhone || suppliers.find((supplier) => supplier.id === order.supplierId)?.phone;
+    if (!phone) {
+      setNotice({ type: "error", text: `${order.supplier} has no phone number saved.` });
+      return;
+    }
+    const message = supplierOrderMessage({ supplierName: order.supplier, items: order.items, shopName });
+    openWhatsApp(phone, message).then((result) => {
+      if (!result.ok) setNotice({ type: "error", text: result.error });
+    });
+  }
+
+  async function reorderSame(order) {
+    setBusyId(order.id);
+    try {
+      const supplier = suppliers.find((item) => item.id === order.supplierId)
+        || { id: order.supplierId, name: order.supplier, phone: order.supplierPhone };
+      const { orderNumber } = await createOrder(storeId, supplier, order.items);
+      setNotice({ type: "success", text: `Order ${orderNumber} created with the same items.` });
+    } catch (error) {
+      setNotice({ type: "error", text: error.message || "Could not create the order." });
+    } finally {
+      setBusyId(null);
+    }
   }
 
   return (
     <>
-      {orders.map((o, i) => {
+      {!loaded ? (
+        <Text style={styles.emptyText}>Loading orders...</Text>
+      ) : orders.length === 0 ? (
+        <View style={styles.emptyCard}>
+          <Text style={styles.emptyTitle}>No orders yet</Text>
+          <Text style={styles.emptyText}>Open a supplier and tap New Order to create one.</Text>
+        </View>
+      ) : null}
+
+      {orders.map((o) => {
         const statusStyle = statusColors[o.status] ?? {
           bg: colors.border,
           text: colors.textMuted,
         };
+        const busy = busyId === o.id;
         return (
-          <View key={i} style={styles.card}>
+          <View key={o.id} style={styles.card}>
             <View style={styles.cardTopRow}>
               <View>
                 <Text style={styles.itemTitle}>{o.supplier}</Text>
                 <Text style={styles.itemSub}>
-                  #{o.id} · {o.date}
+                  #{o.orderNumber} · {o.date}
                 </Text>
               </View>
               <View style={[styles.badge, { backgroundColor: statusStyle.bg }]}>
@@ -401,21 +602,28 @@ function OrdersTab({ orders, setOrders }) {
             <View style={styles.orderBottomRow}>
               <View>
                 <Text style={styles.presetLabel}>TOTAL COST</Text>
-                <Text style={styles.itemCost}>R{o.total.toLocaleString()}</Text>
+                <Text style={styles.itemCost}>{formatR(o.total)}</Text>
               </View>
-              <View style={{ flexDirection: "row", gap: 8 }}>
-                {o.status === "Pending" && (
-                  <Pressable
-                    style={styles.deliverButton}
-                    onPress={() => markDelivered(o.id)}
-                  >
-                    <Text style={styles.deliverButtonText}>Mark Delivered</Text>
-                  </Pressable>
-                )}
-                <Pressable style={styles.reorderButton}>
-                  <Text style={styles.reorderButtonText}>↻ Reorder Same</Text>
+              {o.status === "Delivered" && (
+                <Text style={styles.deliveredNote}>Added to Stock</Text>
+              )}
+            </View>
+
+            <View style={styles.orderActions}>
+              {o.status === "Pending" && (
+                <Pressable style={styles.whatsappButton} onPress={() => sendWhatsApp(o)} disabled={busy}>
+                  <Ionicons name="logo-whatsapp" size={18} color={WHATSAPP_GREEN} />
+                  <Text style={styles.whatsappButtonText}>Send on WhatsApp</Text>
                 </Pressable>
-              </View>
+              )}
+              {o.status === "Pending" && (
+                <Pressable style={styles.deliverButton} onPress={() => markDelivered(o)} disabled={busy}>
+                  <Text style={styles.deliverButtonText}>{busy ? "Updating..." : "Mark Delivered"}</Text>
+                </Pressable>
+              )}
+              <Pressable style={styles.reorderButton} onPress={() => reorderSame(o)} disabled={busy}>
+                <Text style={styles.reorderButtonText}>↻ Reorder Same</Text>
+              </Pressable>
             </View>
           </View>
         );
@@ -429,6 +637,22 @@ const makeStyles = (colors) =>
     screen: { flex: 1, backgroundColor: colors.background },
     content: { padding: 20, paddingBottom: 40 },
     header: { fontSize: 24, fontWeight: "800", marginBottom: 16, color: colors.textPrimary },
+
+    /* Inline result message */
+    noticeCard: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      borderRadius: 10,
+      marginBottom: 12,
+      borderWidth: 1,
+    },
+    noticeSuccess: { backgroundColor: colors.primaryLight, borderColor: colors.primary },
+    noticeError: { backgroundColor: "rgba(220, 38, 38, 0.15)", borderColor: "rgba(220, 38, 38, 0.4)" },
+    noticeText: { flex: 1, fontSize: 13, fontWeight: "600", lineHeight: 18 },
+
     segmentWrap: {
       flexDirection: "row",
       backgroundColor: colors.card,
@@ -474,6 +698,7 @@ const makeStyles = (colors) =>
       borderWidth: 1,
       borderColor: colors.border,
     },
+    addItemForm: { marginTop: 10 },
     formInput: {
       backgroundColor: colors.card,
       color: colors.textPrimary,
@@ -485,6 +710,7 @@ const makeStyles = (colors) =>
       borderWidth: 1,
       borderColor: colors.border,
     },
+    qtyInput: { marginTop: 4 },
     formSubmit: {
       backgroundColor: BRAND_GREEN,
       borderRadius: 10,
@@ -493,6 +719,28 @@ const makeStyles = (colors) =>
       marginTop: 4,
     },
     formSubmitText: { color: "#FFFFFF", fontWeight: "700", fontSize: 13 },
+    productResult: {
+      backgroundColor: colors.card,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      marginBottom: 6,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    productResultName: { fontSize: 14, fontWeight: "600", color: colors.textPrimary },
+    pickedChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      alignSelf: "flex-start",
+      gap: 6,
+      backgroundColor: colors.primaryLight,
+      borderRadius: 14,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      marginBottom: 10,
+    },
+    pickedChipText: { color: colors.primary, fontSize: 13, fontWeight: "700" },
     categoryPickOption: {
       borderWidth: 1,
       borderColor: colors.border,
@@ -505,6 +753,17 @@ const makeStyles = (colors) =>
     categoryPickSelected: { backgroundColor: BRAND_GREEN, borderColor: BRAND_GREEN },
     categoryPickText: { color: colors.textMuted, fontSize: 12, fontWeight: "600" },
     categoryPickTextSelected: { color: "#FFFFFF" },
+    emptyCard: {
+      backgroundColor: colors.card,
+      borderRadius: 14,
+      padding: 20,
+      marginBottom: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignItems: "center",
+    },
+    emptyTitle: { fontSize: 15, fontWeight: "700", color: colors.textPrimary },
+    emptyText: { fontSize: 13, color: colors.textMuted, marginTop: 4, lineHeight: 18 },
     card: {
       backgroundColor: colors.card,
       borderRadius: 14,
@@ -553,14 +812,31 @@ const makeStyles = (colors) =>
       borderTopWidth: 1,
       borderTopColor: colors.border,
     },
+    supplierActions: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      marginTop: 12,
+    },
     newOrderButton: {
       backgroundColor: BRAND_GREEN,
       borderRadius: 10,
       paddingVertical: 10,
       alignItems: "center",
-      marginTop: 12,
     },
+    newOrderGrow: { flex: 1 },
     newOrderButtonText: { color: "#FFFFFF", fontWeight: "700", fontSize: 13 },
+    whatsappButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      borderWidth: 1,
+      borderColor: WHATSAPP_GREEN,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+    },
+    whatsappButtonText: { color: colors.textPrimary, fontWeight: "700", fontSize: 13 },
     receiptLine: { color: colors.textSecondary, fontSize: 13, marginTop: 6 },
     orderBottomRow: {
       flexDirection: "row",
@@ -570,6 +846,13 @@ const makeStyles = (colors) =>
       paddingTop: 12,
       borderTopWidth: 1,
       borderTopColor: colors.border,
+    },
+    deliveredNote: { color: colors.primary, fontSize: 12, fontWeight: "700" },
+    orderActions: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+      marginTop: 12,
     },
     reorderButton: {
       backgroundColor: colors.primaryLight,

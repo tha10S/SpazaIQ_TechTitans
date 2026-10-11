@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,7 @@ import { useCustomerBalances } from '../hooks/useCustomerBalances';
 import { getAuthenticatedStoreId } from '../services/firestore/paths';
 import { createCustomer } from '../services/creditService';
 import { OfflineSyncNotice } from '../components/OfflineSyncNotice';
+import { creditReminderMessage, openWhatsApp } from '../services/whatsapp';
 
 const BRAND_GREEN = '#004B49'; // solid buttons and hero card keep brand green in both themes
 
@@ -131,6 +132,9 @@ export default function CreditLedgerScreen({ route, navigation }) {
   const storeId = route?.params?.storeId || getAuthenticatedStoreId();
   const { customers, loading, error, confirmCredit, createCustomerWithCredit, recordPayment } = useCustomerBalances(storeId);
 
+  // Set when a credit sale was started on the Sell screen: { creditAmount, total, itemCount, paymentMethod }
+  const saleDraft = route?.params?.saleDraft;
+
   const [idModalVisible, setIdModalVisible] = useState(false);
   const [modalMode, setModalMode] = useState('credit');
   const [activeCustomer, setActiveCustomer] = useState(null);
@@ -140,9 +144,21 @@ export default function CreditLedgerScreen({ route, navigation }) {
   const [durationMonths, setDurationMonths] = useState('');
   const [durationWeeks, setDurationWeeks] = useState('');
   const [saving, setSaving] = useState(false);
+  const [modalError, setModalError] = useState('');
+  // Inline message for WhatsApp reminders. Alert.alert shows nothing on web.
+  const [notice, setNotice] = useState(null);
+  const shopName = route?.params?.shopName;
   const [customerFormVisible, setCustomerFormVisible] = useState(false);
   const [customerForm, setCustomerForm] = useState({ name: '', phone: '', creditLimit: '' });
   const [customerFormError, setCustomerFormError] = useState('');
+
+  // Leaving this screen drops a half-finished credit sale, so the banner doesn't linger
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('blur', () => {
+      navigation.setParams({ saleDraft: undefined });
+    });
+    return unsubscribe;
+  }, [navigation]);
 
   const totalOutstanding = customers.reduce((sum, c) => sum + (c.balance || 0), 0);
   const repaymentPeriods = scheduleFrequency === 'monthly'
@@ -159,9 +175,28 @@ export default function CreditLedgerScreen({ route, navigation }) {
     if (pattern.test(value)) setter(value);
   };
 
+  const resetCreditForm = () => {
+    setPendingAmount('');
+    setPendingDueDate('');
+    setScheduleFrequency('one_time');
+    setDurationMonths('');
+    setDurationWeeks('');
+  };
+
+  const buildSchedule = () => ({
+    frequency: scheduleFrequency,
+    totalPayments: repaymentPeriods,
+    installmentAmount: Number(installmentAmount.toFixed(2)),
+    ...(scheduleFrequency === 'monthly' ? { durationMonths: Number(durationMonths) } : {}),
+    ...(scheduleFrequency === 'weekly' ? { durationWeeks: Number(durationWeeks) } : {}),
+  });
+
   const openIdVerification = (customer) => {
     setModalMode('credit');
     setActiveCustomer(customer);
+    setModalError('');
+    // In credit-sale mode the amount comes from the sale and can't be changed here
+    setPendingAmount(saleDraft ? Number(saleDraft.creditAmount).toFixed(2) : '');
     setIdModalVisible(true);
   };
 
@@ -169,25 +204,70 @@ export default function CreditLedgerScreen({ route, navigation }) {
     setModalMode('payment');
     setActiveCustomer(customer);
     setPendingAmount('');
+    setModalError('');
     setIdModalVisible(true);
   };
 
+  const closeCreditModal = () => {
+    setIdModalVisible(false);
+    setModalError('');
+    if (saleDraft) resetCreditForm();
+  };
+
+  const cancelCreditSale = () => {
+    navigation.setParams({ saleDraft: undefined });
+    navigation.navigate('Sell');
+  };
+
+  // Opens WhatsApp straight from the tap. Don't put an await before openWhatsApp.
+  const sendReminder = (customer) => {
+    setNotice(null);
+    const dueDate = customer.nextDueDate || customer.dueBy;
+    const message = creditReminderMessage({
+      customerName: customer.name,
+      balance: customer.balance,
+      dueDate,
+      overdue: customer.overdue,
+      shopName,
+    });
+    openWhatsApp(customer.phone, message).then((result) => {
+      if (!result.ok) setNotice({ type: 'error', text: `${customer.name}: ${result.error}` });
+    });
+  };
+
   const handleVerifyAndAppend = async () => {
+    setModalError('');
     const amount = Number(pendingAmount);
     if (!pendingAmount.trim() || !Number.isFinite(amount) || amount <= 0) {
-      Alert.alert('Invalid amount', 'Enter an amount using numbers only, greater than zero.');
+      setModalError('Enter an amount using numbers only, greater than zero.');
       return;
     }
     if (modalMode === 'credit' && !pendingDueDate.trim()) {
-      Alert.alert('Due date required', 'Please enter when this credit should be paid.');
+      setModalError('Choose the date this credit should be paid by.');
       return;
     }
     if (modalMode === 'credit' && scheduleFrequency === 'monthly' && (!Number.isInteger(Number(durationMonths)) || Number(durationMonths) < 1 || Number(durationMonths) > 12)) {
-      Alert.alert('Invalid duration', 'Enter a whole number of months between 1 and 12.');
+      setModalError('Enter a whole number of months between 1 and 12.');
       return;
     }
     if (modalMode === 'credit' && scheduleFrequency === 'weekly' && (!Number.isInteger(Number(durationWeeks)) || Number(durationWeeks) < 1)) {
-      Alert.alert('Invalid duration', 'Enter a whole number of weeks greater than zero.');
+      setModalError('Enter a whole number of weeks greater than zero.');
+      return;
+    }
+
+    // Credit sale started on Sell: hand the customer and plan back. Sell records the whole sale.
+    if (modalMode === 'credit' && saleDraft) {
+      const selection = {
+        customerId: activeCustomer.id,
+        dueDate: pendingDueDate.trim(),
+        schedule: buildSchedule(),
+        nonce: Date.now(),
+      };
+      setIdModalVisible(false);
+      resetCreditForm();
+      setActiveCustomer(null);
+      navigation.setParams({ saleDraft: undefined });
+      navigation.navigate('Sell', { creditSelection: selection });
       return;
     }
 
@@ -201,21 +281,11 @@ export default function CreditLedgerScreen({ route, navigation }) {
           customer: activeCustomer,
           amount,
           dueDate: pendingDueDate.trim(),
-          schedule: {
-            frequency: scheduleFrequency,
-            totalPayments: repaymentPeriods,
-            installmentAmount: Number(installmentAmount.toFixed(2)),
-            ...(scheduleFrequency === 'monthly' ? { durationMonths: Number(durationMonths) } : {}),
-            ...(scheduleFrequency === 'weekly' ? { durationWeeks: Number(durationWeeks) } : {}),
-          },
+          schedule: buildSchedule(),
         });
       }
       setIdModalVisible(false);
-      setPendingAmount('');
-      setPendingDueDate('');
-      setScheduleFrequency('one_time');
-      setDurationMonths('');
-      setDurationWeeks('');
+      resetCreditForm();
       setActiveCustomer(null);
       if (result?.pendingSync) {
         Alert.alert(
@@ -224,7 +294,7 @@ export default function CreditLedgerScreen({ route, navigation }) {
         );
       }
     } catch (err) {
-      Alert.alert(modalMode === 'payment' ? 'Could not make payment' : 'Could not log credit', err.message);
+      setModalError(err.message || (modalMode === 'payment' ? 'Could not make payment.' : 'Could not log credit.'));
     } finally {
       setSaving(false);
     }
@@ -232,7 +302,8 @@ export default function CreditLedgerScreen({ route, navigation }) {
 
   const handleCreateCustomer = async () => {
     const amount = Number(pendingAmount);
-    const hasInitialCredit = pendingAmount.trim() !== '';
+    // In credit-sale mode the customer is added without credit, then picked from the list
+    const hasInitialCredit = !saleDraft && pendingAmount.trim() !== '';
     if (hasInitialCredit && (!Number.isFinite(amount) || amount <= 0)) {
       setCustomerFormError('Enter an initial credit amount greater than zero, or leave it blank.');
       return;
@@ -258,23 +329,13 @@ export default function CreditLedgerScreen({ route, navigation }) {
           customer: customerForm,
           amount,
           dueDate: pendingDueDate.trim(),
-          schedule: {
-            frequency: scheduleFrequency,
-            totalPayments: repaymentPeriods,
-            installmentAmount: Number(installmentAmount.toFixed(2)),
-            ...(scheduleFrequency === 'monthly' ? { durationMonths: Number(durationMonths) } : {}),
-            ...(scheduleFrequency === 'weekly' ? { durationWeeks: Number(durationWeeks) } : {}),
-          },
+          schedule: buildSchedule(),
         });
       } else {
         await createCustomer(storeId, customerForm);
       }
       setCustomerForm({ name: '', phone: '', creditLimit: '' });
-      setPendingAmount('');
-      setPendingDueDate('');
-      setScheduleFrequency('one_time');
-      setDurationMonths('');
-      setDurationWeeks('');
+      resetCreditForm();
       setCustomerFormVisible(false);
     } catch (err) {
       setCustomerFormError(err.message || 'Could not save customer.');
@@ -301,6 +362,8 @@ export default function CreditLedgerScreen({ route, navigation }) {
     );
   }
 
+  const creditModalTitle = modalMode === 'payment' ? 'Make Payment' : saleDraft ? 'Credit Sale' : 'Record Credit';
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
@@ -318,6 +381,34 @@ export default function CreditLedgerScreen({ route, navigation }) {
             </Text>
           </View>
         </View>
+
+        {notice && (
+          <View style={styles.noticeCard}>
+            <Ionicons name="alert-circle" size={18} color={COLORS.danger} />
+            <Text style={styles.noticeText}>{notice.text}</Text>
+            <TouchableOpacity onPress={() => setNotice(null)} accessibilityLabel="Dismiss message">
+              <Ionicons name="close" size={16} color={COLORS.danger} />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Credit sale started on the Sell screen */}
+        {saleDraft && (
+          <View style={styles.saleBanner}>
+            <View style={styles.saleBannerIcon}>
+              <Ionicons name="cart" size={18} color={COLORS.emerald} />
+            </View>
+            <View style={styles.saleBannerBody}>
+              <Text style={styles.saleBannerTitle}>Credit sale: {formatR(saleDraft.creditAmount)}</Text>
+              <Text style={styles.saleBannerText}>
+                Tap the customer who is taking this on credit. You'll set the due date and repayment plan next.
+              </Text>
+            </View>
+            <TouchableOpacity onPress={cancelCreditSale} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={styles.saleBannerCancel}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Emerald Hero Total Card */}
         <View style={styles.heroCard}>
@@ -364,12 +455,26 @@ export default function CreditLedgerScreen({ route, navigation }) {
         ) : (
           customers.map((customer) => {
             const status = STATUS_CONFIG[customer.status] ?? STATUS_CONFIG.good;
+            const dueDate = customer.nextDueDate || customer.dueBy;
+
+            // In credit-sale mode, show why a customer can't take this sale (same rules the server applies)
+            const available = customer.creditLimit > 0 ? customer.creditLimit - customer.balance : null;
+            let blockedReason = '';
+            if (saleDraft) {
+              if (customer.overdue) {
+                blockedReason = 'Overdue. Blocked from new credit.';
+              } else if (available !== null && saleDraft.creditAmount > available) {
+                blockedReason = `Over credit limit. ${formatR(Math.max(0, available))} available.`;
+              }
+            }
+
             return (
               <TouchableOpacity
                 key={customer.id}
-                style={styles.customerCard}
+                style={[styles.customerCard, !!blockedReason && styles.customerCardBlocked]}
                 activeOpacity={0.75}
                 onPress={() => openIdVerification(customer)}
+                disabled={!!blockedReason}
               >
                 <View style={styles.avatarCircle}>
                   <Text style={styles.avatarText}>
@@ -380,9 +485,13 @@ export default function CreditLedgerScreen({ route, navigation }) {
                 <View style={styles.customerInfo}>
                   <Text style={styles.customerName}>{customer.name}</Text>
                   <View style={styles.dueRow}>
-                    <Ionicons name="calendar-outline" size={12} color={COLORS.textMuted} />
-                    <Text style={styles.customerDue}>
-                      {customer.dueBy ? `Due by ${customer.dueBy}` : 'No due date set'}
+                    <Ionicons
+                      name={blockedReason ? 'ban-outline' : 'calendar-outline'}
+                      size={12}
+                      color={blockedReason ? COLORS.danger : COLORS.textMuted}
+                    />
+                    <Text style={blockedReason ? styles.customerBlockedText : styles.customerDue}>
+                      {blockedReason || (dueDate ? `Due by ${dueDate}` : 'No due date set')}
                     </Text>
                   </View>
                 </View>
@@ -395,9 +504,20 @@ export default function CreditLedgerScreen({ route, navigation }) {
                       {status.label}
                     </Text>
                   </View>
-                  {customer.balance > 0 && (
+                  {customer.balance > 0 && !saleDraft && (
                     <TouchableOpacity style={styles.paymentLink} onPress={() => openPayment(customer)}>
                       <Text style={styles.paymentLinkText}>Make Payment</Text>
+                    </TouchableOpacity>
+                  )}
+                  {customer.balance > 0 && !saleDraft && !!customer.phone && (
+                    <TouchableOpacity
+                      style={styles.reminderLink}
+                      onPress={() => sendReminder(customer)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Send ${customer.name} a WhatsApp reminder`}
+                    >
+                      <Ionicons name="logo-whatsapp" size={14} color="#25D366" />
+                      <Text style={styles.reminderLinkText}>Remind</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -411,11 +531,7 @@ export default function CreditLedgerScreen({ route, navigation }) {
           activeOpacity={0.88}
           onPress={() => {
             setCustomerFormError('');
-            setPendingAmount('');
-            setPendingDueDate('');
-            setScheduleFrequency('one_time');
-            setDurationMonths('');
-            setDurationWeeks('');
+            resetCreditForm();
             setCustomerFormVisible(true);
           }}
         >
@@ -430,7 +546,7 @@ export default function CreditLedgerScreen({ route, navigation }) {
       </ScrollView>
 
       {/* ID Verification / New Credit Modal */}
-      <Modal visible={idModalVisible} transparent animationType="fade" onRequestClose={() => setIdModalVisible(false)}>
+      <Modal visible={idModalVisible} transparent animationType="fade" onRequestClose={closeCreditModal}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
@@ -438,15 +554,15 @@ export default function CreditLedgerScreen({ route, navigation }) {
                 <View style={styles.modalIconWrap}>
                   <Ionicons name="card" size={18} color={COLORS.emerald} />
                 </View>
-                <Text style={styles.modalTitle}>{modalMode === 'payment' ? 'Make Payment' : 'Record Credit'}</Text>
+                <Text style={styles.modalTitle}>{creditModalTitle}</Text>
               </View>
-              <TouchableOpacity onPress={() => setIdModalVisible(false)} disabled={saving} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <TouchableOpacity onPress={closeCreditModal} disabled={saving} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                 <Ionicons name="close-circle" size={24} color={COLORS.textMuted} />
               </TouchableOpacity>
             </View>
 
             <Text style={styles.modalSubtitle}>
-              {modalMode === 'payment' ? 'Record a repayment for ' : 'Record credit for '}
+              {modalMode === 'payment' ? 'Record a repayment for ' : saleDraft ? 'Credit sale for ' : 'Record credit for '}
               <Text style={styles.modalCustomerHighlight}>{activeCustomer?.name}</Text>.
             </Text>
 
@@ -460,7 +576,7 @@ export default function CreditLedgerScreen({ route, navigation }) {
                 keyboardType="decimal-pad"
                 value={pendingAmount}
                 onChangeText={(value) => setNumericInput(setPendingAmount, value, true)}
-                editable={!saving}
+                editable={!saving && !(saleDraft && modalMode === 'credit')}
               />
             </View>
 
@@ -520,10 +636,12 @@ export default function CreditLedgerScreen({ route, navigation }) {
               </>
             )}
 
+            {modalError ? <Text style={styles.modalError}>{modalError}</Text> : null}
+
             <View style={styles.modalButtonRow}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.modalButtonCancel]}
-                onPress={() => setIdModalVisible(false)}
+                onPress={closeCreditModal}
                 disabled={saving}
               >
                 <Text style={styles.modalButtonCancelText}>Cancel</Text>
@@ -537,7 +655,9 @@ export default function CreditLedgerScreen({ route, navigation }) {
                 {saving ? (
                   <ActivityIndicator color="#FFFFFF" size="small" />
                 ) : (
-                  <Text style={styles.modalButtonConfirmText}>{modalMode === 'payment' ? 'Save Payment' : 'Confirm & Log'}</Text>
+                  <Text style={styles.modalButtonConfirmText}>
+                    {modalMode === 'payment' ? 'Save Payment' : saleDraft ? 'Confirm Credit Sale' : 'Confirm & Log'}
+                  </Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -549,7 +669,7 @@ export default function CreditLedgerScreen({ route, navigation }) {
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add Customer & Record Credit</Text>
+              <Text style={styles.modalTitle}>{saleDraft ? 'Add Customer' : 'Add Customer & Record Credit'}</Text>
               <TouchableOpacity onPress={() => setCustomerFormVisible(false)} disabled={saving}>
                 <Ionicons name="close-circle" size={24} color={COLORS.textMuted} />
               </TouchableOpacity>
@@ -575,73 +695,77 @@ export default function CreditLedgerScreen({ route, navigation }) {
                 </View>
               ))}
 
-              <Text style={styles.formSectionTitle}>RECORD CREDIT</Text>
-              <Text style={styles.formHelperText}>Enter credit details here, or leave the amount blank to add only the customer.</Text>
-              <Text style={styles.inputLabel}>CREDIT AMOUNT (R)</Text>
-              <View style={styles.inputWrapper}>
-                <Text style={styles.currencyPrefix}>R</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="0.00"
-                  placeholderTextColor={COLORS.textMuted}
-                  keyboardType="decimal-pad"
-                  value={pendingAmount}
-                  onChangeText={(value) => setNumericInput(setPendingAmount, value, true)}
-                  editable={!saving}
-                />
-              </View>
-              <Text style={styles.inputLabel}>DUE DATE</Text>
-              <DueDateField
-                value={pendingDueDate}
-                onChange={setPendingDueDate}
-                colors={colors}
-                styles={styles}
-                disabled={saving}
-              />
-              <Text style={styles.inputLabel}>REPAYMENT SCHEDULE</Text>
-              <View style={styles.scheduleRow}>
-                {['one_time', 'weekly', 'monthly'].map((frequency) => (
-                  <TouchableOpacity
-                    key={frequency}
-                    style={[styles.scheduleOption, scheduleFrequency === frequency && styles.scheduleOptionSelected]}
-                    onPress={() => {
-                      setScheduleFrequency(frequency);
-                      setDurationMonths('');
-                      setDurationWeeks('');
-                    }}
-                    disabled={saving}
-                  >
-                    <Text style={[styles.scheduleOptionText, scheduleFrequency === frequency && styles.scheduleOptionTextSelected]}>
-                      {frequency === 'one_time' ? 'Once' : frequency[0].toUpperCase() + frequency.slice(1)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              {scheduleFrequency !== 'one_time' && (
+              {!saleDraft && (
                 <>
-                  <Text style={styles.inputLabel}>PLAN DURATION ({scheduleFrequency === 'monthly' ? 'MONTHS' : 'WEEKS'})</Text>
+                  <Text style={styles.formSectionTitle}>RECORD CREDIT</Text>
+                  <Text style={styles.formHelperText}>Enter credit details here, or leave the amount blank to add only the customer.</Text>
+                  <Text style={styles.inputLabel}>CREDIT AMOUNT (R)</Text>
                   <View style={styles.inputWrapper}>
-                    <Ionicons name="time-outline" size={18} color={COLORS.textMuted} style={styles.inputIcon} />
+                    <Text style={styles.currencyPrefix}>R</Text>
                     <TextInput
                       style={styles.modalInput}
-                      placeholder={scheduleFrequency === 'monthly' ? '1 to 12' : 'e.g. 12'}
+                      placeholder="0.00"
                       placeholderTextColor={COLORS.textMuted}
-                      keyboardType="number-pad"
-                      value={scheduleFrequency === 'monthly' ? durationMonths : durationWeeks}
-                      onChangeText={(value) => setNumericInput(scheduleFrequency === 'monthly' ? setDurationMonths : setDurationWeeks, value)}
+                      keyboardType="decimal-pad"
+                      value={pendingAmount}
+                      onChangeText={(value) => setNumericInput(setPendingAmount, value, true)}
                       editable={!saving}
                     />
                   </View>
+                  <Text style={styles.inputLabel}>DUE DATE</Text>
+                  <DueDateField
+                    value={pendingDueDate}
+                    onChange={setPendingDueDate}
+                    colors={colors}
+                    styles={styles}
+                    disabled={saving}
+                  />
+                  <Text style={styles.inputLabel}>REPAYMENT SCHEDULE</Text>
+                  <View style={styles.scheduleRow}>
+                    {['one_time', 'weekly', 'monthly'].map((frequency) => (
+                      <TouchableOpacity
+                        key={frequency}
+                        style={[styles.scheduleOption, scheduleFrequency === frequency && styles.scheduleOptionSelected]}
+                        onPress={() => {
+                          setScheduleFrequency(frequency);
+                          setDurationMonths('');
+                          setDurationWeeks('');
+                        }}
+                        disabled={saving}
+                      >
+                        <Text style={[styles.scheduleOptionText, scheduleFrequency === frequency && styles.scheduleOptionTextSelected]}>
+                          {frequency === 'one_time' ? 'Once' : frequency[0].toUpperCase() + frequency.slice(1)}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  {scheduleFrequency !== 'one_time' && (
+                    <>
+                      <Text style={styles.inputLabel}>PLAN DURATION ({scheduleFrequency === 'monthly' ? 'MONTHS' : 'WEEKS'})</Text>
+                      <View style={styles.inputWrapper}>
+                        <Ionicons name="time-outline" size={18} color={COLORS.textMuted} style={styles.inputIcon} />
+                        <TextInput
+                          style={styles.modalInput}
+                          placeholder={scheduleFrequency === 'monthly' ? '1 to 12' : 'e.g. 12'}
+                          placeholderTextColor={COLORS.textMuted}
+                          keyboardType="number-pad"
+                          value={scheduleFrequency === 'monthly' ? durationMonths : durationWeeks}
+                          onChangeText={(value) => setNumericInput(scheduleFrequency === 'monthly' ? setDurationMonths : setDurationWeeks, value)}
+                          editable={!saving}
+                        />
+                      </View>
+                    </>
+                  )}
+                  <View style={styles.installmentPreview}>
+                    <Ionicons name="calculator-outline" size={17} color={COLORS.emerald} />
+                    <Text style={styles.installmentPreviewText}>
+                      {scheduleFrequency === 'one_time'
+                        ? `One payment of ${formatR(Number(pendingAmount) || 0)}`
+                        : `${formatR(installmentAmount)} ${scheduleFrequency === 'monthly' ? 'per month' : 'per week'} × ${repaymentPeriods || 0} payments`}
+                    </Text>
+                  </View>
                 </>
               )}
-              <View style={styles.installmentPreview}>
-                <Ionicons name="calculator-outline" size={17} color={COLORS.emerald} />
-                <Text style={styles.installmentPreviewText}>
-                  {scheduleFrequency === 'one_time'
-                    ? `One payment of ${formatR(Number(pendingAmount) || 0)}`
-                    : `${formatR(installmentAmount)} ${scheduleFrequency === 'monthly' ? 'per month' : 'per week'} × ${repaymentPeriods || 0} payments`}
-                </Text>
-              </View>
               <Text style={styles.inputLabel}>CREDIT LIMIT (R)</Text>
               <View style={styles.inputWrapper}>
                 <TextInput
@@ -673,7 +797,7 @@ export default function CreditLedgerScreen({ route, navigation }) {
                 onPress={handleCreateCustomer}
                 disabled={saving}
               >
-                {saving ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.modalButtonConfirmText}>{pendingAmount.trim() ? 'Save Customer & Credit' : 'Save Customer'}</Text>}
+                {saving ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.modalButtonConfirmText}>{!saleDraft && pendingAmount.trim() ? 'Save Customer & Credit' : 'Save Customer'}</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -709,6 +833,13 @@ const makeStyles = (COLORS) =>
       color: COLORS.danger,
       fontSize: 12,
       marginBottom: 6,
+    },
+    modalError: {
+      color: COLORS.danger,
+      fontSize: 12,
+      fontWeight: '600',
+      marginTop: 10,
+      lineHeight: 17,
     },
     customerFormFields: {
       flexShrink: 1,
@@ -764,6 +895,46 @@ const makeStyles = (COLORS) =>
     badgeText: {
       fontSize: 12,
       fontWeight: '700',
+      color: COLORS.emerald,
+    },
+
+    /* Credit sale banner */
+    saleBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      backgroundColor: COLORS.emeraldBg,
+      borderWidth: 1,
+      borderColor: COLORS.emerald,
+      borderRadius: 14,
+      padding: 14,
+      marginBottom: 16,
+    },
+    saleBannerIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: COLORS.cardBg,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    saleBannerBody: {
+      flex: 1,
+    },
+    saleBannerTitle: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: COLORS.emerald,
+    },
+    saleBannerText: {
+      fontSize: 12,
+      lineHeight: 17,
+      color: COLORS.textDark,
+      marginTop: 2,
+    },
+    saleBannerCancel: {
+      fontSize: 13,
+      fontWeight: '800',
       color: COLORS.emerald,
     },
 
@@ -915,6 +1086,9 @@ const makeStyles = (COLORS) =>
         android: { elevation: 1 },
       }),
     },
+    customerCardBlocked: {
+      opacity: 0.6,
+    },
     avatarCircle: {
       width: 42,
       height: 42,
@@ -952,6 +1126,12 @@ const makeStyles = (COLORS) =>
       fontWeight: '500',
       color: COLORS.textMuted,
     },
+    customerBlockedText: {
+      flexShrink: 1,
+      fontSize: 12,
+      fontWeight: '600',
+      color: COLORS.danger,
+    },
     customerRight: {
       alignItems: 'flex-end',
       gap: 5,
@@ -964,6 +1144,37 @@ const makeStyles = (COLORS) =>
       fontSize: 11,
       fontWeight: '800',
       color: COLORS.emerald,
+    },
+    reminderLink: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingVertical: 2,
+      paddingHorizontal: 4,
+    },
+    reminderLinkText: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: COLORS.textDark,
+    },
+    noticeCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: 'rgba(220, 38, 38, 0.15)',
+      borderWidth: 1,
+      borderColor: 'rgba(220, 38, 38, 0.4)',
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      marginBottom: 12,
+    },
+    noticeText: {
+      flex: 1,
+      fontSize: 13,
+      fontWeight: '600',
+      lineHeight: 18,
+      color: COLORS.danger,
     },
     customerBalance: {
       fontSize: 16,

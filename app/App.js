@@ -7,6 +7,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeProvider, useTheme } from '../config/ThemeContext';
 import { TechTitansAssistant } from '../components/TechTitansAssistant';
 import { watchAuth } from '../services/auth/firebaseAuth';
@@ -26,6 +27,7 @@ import QRScannerScreen from '../screens/QRScannerScreen';
 import PlaceholderScreen from '../screens/PlaceholderScreen';
 import NotificationsScreen from '../screens/NotificationsScreen';
 import FirebaseTestScreen from '../screens/FirebaseTestScreen';
+import WelcomeScreen from '../screens/WelcomeScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -98,6 +100,27 @@ function AppContent() {
   const [userProfile, setUserProfile] = useState(null);
   const [offlineDemo, setOfflineDemo] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // Welcome screen: shown once per account, remembered on this device
+  const [welcome, setWelcome] = useState({ uid: null, seen: false });
+  const uid = user?.uid;
+  useEffect(() => {
+    if (!uid) return undefined;
+    let active = true;
+    AsyncStorage.getItem(`welcomeSeen:${uid}`)
+      .then((value) => active && setWelcome({ uid, seen: value === '1' }))
+      .catch(() => active && setWelcome({ uid, seen: true }));
+    return () => {
+      active = false;
+    };
+  }, [uid]);
+  const welcomeReady = Boolean(uid) && welcome.uid === uid;
+  const showWelcome = welcomeReady && !welcome.seen;
+  const finishWelcome = () => {
+    setWelcome({ uid, seen: true });
+    AsyncStorage.setItem(`welcomeSeen:${uid}`, '1').catch(() => {});
+  };
+
   const isOffline = networkState.isConnected === false || networkState.isInternetReachable === false;
 
   useEffect(() => {
@@ -166,7 +189,7 @@ function AppContent() {
   const userName = offlineDemo ? 'Demo Shopkeeper' : userProfile?.fullName || user?.displayName || user?.email;
   const shopName = offlineDemo ? 'SpazaIQ Offline Demo' : userProfile?.shopName || user?.displayName || 'My Shop';
 
-  if (loading) {
+  if (loading || (user && !welcomeReady)) {
     return (
       <View
         style={{
@@ -195,6 +218,10 @@ function AppContent() {
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           {offlineDemo ? (
             <Stack.Screen name="OfflineDemo" component={OfflineDemoScreen} />
+          ) : user && showWelcome ? (
+            <Stack.Screen name="Welcome">
+              {() => <WelcomeScreen userName={userName} shopName={shopName} onStart={finishWelcome} />}
+            </Stack.Screen>
           ) : user ? (
             <>
               <Stack.Screen
@@ -230,7 +257,7 @@ function AppContent() {
           />
         </Stack.Navigator>
       </NavigationContainer>
-      {(user || offlineDemo) && (
+      {((user && welcomeReady && !showWelcome) || offlineDemo) && (
         <TechTitansAssistant storeId={storeId} userName={userName} shopName={shopName} />
       )}
     </View>
