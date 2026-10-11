@@ -5,13 +5,13 @@ import {
   TouchableOpacity,
   ScrollView,
   StyleSheet,
-  SafeAreaView,
   Modal,
   TextInput,
   Alert,
   ActivityIndicator,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../config/ThemeContext';
@@ -346,7 +346,7 @@ export default function CreditLedgerScreen({ route, navigation }) {
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.safeArea, styles.centered]}>
+      <SafeAreaView style={[styles.safeArea, styles.centered]} edges={['top']}>
         <ActivityIndicator size="large" color={COLORS.emerald} />
       </SafeAreaView>
     );
@@ -354,7 +354,7 @@ export default function CreditLedgerScreen({ route, navigation }) {
 
   if (error) {
     return (
-      <SafeAreaView style={[styles.safeArea, styles.centered]}>
+      <SafeAreaView style={[styles.safeArea, styles.centered]} edges={['top']}>
         <Ionicons name="alert-circle-outline" size={42} color={COLORS.danger} style={{ marginBottom: 10 }} />
         <Text style={styles.errorText}>Couldn't load your credit ledger.</Text>
         <Text style={styles.errorSubtext}>{error.message}</Text>
@@ -365,7 +365,7 @@ export default function CreditLedgerScreen({ route, navigation }) {
   const creditModalTitle = modalMode === 'payment' ? 'Make Payment' : saleDraft ? 'Credit Sale' : 'Record Credit';
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <OfflineSyncNotice storeId={storeId} />
         {/* Header Section */}

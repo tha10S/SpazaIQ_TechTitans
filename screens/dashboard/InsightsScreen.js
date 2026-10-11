@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../config/ThemeContext";
 import { getAuthenticatedStoreId } from '../../services/firestore/paths';
@@ -110,6 +111,7 @@ function getPeriodData(sales, period) {
 
 export default function Insights({ route, navigation }) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
   const [period, setPeriod] = useState("Today");
@@ -199,7 +201,10 @@ export default function Insights({ route, navigation }) {
   const maxBarValue = Math.max(1, ...data.salesByDay.map((d) => d.value));
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}
+    >
       <Text style={styles.header}>Analytics & Forecasts</Text>
       {salesError ? (
         <Text style={styles.errorText}>Could not load sales: {salesError}</Text>

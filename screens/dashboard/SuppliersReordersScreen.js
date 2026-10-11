@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../config/ThemeContext";
 import { getAuthenticatedStoreId } from "../../services/firestore/paths";
@@ -52,6 +53,7 @@ function isOfflineError(error) {
 
 export default function SuppliersAndReorders({ route }) {
   const { colors, styles } = useThemedStyles();
+  const insets = useSafeAreaInsets();
   const storeId = route?.params?.storeId || getAuthenticatedStoreId();
   const shopName = route?.params?.shopName;
 
@@ -90,7 +92,11 @@ export default function SuppliersAndReorders({ route }) {
   }, [notice]);
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}
+      keyboardShouldPersistTaps="handled"
+    >
       <Text style={styles.header}>Suppliers</Text>
 
       {notice && (

@@ -6,11 +6,11 @@ import {
   TouchableOpacity,
   ScrollView,
   StyleSheet,
-  SafeAreaView,
   ActivityIndicator,
   Modal,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNetworkState } from 'expo-network';
 import QRScannerScreen from './QRScannerScreen';
@@ -27,6 +27,9 @@ const PAYMENT_METHODS = [
   { id: 'Credit', label: 'Credit', icon: 'wallet-outline' },
   { id: 'Split', label: 'Split', icon: 'git-compare-outline' },
 ];
+
+const SPLIT_METHODS = PAYMENT_METHODS.filter((method) => method.id !== 'Split');
+const SPLIT_ORDER = SPLIT_METHODS.map((method) => method.id);
 
 const BRAND_GREEN = '#004B49'; // solid buttons keep brand green in both themes
 
@@ -74,12 +77,13 @@ export default function NewSaleScreen({ route, navigation }) {
 
   const [payment, setPayment] = useState('Cash');
   const [customers, setCustomers] = useState([]);
+  const [splitMethods, setSplitMethods] = useState(['Cash', 'Credit']);
   const [splitPaidAmount, setSplitPaidAmount] = useState('');
   const [scannerVisible, setScannerVisible] = useState(false);
   const [scanError, setScanError] = useState('');
   // { type: 'success' | 'error', text }. Shown inline because Alert.alert shows nothing on web.
   const [notice, setNotice] = useState(null);
-  // null | { phase: 'processing' | 'approved' | 'failed', total, message }
+  // null | { phase: 'processing' | 'approved' | 'failed', total, message, note }
   const [cardState, setCardState] = useState(null);
 
   useEffect(() => {
@@ -94,13 +98,41 @@ export default function NewSaleScreen({ route, navigation }) {
   }, [notice]);
 
   const totalItemsCount = cart.reduce((sum, item) => sum + item.qty, 0);
-  const splitPaid = Number(splitPaidAmount || 0);
+
+  // Split: exactly two of Cash, Card and Credit, always kept in that order.
+  // The amount typed is for the first method; the second method gets whatever is left.
+  const isSplit = payment === 'Split';
+  const splitPair = SPLIT_ORDER.filter((id) => splitMethods.includes(id));
+  const firstMethod = splitPair[0];
+  const secondMethod = splitPair[1];
+  const firstAmount = Number(splitPaidAmount || 0);
+  const secondAmount = Math.max(0, subtotal - firstAmount);
+  const splitHasCard = isSplit && splitPair.includes('Card');
+  const splitHasCredit = isSplit && splitPair.includes('Credit');
+
   const creditAmount = payment === 'Credit'
     ? subtotal
-    : payment === 'Split'
-      ? Math.max(0, subtotal - splitPaid)
+    : splitHasCredit
+      ? secondAmount
+      : 0;
+  const cardAmount = payment === 'Card'
+    ? subtotal
+    : splitHasCard
+      ? (firstMethod === 'Card' ? firstAmount : secondAmount)
+      : 0;
+  const cashAmount = payment === 'Cash'
+    ? subtotal
+    : isSplit && splitPair.includes('Cash')
+      ? firstAmount
       : 0;
   const paidAmount = subtotal - creditAmount;
+
+  const amountByMethod = { Cash: cashAmount, Card: cardAmount, Credit: creditAmount };
+
+  const toggleSplitMethod = (id) => {
+    setSplitMethods((current) => (current.includes(id) ? current : [current[1], id]));
+    setSplitPaidAmount('');
+  };
 
   const handleBarcodeScanned = async (value) => {
     setScannerVisible(false);
@@ -144,28 +176,60 @@ export default function NewSaleScreen({ route, navigation }) {
     handleBarcodeScanned(String(scannedCode));
   }, [scannedCode]);
 
-  // Simulated card payment: processing, then approved, then the sale is recorded like a cash sale.
-  // The sale is saved while the "processing" screen shows, so a stock problem is reported as a failed payment.
+  const openCreditLedger = () => {
+    navigation.navigate('Credit', {
+      saleDraft: {
+        creditAmount,
+        total: subtotal,
+        itemCount: totalItemsCount,
+        paymentMethod: payment,
+        paidAmount,
+      },
+    });
+  };
+
+  // Simulated card payment for a sale with no credit part: processing, then approved, then the sale is
+  // recorded as fully paid. The sale is saved while the "processing" screen shows, so a stock problem is
+  // reported as a failed payment. For a split, the card amount is charged and the rest was paid in cash.
   const payByCard = async () => {
     const total = subtotal;
-    setCardState({ phase: 'processing', total });
+    const charged = cardAmount;
+    const cashPart = cashAmount;
+    const wasSplit = isSplit;
+    setCardState({ phase: 'processing', total: charged, note: 'Recording your sale.' });
     try {
       const [result] = await Promise.all([
-        completeSale({ paymentMethod: 'card', paidAmount: total, creditAmount: 0 }),
+        completeSale({ paymentMethod: wasSplit ? 'split' : 'card', paidAmount: total, creditAmount: 0 }),
         wait(2200),
       ]);
-      setCardState({ phase: 'approved', total });
+      setCardState({ phase: 'approved', total: charged, note: 'Recording your sale.' });
       await wait(1300);
       setCardState(null);
+      setSplitPaidAmount('');
+      const detail = wasSplit
+        ? `Split sale of ${formatR(total)} recorded. Cash ${formatR(cashPart)} and card ${formatR(charged)} received.`
+        : `Card payment of ${formatR(total)} approved. Sale recorded.`;
       setNotice({
         type: 'success',
         text: result?.pendingSync
-          ? `Card sale of ${formatR(total)} saved on this device. It will sync when you're back online.`
-          : `Card payment of ${formatR(total)} approved. Sale recorded.`,
+          ? `${wasSplit ? 'Split' : 'Card'} sale of ${formatR(total)} saved on this device. It will sync when you're back online.`
+          : detail,
       });
     } catch (err) {
-      setCardState({ phase: 'failed', total, message: err.message || 'The payment could not be completed.' });
+      setCardState({ phase: 'failed', total: charged, message: err.message || 'The payment could not be completed.' });
     }
+  };
+
+  // Card plus credit: charge the card part first, then open the credit ledger for the remainder.
+  // The sale itself is recorded once the customer and repayment plan are chosen.
+  const chargeCardThenOpenCredit = async () => {
+    const charged = cardAmount;
+    setCardState({ phase: 'processing', total: charged, note: 'Opening the credit ledger for the remainder.' });
+    await wait(2200);
+    setCardState({ phase: 'approved', total: charged, note: 'Opening the credit ledger for the remainder.' });
+    await wait(1300);
+    setCardState(null);
+    openCreditLedger();
   };
 
   // The Credit screen hands back the customer and repayment plan, then the sale is recorded here
@@ -173,6 +237,10 @@ export default function NewSaleScreen({ route, navigation }) {
   const finishCreditSale = async ({ customerId, dueDate, schedule }) => {
     const total = subtotal;
     const customer = customers.find((item) => item.id === customerId);
+    const paidParts = [];
+    if (isSplit && cardAmount > 0) paidParts.push(`${formatR(cardAmount)} paid by card`);
+    if (isSplit && cashAmount > 0) paidParts.push(`${formatR(cashAmount)} paid in cash`);
+    const paidText = paidParts.length ? ` ${paidParts.join(', ')}.` : '';
     try {
       const result = await completeSale({
         paymentMethod: payment.toLowerCase(),
@@ -187,7 +255,7 @@ export default function NewSaleScreen({ route, navigation }) {
         type: 'success',
         text: result?.pendingSync
           ? `Credit sale of ${formatR(total)} saved on this device. It will sync when you're back online.`
-          : `Sale of ${formatR(total)} recorded. ${formatR(creditAmount)} is on credit${customer ? ` for ${customer.name}` : ''}.`,
+          : `Sale of ${formatR(total)} recorded.${paidText} ${formatR(creditAmount)} is on credit${customer ? ` for ${customer.name}` : ''}.`,
       });
     } catch (err) {
       setNotice({ type: 'error', text: err.message || 'The credit sale could not be recorded.' });
@@ -211,28 +279,32 @@ export default function NewSaleScreen({ route, navigation }) {
       setNotice({ type: 'error', text: 'Add at least one item to the cart first.' });
       return;
     }
-    if (payment === 'Split' && !(splitPaid > 0 && splitPaid < subtotal)) {
+    if (isSplit && !(firstAmount > 0 && firstAmount < subtotal)) {
       setNotice({
         type: 'error',
-        text: 'For a split payment, enter an amount paid now that is more than R 0.00 and less than the total.',
+        text: `For a split payment, enter an amount for ${firstMethod.toLowerCase()} that is more than R 0.00 and less than the total.`,
       });
       return;
     }
 
-    if (payment === 'Card') {
-      if (isOffline) {
-        setNotice({ type: 'error', text: 'Card payments need an internet connection. Use cash or credit instead.' });
-        return;
-      }
+    if (cardAmount > 0 && isOffline) {
+      setNotice({ type: 'error', text: 'Card payments need an internet connection. Use cash or credit instead.' });
+      return;
+    }
+
+    if (cardAmount > 0 && creditAmount > 0) {
+      chargeCardThenOpenCredit();
+      return;
+    }
+
+    if (cardAmount > 0) {
       payByCard();
       return;
     }
 
     if (creditAmount > 0) {
-      // Credit and Split sales are finished on the Credit screen, where the customer and plan are chosen
-      navigation.navigate('Credit', {
-        saleDraft: { creditAmount, total: subtotal, itemCount: totalItemsCount, paymentMethod: payment },
-      });
+      // Credit and cash-plus-credit sales are finished on the Credit screen, where the customer and plan are chosen
+      openCreditLedger();
       return;
     }
 
@@ -250,15 +322,29 @@ export default function NewSaleScreen({ route, navigation }) {
     }
   };
 
+  const goesToCredit = creditAmount > 0 || payment === 'Credit';
   const ctaLabel = payment === 'Card'
     ? 'Pay by Card'
-    : payment === 'Credit' || payment === 'Split'
+    : goesToCredit
       ? 'Continue to Credit'
-      : 'Complete Sale';
-  const ctaIcon = payment === 'Credit' || payment === 'Split' ? 'arrow-forward-circle' : 'checkmark-circle';
+      : isSplit
+        ? 'Complete Split Sale'
+        : 'Complete Sale';
+  const ctaIcon = goesToCredit ? 'arrow-forward-circle' : 'checkmark-circle';
+
+  const splitHint = (() => {
+    if (!isSplit) return '';
+    if (splitHasCredit && splitHasCard) {
+      return 'The card amount counts as paid. The remainder opens the Credit ledger, where you pick the customer and repayment plan.';
+    }
+    if (splitHasCredit) {
+      return 'The cash amount counts as paid. The remainder opens the Credit ledger, where you pick the customer and repayment plan.';
+    }
+    return 'Both amounts are received now, so the full total counts as paid.';
+  })();
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <OfflineSyncNotice storeId={storeId} />
         <View style={styles.headerRow}>
@@ -459,25 +545,78 @@ export default function NewSaleScreen({ route, navigation }) {
           </View>
         )}
 
-        {(payment === 'Credit' || payment === 'Split') && (
+        {payment === 'Credit' && (
           <View style={styles.creditOptionsCard}>
-            {payment === 'Split' && (
-              <>
-                <Text style={styles.creditOptionsLabel}>PAID NOW (R)</Text>
-                <TextInput
-                  style={styles.creditTextInput}
-                  placeholder="0.00"
-                  placeholderTextColor={COLORS.textMuted}
-                  keyboardType="decimal-pad"
-                  value={splitPaidAmount}
-                  onChangeText={setSplitPaidAmount}
-                />
-              </>
-            )}
             <View style={styles.infoRow}>
               <Ionicons name="wallet-outline" size={18} color={COLORS.primary} />
               <Text style={styles.infoText}>
                 {formatR(creditAmount)} goes on credit. You'll choose the customer and repayment plan on the Credit screen.
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {isSplit && (
+          <View style={styles.creditOptionsCard}>
+            <Text style={styles.creditOptionsLabel}>SPLIT BETWEEN (PICK TWO)</Text>
+            <View style={styles.splitChipRow}>
+              {SPLIT_METHODS.map((method) => {
+                const selected = splitMethods.includes(method.id);
+                return (
+                  <TouchableOpacity
+                    key={method.id}
+                    style={[styles.splitChip, selected && styles.splitChipSelected]}
+                    onPress={() => toggleSplitMethod(method.id)}
+                    activeOpacity={0.85}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                  >
+                    <Ionicons
+                      name={method.icon}
+                      size={16}
+                      color={selected ? COLORS.primary : COLORS.textMuted}
+                    />
+                    <Text style={[styles.splitChipText, selected && styles.splitChipTextSelected]}>
+                      {method.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={styles.creditOptionsLabel}>{`${firstMethod.toUpperCase()} AMOUNT (R)`}</Text>
+            <TextInput
+              style={styles.creditTextInput}
+              placeholder="0.00"
+              placeholderTextColor={COLORS.textMuted}
+              keyboardType="decimal-pad"
+              value={splitPaidAmount}
+              onChangeText={(value) => {
+                if (/^\d*\.?\d{0,2}$/.test(value)) setSplitPaidAmount(value);
+              }}
+            />
+
+            <View style={styles.splitSummary}>
+              <View style={styles.splitSummaryRow}>
+                <Text style={styles.splitSummaryLabel}>{firstMethod}</Text>
+                <Text style={styles.splitSummaryValue}>{formatR(amountByMethod[firstMethod])}</Text>
+              </View>
+              <View style={styles.splitSummaryRow}>
+                <Text style={styles.splitSummaryLabel}>{`${secondMethod} (remainder)`}</Text>
+                <Text style={styles.splitSummaryValue}>{formatR(amountByMethod[secondMethod])}</Text>
+              </View>
+            </View>
+
+            <View style={styles.infoRow}>
+              <Ionicons
+                name={splitHasCredit ? 'wallet-outline' : 'information-circle-outline'}
+                size={18}
+                color={COLORS.primary}
+              />
+              <Text style={styles.infoText}>
+                {splitHasCard && isOffline
+                  ? 'Card payments need an internet connection. Pick cash and credit while offline.'
+                  : `${splitHint}${splitHasCard ? ' Card payments are simulated. No real card is charged.' : ''}`}
               </Text>
             </View>
           </View>
@@ -533,7 +672,7 @@ export default function NewSaleScreen({ route, navigation }) {
                 <Ionicons name="checkmark-circle" size={72} color="#10B981" />
                 <Text style={styles.cardModalTitle}>Payment approved</Text>
                 <Text style={styles.cardModalAmount}>{formatR(cardState.total)}</Text>
-                <Text style={styles.cardModalText}>Recording your sale.</Text>
+                <Text style={styles.cardModalText}>{cardState.note || 'Recording your sale.'}</Text>
               </>
             )}
             {cardState?.phase === 'failed' && (
@@ -956,6 +1095,63 @@ const makeStyles = (COLORS) =>
       color: COLORS.textDark,
       marginBottom: 10,
     },
+
+    /* Split payment */
+    splitChipRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginBottom: 12,
+    },
+    splitChip: {
+      flex: 1,
+      height: 40,
+      borderRadius: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      borderWidth: 1,
+      borderColor: COLORS.border,
+      backgroundColor: COLORS.bg,
+    },
+    splitChipSelected: {
+      borderColor: COLORS.primary,
+      backgroundColor: COLORS.primaryBg,
+    },
+    splitChipText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: COLORS.textMuted,
+    },
+    splitChipTextSelected: {
+      color: COLORS.primary,
+      fontWeight: '700',
+    },
+    splitSummary: {
+      borderWidth: 1,
+      borderColor: COLORS.border,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      marginBottom: 10,
+    },
+    splitSummaryRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 4,
+    },
+    splitSummaryLabel: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: COLORS.textMuted,
+    },
+    splitSummaryValue: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: COLORS.textDark,
+    },
+
     completeCta: {
       height: 52,
       borderRadius: 14,

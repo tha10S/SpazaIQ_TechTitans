@@ -43,6 +43,13 @@ export default function StockScreen({ navigation, route }) {
 
   const lowStockCount = products.filter((product) => product.quantity <= product.reorder_level).length;
   const totalQuantity = products.reduce((total, product) => total + product.quantity, 0);
+  const expiringCount = products.filter((product) => {
+    const raw = product.expiry_date || product.expiryDate;
+    if (!raw) return false;
+    const date = raw?.toDate ? raw.toDate() : new Date(raw);
+    if (Number.isNaN(date.getTime())) return false;
+    return (date.getTime() - Date.now()) / 86400000 <= 7;
+  }).length;
 
   const openProductForm = (product = null) => {
     setEditingProduct(product);
@@ -141,7 +148,7 @@ export default function StockScreen({ navigation, route }) {
                 <Ionicons name="time" size={16} color="#F59E0B" />
               </View>
               <Text style={styles.summaryLabel}>Expiring</Text>
-              <Text style={[styles.summaryValue, { color: '#F59E0B' }]}>5</Text>
+              <Text style={[styles.summaryValue, { color: '#F59E0B' }]}>{expiringCount}</Text>
             </View>
           </View>
 
@@ -176,7 +183,7 @@ export default function StockScreen({ navigation, route }) {
 
           {/* Product List */}
           <View style={styles.productList}>
-            {loading ? <Text style={styles.emptyText}>Loading products...</Text> : error ? <Text style={styles.emptyText}>{error.message}</Text> : products.map((product) => {
+            {loading ? <Text style={styles.emptyText}>Loading products...</Text> : error ? <Text style={styles.emptyText}>{error.message}</Text> : products.length === 0 ? <Text style={styles.emptyText}>{searchQuery ? 'No products match your search.' : 'No products yet. Tap + to add your first product.'}</Text> : products.map((product) => {
               const statusType = product.quantity === 0 ? 'out' : product.quantity <= product.reorder_level ? 'low' : 'stock';
               const status = statusType === 'out' ? 'Out of Stock' : statusType === 'low' ? 'Low Stock' : 'In Stock';
               return (

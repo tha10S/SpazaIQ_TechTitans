@@ -3,6 +3,13 @@ import { db } from '../firebase/firebaseConfig';
 import { SEED_CUSTOMERS, SEED_PRODUCTS } from '../../data/seedData';
 import { assertStoreId, storeCollectionPath, storePath } from './paths';
 
+const DEMO_ACCOUNT_EMAILS = ['demo@spazaiq.com'];
+
+function isDemoAccount(email) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  return DEMO_ACCOUNT_EMAILS.includes(normalizedEmail);
+}
+
 export async function ensureStoreSeed(storeId, profile = {}) {
   const authenticatedStoreId = assertStoreId(storeId);
   const userReference = doc(db, 'users', authenticatedStoreId);
@@ -16,11 +23,12 @@ export async function ensureStoreSeed(storeId, profile = {}) {
     const existingStore = storeSnapshot.exists() ? storeSnapshot.data() : {};
     const displayName = profile.fullName || profile.displayName || existingUser.displayName || '';
     const shopName = profile.shopName || existingUser.shopName || existingStore.name || displayName || 'My Shop';
-    const shouldSeed = existingStore.seedVersion !== 1;
+    const email = profile.email || existingUser.email || '';
+    const shouldSeed = isDemoAccount(email) && existingStore.seedVersion !== 1;
 
     transaction.set(userReference, {
       uid: authenticatedStoreId,
-      email: profile.email || existingUser.email || '',
+      email,
       displayName,
       mobile: profile.mobile || existingUser.mobile || '',
       shopName,
@@ -31,7 +39,7 @@ export async function ensureStoreSeed(storeId, profile = {}) {
     transaction.set(storeReference, {
       ownerId: authenticatedStoreId,
       name: shopName,
-      seedVersion: 1,
+      seedVersion: shouldSeed ? 1 : existingStore.seedVersion || 0,
       createdAt: existingStore.createdAt || serverTimestamp(),
       updatedAt: serverTimestamp(),
     }, { merge: true });

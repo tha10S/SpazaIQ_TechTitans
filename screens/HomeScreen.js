@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../config/ThemeContext';
@@ -13,6 +13,8 @@ import { OfflineSyncNotice } from '../components/OfflineSyncNotice';
 // Shop location isn't stored yet, so weather is for Johannesburg.
 const WEATHER_URL =
   'https://api.open-meteo.com/v1/forecast?latitude=-26.2041&longitude=28.0473&current=temperature_2m,weather_code&timezone=auto';
+
+const MAX_NEWS_ITEMS = 5;
 
 function getGreeting() {
   const hour = new Date().getHours();
@@ -44,7 +46,6 @@ export default function HomeScreen({ navigation, route }) {
   const [products, setProducts] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [weather, setWeather] = useState(null);
-  const [feedVisible, setFeedVisible] = useState(false);
   const storeId = route?.params?.storeId || getAuthenticatedStoreId();
 
   // Real-time clock trigger
@@ -142,7 +143,6 @@ export default function HomeScreen({ navigation, route }) {
   };
 
   const openFeedItem = (item) => {
-    setFeedVisible(false);
     if (item.target) navigation.navigate(item.target);
   };
 
@@ -157,7 +157,7 @@ export default function HomeScreen({ navigation, route }) {
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <OfflineSyncNotice storeId={storeId} />
 
-        {/* Header with Greeting, Shop Name, Real-time Clock, Weather and Shop news */}
+        {/* Header with Greeting, Shop Name, Real-time Clock, Weather and Profile */}
         <View style={styles.header}>
           <View style={styles.headerMain}>
             <Text style={styles.greeting}>
@@ -175,6 +175,16 @@ export default function HomeScreen({ navigation, route }) {
           </View>
 
           <View style={styles.headerRightCol}>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Profile')}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Open profile and settings"
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            >
+              <Ionicons name="person-circle" size={36} color={colors.primary} />
+            </TouchableOpacity>
+
             <View style={styles.weatherChip}>
               <View style={styles.weatherRow}>
                 <Ionicons name={weather?.icon || 'cloud-outline'} size={15} color={colors.warning} />
@@ -182,22 +192,6 @@ export default function HomeScreen({ navigation, route }) {
               </View>
               <Text style={styles.locationText}>{weather ? `${weather.label} • Joburg` : 'Joburg'}</Text>
             </View>
-
-            <TouchableOpacity
-              style={styles.newsButton}
-              onPress={() => setFeedVisible(true)}
-              activeOpacity={0.8}
-              accessibilityRole="button"
-              accessibilityLabel={`Shop news${attentionCount ? `, ${attentionCount} need attention` : ''}`}
-            >
-              <Ionicons name="newspaper-outline" size={16} color={colors.primary} />
-              <Text style={styles.newsButtonText}>News</Text>
-              {attentionCount > 0 && (
-                <View style={styles.newsBadge}>
-                  <Text style={styles.newsBadgeText}>{attentionCount}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
           </View>
         </View>
 
@@ -245,6 +239,49 @@ export default function HomeScreen({ navigation, route }) {
               <Text style={styles.statValue}>{stat.value}</Text>
             </View>
           ))}
+        </View>
+
+        {/* Shop news: important info pulled from Stock, Credit and Insights */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Shop News</Text>
+          {attentionCount > 0 ? (
+            <View style={styles.newsBadge}>
+              <Text style={styles.newsBadgeText}>{attentionCount} need attention</Text>
+            </View>
+          ) : null}
+        </View>
+
+        <View style={styles.feedList}>
+          {feed.length === 0 ? (
+            <View style={styles.feedEmpty}>
+              <Ionicons name="newspaper-outline" size={30} color={colors.textMuted} />
+              <Text style={styles.feedEmptyTitle}>Nothing to report yet</Text>
+              <Text style={styles.feedEmptyText}>
+                Record a sale or add stock, and updates about your shop will show up here.
+              </Text>
+            </View>
+          ) : (
+            feed.slice(0, MAX_NEWS_ITEMS).map((item) => {
+              const tone = feedTones[item.severity] || feedTones.info;
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.feedRow}
+                  activeOpacity={0.75}
+                  onPress={() => openFeedItem(item)}
+                >
+                  <View style={[styles.feedIcon, { backgroundColor: tone.bg }]}>
+                    <Ionicons name={item.icon} size={18} color={tone.color} />
+                  </View>
+                  <View style={styles.feedTextWrap}>
+                    <Text style={styles.feedTitle}>{item.title}</Text>
+                    <Text style={styles.feedDetail}>{item.detail}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                </TouchableOpacity>
+              );
+            })
+          )}
         </View>
 
         {/* Today's Sales Performance Chart */}
@@ -329,68 +366,6 @@ export default function HomeScreen({ navigation, route }) {
         </View>
 
       </ScrollView>
-
-      {/* Shop news popup: important info pulled from Stock, Credit and Insights */}
-      <Modal
-        visible={feedVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setFeedVisible(false)}
-      >
-        <View style={styles.sheetOverlay}>
-          <TouchableOpacity
-            style={styles.sheetBackdrop}
-            activeOpacity={1}
-            onPress={() => setFeedVisible(false)}
-            accessibilityLabel="Close shop news"
-          />
-          <View style={styles.sheet}>
-            <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>Shop news</Text>
-              <TouchableOpacity
-                onPress={() => setFeedVisible(false)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                accessibilityLabel="Close"
-              >
-                <Ionicons name="close-circle" size={26} color={colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetContent}>
-              {feed.length === 0 ? (
-                <View style={styles.feedEmpty}>
-                  <Ionicons name="newspaper-outline" size={32} color={colors.textMuted} />
-                  <Text style={styles.feedEmptyTitle}>Nothing to report yet</Text>
-                  <Text style={styles.feedEmptyText}>
-                    Record a sale or add stock, and updates about your shop will show up here.
-                  </Text>
-                </View>
-              ) : (
-                feed.map((item) => {
-                  const tone = feedTones[item.severity] || feedTones.info;
-                  return (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={styles.feedRow}
-                      activeOpacity={0.75}
-                      onPress={() => openFeedItem(item)}
-                    >
-                      <View style={[styles.feedIcon, { backgroundColor: tone.bg }]}>
-                        <Ionicons name={item.icon} size={18} color={tone.color} />
-                      </View>
-                      <View style={styles.feedTextWrap}>
-                        <Text style={styles.feedTitle}>{item.title}</Text>
-                        <Text style={styles.feedDetail}>{item.detail}</Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-                    </TouchableOpacity>
-                  );
-                })
-              )}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -430,30 +405,6 @@ function makeStyles(colors, typography, spacing, radius) {
     weatherText: { fontSize: 12, fontWeight: '700', color: colors.textPrimary },
     weatherRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     locationText: { fontSize: 10, color: colors.textMuted },
-
-    /* Shop news button */
-    newsButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 5,
-      backgroundColor: colors.card,
-      paddingHorizontal: 10,
-      paddingVertical: 5,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-    newsButtonText: { fontSize: 12, fontWeight: '700', color: colors.textPrimary },
-    newsBadge: {
-      minWidth: 18,
-      height: 18,
-      borderRadius: 9,
-      paddingHorizontal: 4,
-      backgroundColor: colors.danger,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    newsBadgeText: { fontSize: 11, fontWeight: '800', color: '#FFFFFF' },
 
     /* Hero Sales Card */
     heroCard: {
@@ -517,7 +468,7 @@ function makeStyles(colors, typography, spacing, radius) {
     statLabel: { fontSize: 11, color: colors.textMuted, fontWeight: '600', marginBottom: 2 },
     statValue: { fontSize: 15, fontWeight: '800', color: colors.textPrimary },
 
-    /* Today's Hourly Chart Section */
+    /* Section headers */
     sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm },
     sectionTitle: { fontSize: 17, fontWeight: '800', color: colors.textPrimary },
     subBadge: {
@@ -531,6 +482,44 @@ function makeStyles(colors, typography, spacing, radius) {
       overflow: 'hidden',
     },
     linkText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
+
+    /* Shop news */
+    newsBadge: {
+      backgroundColor: 'rgba(220,38,38,0.15)',
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 6,
+    },
+    newsBadgeText: { fontSize: 11, fontWeight: '800', color: colors.danger },
+    feedList: { gap: spacing.sm, marginBottom: spacing.lg },
+    feedRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      backgroundColor: colors.card,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: spacing.md,
+    },
+    feedIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+    feedTextWrap: { flex: 1 },
+    feedTitle: { fontSize: 14, fontWeight: '700', color: colors.textPrimary },
+    feedDetail: { fontSize: 12, color: colors.textMuted, marginTop: 2, lineHeight: 17 },
+    feedEmpty: {
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: colors.card,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingVertical: spacing.lg,
+      paddingHorizontal: spacing.lg,
+    },
+    feedEmptyTitle: { fontSize: 15, fontWeight: '700', color: colors.textPrimary, marginTop: 4 },
+    feedEmptyText: { fontSize: 13, color: colors.textMuted, textAlign: 'center' },
+
+    /* Today's Hourly Chart Section */
     chartCard: {
       backgroundColor: colors.card,
       borderRadius: 16,
@@ -579,39 +568,5 @@ function makeStyles(colors, typography, spacing, radius) {
       borderRadius: 8,
     },
     reorderText: { fontSize: 12, color: colors.textPrimary, fontWeight: '700' },
-
-    /* Shop news popup */
-    sheetOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(15,23,42,0.5)' },
-    sheetBackdrop: { ...StyleSheet.absoluteFillObject },
-    sheet: {
-      maxHeight: '75%',
-      backgroundColor: colors.card,
-      borderTopLeftRadius: 20,
-      borderTopRightRadius: 20,
-      paddingHorizontal: spacing.lg,
-      paddingTop: spacing.lg,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-    sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md },
-    sheetTitle: { fontSize: 20, fontWeight: '800', color: colors.textPrimary },
-    sheetContent: { paddingBottom: spacing.xl, gap: spacing.sm },
-    feedRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      backgroundColor: colors.background,
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: colors.border,
-      padding: spacing.md,
-    },
-    feedIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-    feedTextWrap: { flex: 1 },
-    feedTitle: { fontSize: 14, fontWeight: '700', color: colors.textPrimary },
-    feedDetail: { fontSize: 12, color: colors.textMuted, marginTop: 2, lineHeight: 17 },
-    feedEmpty: { alignItems: 'center', paddingVertical: spacing.xl, gap: 6 },
-    feedEmptyTitle: { fontSize: 15, fontWeight: '700', color: colors.textPrimary, marginTop: 4 },
-    feedEmptyText: { fontSize: 13, color: colors.textMuted, textAlign: 'center', paddingHorizontal: spacing.lg },
   });
 }

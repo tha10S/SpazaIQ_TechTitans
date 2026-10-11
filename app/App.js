@@ -59,29 +59,19 @@ function MainTabs({ route }) {
 
   return (
     <Tab.Navigator
-      screenOptions={({ route: screenRoute, navigation }) => ({
-        headerShown: true,
-        headerStyle: { backgroundColor: colors.card },
-        headerTintColor: colors.textPrimary,
-        headerRight: () => (
-          <TouchableOpacity
-            onPress={() => navigation.navigate('Profile')}
-            style={{ marginRight: 16 }}
-          >
-            <Ionicons name="person-circle" size={32} color={colors.primary} />
-          </TouchableOpacity>
-        ),
-        tabBarStyle: {
-          backgroundColor: colors.card,
-          borderTopColor: colors.border,
-        },
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textMuted,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
-        tabBarIcon: ({ color, size }) => (
-          <Ionicons name={icons[screenRoute.name]} size={size} color={color} />
-        ),
-      })}
+      screenOptions={({ route: screenRoute }) => ({
+  headerShown: false,
+  tabBarStyle: {
+    backgroundColor: colors.card,
+    borderTopColor: colors.border,
+  },
+  tabBarActiveTintColor: colors.primary,
+  tabBarInactiveTintColor: colors.textMuted,
+  tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+  tabBarIcon: ({ color, size }) => (
+    <Ionicons name={icons[screenRoute.name]} size={size} color={color} />
+  ),
+})}
     >
       <Tab.Screen name="Home" component={HomeScreen} initialParams={account} />
       <Tab.Screen name="Stock" component={StockScreen} initialParams={account} />
