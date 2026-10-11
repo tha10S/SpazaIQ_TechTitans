@@ -11,6 +11,7 @@ import {
 import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath } from './paths';
 import { mapCustomer } from './mappers';
+import { normalizePhoneNumber, parseNonNegativeNumber } from '../validation';
 import {
   getOfflineOperations,
   isNetworkError,
@@ -105,16 +106,15 @@ export function customerRef(storeId, customerId) {
 export async function createCustomer(storeId, input) {
   const authenticatedStoreId = assertStoreId(storeId);
   const name = String(input.name || '').trim();
-  const creditLimit = Number(input.creditLimit || 0);
-  if (!name || !Number.isFinite(creditLimit) || creditLimit < 0) {
-    throw new Error('Enter a customer name and a valid non-negative credit limit.');
-  }
+  if (!name) throw new Error('Enter a customer name.');
+  const phone = normalizePhoneNumber(input.phone, { required: true });
+  const creditLimit = parseNonNegativeNumber(input.creditLimit || '0', 'credit limit');
 
   const reference = doc(customersCollection(authenticatedStoreId));
   await setDoc(reference, {
     storeId: authenticatedStoreId,
     name,
-    phone: String(input.phone || '').trim(),
+    phone,
     creditLimit,
     balance: 0,
     overdue: false,

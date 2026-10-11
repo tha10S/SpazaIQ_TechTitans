@@ -1,8 +1,11 @@
-import { useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useEffect, useMemo, useState } from "react";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useTheme } from "../../config/ThemeContext";
+import { normalizePhoneNumber, parseNonNegativeNumber } from "../../services/validation";
 
 const BRAND_GREEN = "#004B49"; // solid buttons keep brand green in both themes
+const STORAGE_KEY = "@spazaiq/suppliers-reorders/v1";
 
 const CATEGORIES = ["Groceries", "Beverages", "Bakery", "Snacks"];
 
@@ -94,10 +97,68 @@ export default function SuppliersAndReorders() {
   const [query, setQuery] = useState("");
   const [suppliers, setSuppliers] = useState(initialSuppliers);
   const [orders, setOrders] = useState(initialOrders);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [storageError, setStorageError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    async function loadSavedData() {
+      try {
+        const saved = await AsyncStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const data = JSON.parse(saved);
+          if (!Array.isArray(data.suppliers) || !Array.isArray(data.orders)) {
+            throw new Error("Saved supplier and order data is invalid.");
+          }
+          if (active) {
+            setSuppliers(data.suppliers);
+            setOrders(data.orders);
+          }
+        } else {
+          await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({
+            suppliers: initialSuppliers,
+            orders: initialOrders,
+          }));
+        }
+      } catch (error) {
+        if (active) setStorageError(error.message || "Could not load saved supplier data.");
+      } finally {
+        if (active) setIsLoaded(true);
+      }
+    }
+    loadSavedData();
+    return () => { active = false; };
+  }, []);
+
+  async function saveSuppliers(nextSuppliers) {
+    if (!isLoaded) throw new Error("Supplier data is still loading.");
+    try {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ suppliers: nextSuppliers, orders }));
+      setSuppliers(nextSuppliers);
+      setStorageError("");
+    } catch (error) {
+      setStorageError("Could not save supplier changes. Please try again.");
+      throw error;
+    }
+  }
+
+  async function saveOrders(nextOrders) {
+    if (!isLoaded) throw new Error("Supplier data is still loading.");
+    try {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ suppliers, orders: nextOrders }));
+      setOrders(nextOrders);
+      setStorageError("");
+    } catch (error) {
+      setStorageError("Could not save order changes. Please try again.");
+      throw error;
+    }
+  }
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={styles.header}>Suppliers</Text>
+      {!isLoaded ? <Text style={{ color: "#6B7280", marginBottom: 12 }}>Loading saved suppliers...</Text> : null}
+      {storageError ? <Text style={{ color: "#B91C1C", marginBottom: 12 }}>{storageError}</Text> : null}
 
       <View style={styles.segmentWrap}>
         {["Suppliers", "Orders"].map((label) => (
@@ -123,16 +184,17 @@ export default function SuppliersAndReorders() {
           query={query}
           setQuery={setQuery}
           suppliers={suppliers}
-          setSuppliers={setSuppliers}
+          saveSuppliers={saveSuppliers}
+          isLoaded={isLoaded}
         />
       ) : (
-        <OrdersTab orders={orders} setOrders={setOrders} />
+        <OrdersTab orders={orders} saveOrders={saveOrders} isLoaded={isLoaded} />
       )}
     </ScrollView>
   );
 }
 
-function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
+function SuppliersTab({ query, setQuery, suppliers, saveSuppliers, isLoaded }) {
   const { colors, styles } = useThemedStyles();
   const categoryColors = useMemo(() => getCategoryColors(colors), [colors]);
 
@@ -140,6 +202,7 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
   const [newName, setNewName] = useState("");
   const [newCategory, setNewCategory] = useState(CATEGORIES[0]);
   const [newPhone, setNewPhone] = useState("");
+  const [formError, setFormError] = useState("");
 
   const [addItemFor, setAddItemFor] = useState(null);
   const [newItemName, setNewItemName] = useState("");
@@ -149,59 +212,91 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
     s.name.toLowerCase().includes(query.toLowerCase()),
   );
 
-  function submitSupplier() {
-    if (!newName.trim()) return;
-    setSuppliers((prev) => [
-      ...prev,
-      { name: newName.trim(), category: newCategory, phone: newPhone.trim(), items: [] },
-    ]);
-    setNewName("");
-    setNewPhone("");
-    setNewCategory(CATEGORIES[0]);
-    setShowAddSupplier(false);
+  async function submitSupplier() {
+    if (!newName.trim()) {
+      setFormError("Enter a supplier name.");
+      return;
+    }
+    if (suppliers.some((supplier) => supplier.name.toLowerCase() === newName.trim().toLowerCase())) {
+      setFormError("A supplier with that name already exists.");
+      return;
+    }
+    let phone;
+    try {
+      phone = normalizePhoneNumber(newPhone);
+    } catch (error) {
+      setFormError(error.message);
+      return;
+    }
+    try {
+      await saveSuppliers([
+        ...suppliers,
+        { name: newName.trim(), category: newCategory, phone, items: [] },
+      ]);
+      setFormError("");
+      setNewName("");
+      setNewPhone("");
+      setNewCategory(CATEGORIES[0]);
+      setShowAddSupplier(false);
+    } catch (error) {
+      setFormError(error.message || "Could not save supplier.");
+    }
   }
 
-  function submitItem(supplierName) {
-    if (!newItemName.trim()) return;
-    setSuppliers((prev) =>
-      prev.map((s) =>
-        s.name === supplierName
-          ? {
-              ...s,
-              items: [
-                ...s.items,
-                {
-                  name: newItemName.trim(),
-                  qty: Number(newItemQty) || 1,
-                  selected: true,
-                },
-              ],
-            }
-          : s,
-      ),
+  async function submitItem(supplierName) {
+    const name = newItemName.trim();
+    if (!name) {
+      setFormError("Enter an item name.");
+      return;
+    }
+    let quantity;
+    try {
+      quantity = parseNonNegativeNumber(newItemQty, "quantity", { integer: true });
+      if (quantity < 1) throw new Error("Quantity must be a whole number greater than zero.");
+    } catch (error) {
+      setFormError(error.message);
+      return;
+    }
+    try {
+      const nextSuppliers = suppliers.map((supplier) =>
+        supplier.name === supplierName
+          ? { ...supplier, items: [...supplier.items, { name, qty: quantity, selected: true }] }
+          : supplier,
+      );
+      await saveSuppliers(nextSuppliers);
+      setFormError("");
+      setNewItemName("");
+      setNewItemQty("");
+      setAddItemFor(null);
+    } catch (error) {
+      setFormError(error.message || "Could not save item.");
+    }
+  }
+
+  async function toggleItem(supplierName, itemIndex) {
+    const nextSuppliers = suppliers.map((supplier) =>
+      supplier.name === supplierName
+        ? {
+            ...supplier,
+            items: supplier.items.map((item, index) =>
+              index === itemIndex ? { ...item, selected: !item.selected } : item,
+            ),
+          }
+        : supplier,
     );
-    setNewItemName("");
-    setNewItemQty("");
-    setAddItemFor(null);
+    try {
+      await saveSuppliers(nextSuppliers);
+    } catch (error) {
+      setFormError(error.message || "Could not save item changes.");
+    }
   }
 
-  function toggleItem(supplierName, itemIndex) {
-    setSuppliers((prev) =>
-      prev.map((s) =>
-        s.name === supplierName
-          ? {
-              ...s,
-              items: s.items.map((it, j) =>
-                j === itemIndex ? { ...it, selected: !it.selected } : it,
-              ),
-            }
-          : s,
-      ),
-    );
-  }
-
-  function removeSupplier(supplierName) {
-    setSuppliers((prev) => prev.filter((s) => s.name !== supplierName));
+  async function removeSupplier(supplierName) {
+    try {
+      await saveSuppliers(suppliers.filter((supplier) => supplier.name !== supplierName));
+    } catch (error) {
+      setFormError(error.message || "Could not remove supplier.");
+    }
   }
 
   return (
@@ -234,12 +329,14 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
           />
           <TextInput
             style={styles.formInput}
-            placeholder="Phone number"
+            placeholder="10-digit phone (optional)"
             placeholderTextColor={colors.textMuted}
             value={newPhone}
-            onChangeText={setNewPhone}
+            onChangeText={(value) => setNewPhone(value.replace(/\D/g, "").slice(0, 10))}
             keyboardType="phone-pad"
+            maxLength={10}
           />
+          {formError ? <Text style={{ color: colors.danger, marginBottom: 8 }}>{formError}</Text> : null}
           <Text style={styles.presetLabel}>CATEGORY</Text>
           <View style={styles.tagRow}>
             {CATEGORIES.map((cat) => (
@@ -262,7 +359,7 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
               </Pressable>
             ))}
           </View>
-          <Pressable style={styles.formSubmit} onPress={submitSupplier}>
+          <Pressable style={styles.formSubmit} onPress={submitSupplier} disabled={!isLoaded}>
             <Text style={styles.formSubmitText}>Save Supplier</Text>
           </Pressable>
         </View>
@@ -308,6 +405,7 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
 
             {addItemFor === s.name && (
               <View style={styles.formCard}>
+                {formError ? <Text style={{ color: colors.danger, marginBottom: 8 }}>{formError}</Text> : null}
                 <TextInput
                   style={styles.formInput}
                   placeholder="Item name"
@@ -320,12 +418,16 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
                   placeholder="Quantity"
                   placeholderTextColor={colors.textMuted}
                   value={newItemQty}
-                  onChangeText={setNewItemQty}
+                  onChangeText={(value) => {
+                    if (/^\d*$/.test(value)) setNewItemQty(value);
+                  }}
                   keyboardType="number-pad"
+                  maxLength={6}
                 />
                 <Pressable
                   style={styles.formSubmit}
                   onPress={() => submitItem(s.name)}
+                  disabled={!isLoaded}
                 >
                   <Text style={styles.formSubmitText}>Add Item</Text>
                 </Pressable>
@@ -359,14 +461,17 @@ function SuppliersTab({ query, setQuery, suppliers, setSuppliers }) {
   );
 }
 
-function OrdersTab({ orders, setOrders }) {
+function OrdersTab({ orders, saveOrders, isLoaded }) {
   const { colors, styles } = useThemedStyles();
   const statusColors = useMemo(() => getStatusColors(colors), [colors]);
 
-  function markDelivered(orderId) {
-    setOrders((prev) =>
-      prev.map((o) => (o.id === orderId ? { ...o, status: "Delivered" } : o)),
-    );
+  async function markDelivered(orderId) {
+    const nextOrders = orders.map((order) => order.id === orderId ? { ...order, status: "Delivered" } : order);
+    try {
+      await saveOrders(nextOrders);
+    } catch (error) {
+      Alert.alert("Could not save order", error.message || "Please try again.");
+    }
   }
 
   return (
@@ -408,6 +513,7 @@ function OrdersTab({ orders, setOrders }) {
                   <Pressable
                     style={styles.deliverButton}
                     onPress={() => markDelivered(o.id)}
+                    disabled={!isLoaded}
                   >
                     <Text style={styles.deliverButtonText}>Mark Delivered</Text>
                   </Pressable>

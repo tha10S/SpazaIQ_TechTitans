@@ -19,6 +19,7 @@ import { fetchProducts } from '../services/salesService';
 import { getAuthenticatedStoreId } from '../services/firestore/paths';
 import { subscribeCustomers } from '../services/firestore/customersRepository';
 import { OfflineSyncNotice } from '../components/OfflineSyncNotice';
+import { isValidDecimalInput, parseNonNegativeNumber, todayIsoDate, validateIsoDate } from '../services/validation';
 
 const PAYMENT_METHODS = [
   { id: 'Cash', label: 'Cash', icon: 'cash-outline' },
@@ -121,10 +122,23 @@ export default function NewSaleScreen({ route }) {
       Alert.alert('Cart Empty', 'Add at least one item to proceed.');
       return;
     }
+    let splitAmount = 0;
+    if (payment === 'Split') {
+      try {
+        splitAmount = parseNonNegativeNumber(splitPaidAmount, 'paid amount');
+      } catch (error) {
+        Alert.alert('Invalid split', 'Enter a valid amount with no more than 2 decimal places.');
+        return;
+      }
+      if (splitAmount <= 0 || splitAmount >= subtotal) {
+        Alert.alert('Invalid split', 'Enter an amount greater than zero and smaller than the sale total.');
+        return;
+      }
+    }
     const creditAmount = payment === 'Credit'
       ? subtotal
       : payment === 'Split'
-        ? Math.max(0, subtotal - Number(splitPaidAmount || 0))
+        ? subtotal - splitAmount
         : 0;
     const paidAmount = subtotal - creditAmount;
     if (creditAmount > 0 && !selectedCustomerId) {
@@ -135,9 +149,13 @@ export default function NewSaleScreen({ route }) {
       Alert.alert('Due date required', 'Enter a due date for the credit amount.');
       return;
     }
-    if (payment === 'Split' && paidAmount <= 0) {
-      Alert.alert('Invalid split', 'Enter a cash/card amount smaller than the sale total.');
-      return;
+    if (creditAmount > 0) {
+      try {
+        validateIsoDate(dueDate, 'due date', { min: todayIsoDate() });
+      } catch (error) {
+        Alert.alert('Invalid due date', error.message);
+        return;
+      }
     }
     try {
       const result = await completeSale({
@@ -364,7 +382,9 @@ export default function NewSaleScreen({ route }) {
                   placeholderTextColor={COLORS.textMuted}
                   keyboardType="decimal-pad"
                   value={splitPaidAmount}
-                  onChangeText={setSplitPaidAmount}
+                  onChangeText={(value) => {
+                    if (isValidDecimalInput(value)) setSplitPaidAmount(value);
+                  }}
                 />
               </>
             )}
@@ -378,6 +398,8 @@ export default function NewSaleScreen({ route }) {
               placeholderTextColor={COLORS.textMuted}
               value={dueDate}
               onChangeText={setDueDate}
+              keyboardType="numbers-and-punctuation"
+              maxLength={10}
             />
             <View style={styles.scheduleRow}>
               {['one_time', 'weekly', 'monthly'].map((frequency) => (

@@ -14,10 +14,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../config/ThemeContext';
-import { logOut } from '../services/auth/firebaseAuth';
+import { getAuthErrorMessage, logOut } from '../services/auth/firebaseAuth';
 import { auth } from '../services/firebase/firebaseConfig';
 import { deleteCurrentAccount } from '../services/auth/accountDeletionService';
-import { subscribeUserProfile, updateUserProfile } from '../services/firestore/usersRepository';
+import {
+  subscribeUserProfile,
+  updateLoginCredentials,
+  updateUserProfile,
+} from '../services/firestore/usersRepository';
+import { isValidEmail, normalizeEmail, normalizePhoneNumber } from '../services/validation';
 
 const DEFAULT_PROFILE = {
   name: '',
@@ -32,7 +37,6 @@ const FIELDS = [
   { key: 'name', label: 'Full Name', keyboardType: 'default' },
   { key: 'shopName', label: 'Shop Name', keyboardType: 'default' },
   { key: 'phone', label: 'Phone', keyboardType: 'phone-pad' },
-  { key: 'email', label: 'Email', keyboardType: 'email-address' },
   { key: 'location', label: 'Location', keyboardType: 'default' },
   { key: 'shopRegistration', label: 'Shop Registration', keyboardType: 'default' },
 ];
@@ -59,8 +63,16 @@ export default function ProfileSettingsScreen() {
     email: auth.currentUser?.email || '',
   });
   const [draft, setDraft] = useState(profile);
+  const [credentialDraft, setCredentialDraft] = useState({
+    email: auth.currentUser?.email || '',
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
   const [isEditing, setIsEditing] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isEditingCredentials, setIsEditingCredentials] = useState(false);
+  const [isSavingCredentials, setIsSavingCredentials] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState('');
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
@@ -69,7 +81,6 @@ export default function ProfileSettingsScreen() {
   const [deleteError, setDeleteError] = useState('');
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [biometricEnabled, setBiometricEnabled] = useState(false);
 
   // Keep a ref so the subscription doesn't restart every time editing toggles
   const isEditingRef = useRef(false);
@@ -88,7 +99,7 @@ export default function ProfileSettingsScreen() {
           name: data.fullName || data.displayName || auth.currentUser?.displayName || '',
           shopName: data.shopName || '',
           phone: data.mobile || '',
-          email: data.email || auth.currentUser?.email || '',
+          email: auth.currentUser?.email || data.email || '',
           location: data.location || '',
           shopRegistration: data.shopRegistration || '',
         };
@@ -114,25 +125,100 @@ export default function ProfileSettingsScreen() {
       Alert.alert('Missing info', 'Name and shop name cannot be empty.');
       return;
     }
+    let mobile;
+    try {
+      mobile = normalizePhoneNumber(draft.phone, { required: true });
+    } catch (error) {
+      Alert.alert('Invalid phone number', error.message);
+      return;
+    }
     setIsSavingProfile(true);
     try {
       await updateUserProfile(auth.currentUser.uid, {
         fullName: draft.name,
         shopName: draft.shopName,
-        mobile: draft.phone,
+        email: profile.email,
+        mobile,
         location: draft.location,
         shopRegistration: draft.shopRegistration,
       });
-      setProfile(draft);
+      setProfile({ ...draft, phone: mobile });
       setIsEditing(false);
     } catch (error) {
-      Alert.alert('Could not save profile', error.message);
+      Alert.alert('Could not save profile', getAuthErrorMessage(error));
     } finally {
       setIsSavingProfile(false);
     }
   };
 
-  const updateDraft = (key, val) => setDraft((d) => ({ ...d, [key]: val }));
+  const startEditingCredentials = () => {
+    setCredentialDraft({
+      email: auth.currentUser?.email || profile.email,
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: '',
+    });
+    setIsEditingCredentials(true);
+  };
+
+  const cancelEditingCredentials = () => {
+    setCredentialDraft({
+      email: auth.currentUser?.email || profile.email,
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: '',
+    });
+    setIsEditingCredentials(false);
+  };
+
+  const saveCredentials = async () => {
+    const email = normalizeEmail(credentialDraft.email);
+    if (!isValidEmail(email)) {
+      Alert.alert('Invalid email', 'Enter a valid email address.');
+      return;
+    }
+    if (credentialDraft.newPassword && credentialDraft.newPassword.length < 6) {
+      Alert.alert('Password too short', 'Choose a new password with at least 6 characters.');
+      return;
+    }
+    if (credentialDraft.newPassword !== credentialDraft.confirmPassword) {
+      Alert.alert('Passwords do not match', 'Enter the same new password in both password fields.');
+      return;
+    }
+    if (!credentialDraft.currentPassword) {
+      Alert.alert('Current password required', 'Enter your current password to change your login details.');
+      return;
+    }
+    if (
+      email === normalizeEmail(auth.currentUser?.email) &&
+      !credentialDraft.newPassword
+    ) {
+      Alert.alert('No changes', 'Enter a new email or password before saving.');
+      return;
+    }
+
+    setIsSavingCredentials(true);
+    try {
+      await updateLoginCredentials(auth.currentUser.uid, {
+        email,
+        currentPassword: credentialDraft.currentPassword,
+        newPassword: credentialDraft.newPassword,
+      });
+      setProfile((current) => ({ ...current, email }));
+      cancelEditingCredentials();
+    } catch (error) {
+      Alert.alert('Could not update login details', getAuthErrorMessage(error));
+    } finally {
+      setIsSavingCredentials(false);
+    }
+  };
+
+  const updateDraft = (key, val) => setDraft((d) => ({
+    ...d,
+    [key]: key === 'phone' ? val.replace(/\D/g, '').slice(0, 10) : val,
+  }));
+  const updateCredentialDraft = (key, value) =>
+    setCredentialDraft((current) => ({ ...current, [key]: value }));
 
   const handleDeleteAccount = () => {
     setDeletePassword('');
@@ -205,14 +291,6 @@ export default function ProfileSettingsScreen() {
             <Text style={styles.identityName}>{profile.name}</Text>
             <Text style={styles.identitySub}>{profile.shopName}</Text>
           </View>
-          <TouchableOpacity
-            style={styles.avatarEditBadge}
-            onPress={() =>
-              Alert.alert('Change photo', "Photo upload isn't wired up in this prototype yet.")
-            }
-          >
-            <Ionicons name="pencil" size={14} color={colors.primary} />
-          </TouchableOpacity>
         </View>
 
         {/* Shop Information */}
@@ -236,9 +314,12 @@ export default function ProfileSettingsScreen() {
                       style={styles.fieldInput}
                       value={draft[field.key]}
                       onChangeText={(v) => updateDraft(field.key, v)}
-                      placeholder={field.label}
+                      placeholder={field.key === 'phone' ? '10-digit phone number' : field.label}
                       placeholderTextColor={colors.textMuted}
                       keyboardType={field.keyboardType}
+                      maxLength={field.key === 'phone' ? 10 : undefined}
+                      autoComplete={field.key === 'phone' ? 'tel-national' : 'off'}
+                      autoCapitalize="sentences"
                     />
                   </View>
                 ) : (
@@ -324,29 +405,79 @@ export default function ProfileSettingsScreen() {
         {/* Security */}
         <Text style={styles.sectionTitle}>SECURITY</Text>
         <View style={styles.settingsCard}>
-          <TouchableOpacity
-            style={styles.settingRow}
-            onPress={() =>
-              Alert.alert('Change PIN', "PIN management isn't wired up in this prototype yet.")
-            }
-          >
-            <View style={styles.settingLeft}>
-              <Text style={styles.settingLabel}>Change PIN</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-          </TouchableOpacity>
-          <View style={styles.settingDivider} />
-          <View style={styles.settingRow}>
-            <View style={styles.settingLeft}>
-              <Text style={styles.settingLabel}>Biometric Login</Text>
-            </View>
-            <Switch
-              value={biometricEnabled}
-              onValueChange={setBiometricEnabled}
-              trackColor={{ false: colors.border, true: colors.primaryLight }}
-              thumbColor={biometricEnabled ? colors.primary : colors.card}
-            />
+          <View style={styles.fieldValueWrap}>
+            <Text style={styles.fieldLabel}>Login Email</Text>
+            <Text style={styles.fieldValue}>{auth.currentUser?.email || profile.email}</Text>
           </View>
+          {isEditingCredentials ? (
+            <View style={styles.credentialFields}>
+              <Text style={styles.credentialHelp}>
+                Confirm your current password to change your login email or password.
+              </Text>
+              <View style={styles.credentialField}>
+                <Text style={styles.fieldLabel}>New Login Email</Text>
+                <TextInput
+                  style={styles.fieldInput}
+                  value={credentialDraft.email}
+                  onChangeText={(value) => updateCredentialDraft('email', value)}
+                  placeholder="New login email"
+                  placeholderTextColor={colors.textMuted}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoComplete="email"
+                  maxLength={254}
+                  editable={!isSavingCredentials}
+                />
+              </View>
+              {[
+                { key: 'currentPassword', label: 'Current Password', autoComplete: 'current-password' },
+                { key: 'newPassword', label: 'New Password (optional)', autoComplete: 'new-password' },
+                { key: 'confirmPassword', label: 'Confirm New Password', autoComplete: 'new-password' },
+              ].map((field) => (
+                <View key={field.key} style={styles.credentialField}>
+                  <Text style={styles.fieldLabel}>{field.label}</Text>
+                  <TextInput
+                    style={styles.fieldInput}
+                    value={credentialDraft[field.key]}
+                    onChangeText={(value) => updateCredentialDraft(field.key, value)}
+                    placeholder={field.label}
+                    placeholderTextColor={colors.textMuted}
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoComplete={field.autoComplete}
+                    editable={!isSavingCredentials}
+                  />
+                </View>
+              ))}
+              <View style={styles.editActionsRow}>
+                <TouchableOpacity
+                  style={[styles.editActionBtn, styles.cancelBtn]}
+                  onPress={cancelEditingCredentials}
+                  disabled={isSavingCredentials}
+                >
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.editActionBtn, styles.saveBtn]}
+                  onPress={saveCredentials}
+                  disabled={isSavingCredentials}
+                >
+                  <Text style={styles.saveBtnText}>
+                    {isSavingCredentials ? 'Saving...' : 'Save Login Details'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.securityEditButton}
+              onPress={startEditingCredentials}
+              disabled={isSavingCredentials}
+            >
+              <Text style={styles.sectionEditLinkText}>Change Login Details</Text>
+              <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+            </TouchableOpacity>
+          )}
         </View>
 
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} disabled={isLoggingOut}>
@@ -460,15 +591,6 @@ function makeStyles(colors, typography, spacing, radius) {
     identityText: { flex: 1 },
     identityName: { ...typography.h2, color: colors.textPrimary },
     identitySub: { ...typography.small, color: colors.textMuted, marginTop: 2 },
-    avatarEditBadge: {
-      width: 30,
-      height: 30,
-      borderRadius: 15,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: colors.primaryLight,
-    },
-
     sectionHeaderRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -492,6 +614,15 @@ function makeStyles(colors, typography, spacing, radius) {
       paddingVertical: 4,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
+    },
+    credentialFields: { marginTop: spacing.md },
+    credentialHelp: { ...typography.small, color: colors.textMuted, marginBottom: spacing.sm },
+    credentialField: { marginTop: spacing.sm },
+    securityEditButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: spacing.md,
     },
     editActionsRow: {
       flexDirection: 'row',

@@ -7,6 +7,7 @@ export default function QRScannerScreen({ onClose, onScanned }) {
   const [permission, requestPermission] = useCameraPermissions();
   const [hasScanned, setHasScanned] = useState(false);
   const [manualValue, setManualValue] = useState('');
+  const [manualError, setManualError] = useState('');
 
   const handleScan = ({ data }) => {
     if (hasScanned) return;
@@ -16,7 +17,15 @@ export default function QRScannerScreen({ onClose, onScanned }) {
 
   const handleManualSubmit = () => {
     const value = manualValue.trim();
-    if (!value) return;
+    if (!value) {
+      setManualError('Enter a product QR value.');
+      return;
+    }
+    if (value.length > 128) {
+      setManualError('QR values must be 128 characters or fewer.');
+      return;
+    }
+    setManualError('');
     setHasScanned(true);
     onScanned(value);
   };
@@ -63,6 +72,7 @@ export default function QRScannerScreen({ onClose, onScanned }) {
               placeholderTextColor="#9CA3AF"
               value={manualValue}
               onChangeText={setManualValue}
+              maxLength={128}
               autoCapitalize="none"
               editable={!hasScanned}
               onSubmitEditing={handleManualSubmit}
@@ -71,6 +81,7 @@ export default function QRScannerScreen({ onClose, onScanned }) {
               <Text style={styles.manualButtonText}>Use value</Text>
             </TouchableOpacity>
           </View>
+          {manualError ? <Text accessibilityRole="alert" style={styles.error}>{manualError}</Text> : null}
         </View>
       </SafeAreaView>
     </Modal>
@@ -90,6 +101,7 @@ const styles = StyleSheet.create({
   permissionButtonText: { color: '#FFFFFF', fontWeight: '700' },
   manualPanel: { padding: 20, borderTopWidth: 1, borderTopColor: '#374151' },
   manualTitle: { color: '#D1D5DB', fontSize: 13, marginBottom: 8 },
+  error: { color: '#FCA5A5', fontSize: 12, marginTop: 8 },
   manualRow: { flexDirection: 'row', alignItems: 'center' },
   manualInput: { flex: 1, height: 46, backgroundColor: '#FFFFFF', borderRadius: 10, paddingHorizontal: 12, color: '#111827', marginRight: 8 },
   manualButton: { height: 46, backgroundColor: '#0F9D58', borderRadius: 10, justifyContent: 'center', paddingHorizontal: 14 },

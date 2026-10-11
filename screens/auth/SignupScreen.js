@@ -12,8 +12,7 @@ import {
 } from "react-native";
 import { sendEmailVerification } from "firebase/auth";
 import { getAuthErrorMessage, signUp, logOut } from "../../services/auth/firebaseAuth";
-
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+import { isValidEmail, normalizeEmail, normalizePhoneNumber } from "../../services/validation";
 
 export default function SignupScreen({ navigation }) {
   const [fullName, setFullName] = useState("");
@@ -29,14 +28,22 @@ export default function SignupScreen({ navigation }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const createAccount = async () => {
-    const normalizedEmail = email.trim();
+    const normalizedEmail = normalizeEmail(email);
     if (!fullName.trim() || !mobile.trim() || !normalizedEmail || !shopName.trim() || !password || !confirmPassword) {
       setError("Complete all fields before creating your account.");
       return;
     }
 
-    if (!EMAIL_PATTERN.test(normalizedEmail)) {
+    if (!isValidEmail(normalizedEmail)) {
       setError("Enter a valid email address.");
+      return;
+    }
+
+    let normalizedMobile;
+    try {
+      normalizedMobile = normalizePhoneNumber(mobile, { required: true });
+    } catch (validationError) {
+      setError(validationError.message);
       return;
     }
 
@@ -57,7 +64,7 @@ export default function SignupScreen({ navigation }) {
       // Create the account (signUp returns the new Firebase user)
       const user = await signUp(normalizedEmail, password, {
         fullName: fullName.trim(),
-        mobile: mobile.trim(),
+        mobile: normalizedMobile,
         shopName: shopName.trim(),
       });
 
@@ -127,15 +134,15 @@ export default function SignupScreen({ navigation }) {
           <Text style={styles.label}>Mobile Number</Text>
 
           <View style={styles.phoneContainer}>
-            <Text style={styles.countryCode}>+27</Text>
-
             <TextInput
               style={styles.phoneInput}
-              placeholder="82 123 4567"
+              placeholder="10-digit number"
               placeholderTextColor="#9CA3AF"
               keyboardType="phone-pad"
               value={mobile}
-              onChangeText={setMobile}
+              onChangeText={(value) => setMobile(value.replace(/\D/g, "").slice(0, 10))}
+              maxLength={10}
+              autoComplete="tel-national"
             />
           </View>
         </View>
@@ -152,6 +159,7 @@ export default function SignupScreen({ navigation }) {
             autoCapitalize="none"
             value={email}
             onChangeText={setEmail}
+            maxLength={254}
           />
         </View>
 

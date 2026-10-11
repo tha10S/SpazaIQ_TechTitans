@@ -14,6 +14,7 @@ import { useTheme } from '../config/ThemeContext';
 import { useProducts } from '../hooks/useProducts';
 import { getAuthenticatedStoreId } from '../services/firestore/paths';
 import { createProduct, updateProduct } from '../services/salesService';
+import { isValidDecimalInput } from '../services/validation';
 
 const EMPTY_PRODUCT = {
   name: '',
@@ -262,7 +263,15 @@ export default function StockScreen({ navigation, route }) {
                     <TextInput
                       style={styles.formInput}
                       value={productForm[key]}
-                      onChangeText={(value) => setProductForm((current) => ({ ...current, [key]: value }))}
+                      onChangeText={(value) => {
+                        const isNumeric = ['unitPrice', 'costPrice', 'quantity', 'reorderLevel'].includes(key);
+                        const validNumeric = ['quantity', 'reorderLevel'].includes(key)
+                          ? /^\d*$/.test(value)
+                          : isValidDecimalInput(value);
+                        if (!isNumeric || validNumeric) {
+                          setProductForm((current) => ({ ...current, [key]: value }));
+                        }
+                      }}
                       keyboardType={['unitPrice', 'costPrice', 'quantity', 'reorderLevel'].includes(key) ? 'decimal-pad' : 'default'}
                       autoCapitalize={key === 'sku' || key === 'barcode' ? 'characters' : 'sentences'}
                       placeholderTextColor={colors.textMuted}

@@ -4,34 +4,54 @@ import {
   signOut,
   onAuthStateChanged,
   updateProfile,
+  deleteUser,
 } from "firebase/auth";
 
 
 
 import { auth } from "../firebase/firebaseConfig";
 import { ensureStoreSeed } from '../firestore/seedRepository';
+import { isValidEmail, normalizeEmail, normalizePhoneNumber } from '../validation';
 
 export async function signUp(email, password, profile = {}) {
-  const cred = await createUserWithEmailAndPassword(auth, email, password);
-  const displayName = profile.fullName || profile.displayName || '';
-  if (displayName) await updateProfile(cred.user, { displayName });
+  const normalizedEmail = normalizeEmail(email);
+  if (!isValidEmail(normalizedEmail)) throw new Error('Enter a valid email address.');
+  if (!String(password || '').trim() || String(password).length < 6) {
+    throw new Error('Password must be at least 6 characters.');
+  }
+  const fullName = String(profile.fullName || profile.displayName || '').trim();
+  const shopName = String(profile.shopName || '').trim();
+  if (!fullName || !shopName) throw new Error('Enter your full name and shop name.');
+  const normalizedProfile = {
+    ...profile,
+    fullName,
+    shopName,
+    mobile: normalizePhoneNumber(profile.mobile, { required: true }),
+  };
+  const cred = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
+  const displayName = fullName;
   try {
+    await updateProfile(cred.user, { displayName });
     await ensureStoreSeed(cred.user.uid, {
-      ...profile,
+      ...normalizedProfile,
       email: cred.user.email,
       displayName: cred.user.displayName || displayName,
     });
   } catch (error) {
-    console.warn('Firebase account was created, but Firestore profile setup failed', {
-      code: error?.code,
-      message: error?.message,
-    });
+    try {
+      await deleteUser(cred.user);
+    } catch (cleanupError) {
+      throw new Error(`Account setup failed (${error.message || 'unknown error'}) and the new account could not be rolled back (${cleanupError.message || 'unknown error'}).`);
+    }
+    throw error;
   }
   return cred.user;
 }
 
 export const logIn = (email, password) =>
-  signInWithEmailAndPassword(auth, email, password);
+  isValidEmail(email)
+    ? signInWithEmailAndPassword(auth, normalizeEmail(email), password)
+    : Promise.reject(new Error('Enter a valid email address.'));
 
 export const logOut = () => signOut(auth);
 

@@ -13,6 +13,7 @@ import {
 import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath } from './paths';
 import { mapProduct } from './mappers';
+import { parseNonNegativeNumber } from '../validation';
 import {
   getOfflineOperations,
   isNetworkError,
@@ -46,12 +47,13 @@ function applyPendingStock(products, operations) {
 export async function createProduct(storeId, input) {
   const authenticatedStoreId = assertStoreId(storeId);
   const name = String(input.name || '').trim();
-  const unitPrice = Number(input.unitPrice);
-  const quantity = Number(input.quantity);
-  const reorderLevel = Number(input.reorderLevel);
-  if (!name || !Number.isFinite(unitPrice) || unitPrice < 0 || !Number.isInteger(quantity) || quantity < 0 || !Number.isInteger(reorderLevel) || reorderLevel < 0) {
-    throw new Error('Enter a product name, valid price, quantity, and reorder level.');
-  }
+  const category = String(input.category || 'General').trim();
+  if (!name) throw new Error('Enter a product name.');
+  if (!category) throw new Error('Enter a product category.');
+  const unitPrice = parseNonNegativeNumber(input.unitPrice, 'selling price');
+  const costPrice = parseNonNegativeNumber(input.costPrice || '0', 'cost price');
+  const quantity = parseNonNegativeNumber(input.quantity, 'quantity', { integer: true });
+  const reorderLevel = parseNonNegativeNumber(input.reorderLevel, 'low-stock threshold', { integer: true });
 
   const productReference = doc(productsCollection(authenticatedStoreId));
   await setDoc(productReference, {
@@ -60,10 +62,10 @@ export async function createProduct(storeId, input) {
     sku: String(input.sku || '').trim(),
     barcode: String(input.barcode || '').trim(),
     unitPrice,
-    costPrice: Number(input.costPrice || 0),
+    costPrice,
     quantity,
     reorderLevel,
-    category: String(input.category || 'General').trim(),
+    category,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -73,22 +75,23 @@ export async function createProduct(storeId, input) {
 export async function updateProduct(storeId, productId, input) {
   const authenticatedStoreId = assertStoreId(storeId);
   const name = String(input.name || '').trim();
-  const unitPrice = Number(input.unitPrice);
-  const quantity = Number(input.quantity);
-  const reorderLevel = Number(input.reorderLevel);
-  if (!productId || !name || !Number.isFinite(unitPrice) || unitPrice < 0 || !Number.isInteger(quantity) || quantity < 0 || !Number.isInteger(reorderLevel) || reorderLevel < 0) {
-    throw new Error('Enter a product name, valid price, quantity, and reorder level.');
-  }
+  const category = String(input.category || 'General').trim();
+  if (!productId || !name) throw new Error('Enter a product name.');
+  if (!category) throw new Error('Enter a product category.');
+  const unitPrice = parseNonNegativeNumber(input.unitPrice, 'selling price');
+  const costPrice = parseNonNegativeNumber(input.costPrice || '0', 'cost price');
+  const quantity = parseNonNegativeNumber(input.quantity, 'quantity', { integer: true });
+  const reorderLevel = parseNonNegativeNumber(input.reorderLevel, 'low-stock threshold', { integer: true });
 
   await updateDoc(doc(productsCollection(authenticatedStoreId), productId), {
     name,
     sku: String(input.sku || '').trim(),
     barcode: String(input.barcode || '').trim(),
     unitPrice,
-    costPrice: Number(input.costPrice || 0),
+    costPrice,
     quantity,
     reorderLevel,
-    category: String(input.category || 'General').trim(),
+    category,
     updatedAt: serverTimestamp(),
   });
 }

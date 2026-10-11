@@ -19,13 +19,15 @@ import { useCustomerBalances } from '../hooks/useCustomerBalances';
 import { getAuthenticatedStoreId } from '../services/firestore/paths';
 import { createCustomer } from '../services/creditService';
 import { OfflineSyncNotice } from '../components/OfflineSyncNotice';
+import { isValidIsoDate, parseNonNegativeNumber, todayIsoDate, validateIsoDate } from '../services/validation';
 
 const BRAND_GREEN = '#004B49'; // solid buttons and hero card keep brand green in both themes
 
 const formatR = (n) => `R ${Number(n || 0).toFixed(2)}`;
 
 function parseDate(value) {
-  if (!value) return new Date();
+  if (!value) value = todayIsoDate();
+  if (!isValidIsoDate(value)) return new Date();
   const [year, month, day] = value.split('-').map(Number);
   const date = new Date(year, month - 1, day);
   return Number.isNaN(date.getTime()) ? new Date() : date;
@@ -49,6 +51,7 @@ function DueDateField({ value, onChange, colors, styles, disabled }) {
           type: 'date',
           'aria-label': 'Due date',
           value,
+          min: todayIsoDate(),
           onChange: (event) => onChange(event.target.value),
           disabled,
           style: {
@@ -86,6 +89,7 @@ function DueDateField({ value, onChange, colors, styles, disabled }) {
           value={parseDate(value)}
           mode="date"
           display={Platform.OS === 'ios' ? 'compact' : 'default'}
+          minimumDate={parseDate(todayIsoDate())}
           onChange={(event, date) => {
             if (Platform.OS !== 'ios' || event.type === 'dismissed') {
               setPickerVisible(false);
@@ -173,14 +177,28 @@ export default function CreditLedgerScreen({ route, navigation }) {
   };
 
   const handleVerifyAndAppend = async () => {
-    const amount = Number(pendingAmount);
-    if (!pendingAmount.trim() || !Number.isFinite(amount) || amount <= 0) {
+    let amount;
+    try {
+      amount = parseNonNegativeNumber(pendingAmount, 'amount');
+    } catch (error) {
+      Alert.alert('Invalid amount', 'Enter an amount using numbers only, greater than zero.');
+      return;
+    }
+    if (amount <= 0) {
       Alert.alert('Invalid amount', 'Enter an amount using numbers only, greater than zero.');
       return;
     }
     if (modalMode === 'credit' && !pendingDueDate.trim()) {
       Alert.alert('Due date required', 'Please enter when this credit should be paid.');
       return;
+    }
+    if (modalMode === 'credit') {
+      try {
+        validateIsoDate(pendingDueDate, 'due date', { min: todayIsoDate() });
+      } catch (error) {
+        Alert.alert('Invalid due date', error.message);
+        return;
+      }
     }
     if (modalMode === 'credit' && scheduleFrequency === 'monthly' && (!Number.isInteger(Number(durationMonths)) || Number(durationMonths) < 1 || Number(durationMonths) > 12)) {
       Alert.alert('Invalid duration', 'Enter a whole number of months between 1 and 12.');
@@ -231,15 +249,31 @@ export default function CreditLedgerScreen({ route, navigation }) {
   };
 
   const handleCreateCustomer = async () => {
-    const amount = Number(pendingAmount);
+    let amount = 0;
+    if (pendingAmount.trim()) {
+      try {
+        amount = parseNonNegativeNumber(pendingAmount, 'initial credit amount');
+      } catch (error) {
+        setCustomerFormError('Enter a valid initial credit amount greater than zero, or leave it blank.');
+        return;
+      }
+    }
     const hasInitialCredit = pendingAmount.trim() !== '';
-    if (hasInitialCredit && (!Number.isFinite(amount) || amount <= 0)) {
+    if (hasInitialCredit && amount <= 0) {
       setCustomerFormError('Enter an initial credit amount greater than zero, or leave it blank.');
       return;
     }
     if (hasInitialCredit && !pendingDueDate.trim()) {
       setCustomerFormError('Enter a due date for the initial credit.');
       return;
+    }
+    if (hasInitialCredit) {
+      try {
+        validateIsoDate(pendingDueDate, 'due date', { min: todayIsoDate() });
+      } catch (error) {
+        setCustomerFormError(error.message);
+        return;
+      }
     }
     if (hasInitialCredit && scheduleFrequency === 'monthly' && (!Number.isInteger(Number(durationMonths)) || Number(durationMonths) < 1 || Number(durationMonths) > 12)) {
       setCustomerFormError('Enter a whole number of months between 1 and 12.');
@@ -564,11 +598,15 @@ export default function CreditLedgerScreen({ route, navigation }) {
                   <View style={styles.inputWrapper}>
                     <TextInput
                       style={styles.modalInput}
-                      placeholder={label}
+                      placeholder={key === 'phone' ? '10-digit phone number' : label}
                       placeholderTextColor={COLORS.textMuted}
                       keyboardType={keyboardType}
                       value={customerForm[key]}
-                      onChangeText={(value) => setCustomerForm((current) => ({ ...current, [key]: value }))}
+                      onChangeText={(value) => setCustomerForm((current) => ({
+                        ...current,
+                        [key]: key === 'phone' ? value.replace(/\D/g, '').slice(0, 10) : value,
+                      }))}
+                      maxLength={key === 'phone' ? 10 : undefined}
                       editable={!saving}
                     />
                   </View>

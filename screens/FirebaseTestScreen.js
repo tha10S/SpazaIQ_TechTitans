@@ -3,6 +3,7 @@ import { ActivityIndicator, Button, SafeAreaView, StyleSheet, Text, TextInput, V
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../services/firebase/firebaseConfig';
+import { isValidEmail, normalizeEmail } from '../services/validation';
 
 function authErrorMessage(error) {
   switch (error?.code) {
@@ -42,10 +43,19 @@ export default function FirebaseTestScreen({ navigation }) {
   const [busy, setBusy] = useState(false);
 
   const testSignup = async () => {
+    const normalizedEmail = normalizeEmail(email);
+    if (!isValidEmail(normalizedEmail)) {
+      setAuthMessage('Enter a valid email address.');
+      return;
+    }
+    if (!password || password.length < 6) {
+      setAuthMessage('Use a password with at least 6 characters.');
+      return;
+    }
     setBusy(true);
     setAuthMessage('');
     try {
-      const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
+      const credential = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
       setAuthMessage(`Authentication succeeded. Test account created: ${credential.user.email}`);
       console.info('[Firebase test] Authentication succeeded', {
         uid: credential.user.uid,
@@ -99,6 +109,7 @@ export default function FirebaseTestScreen({ navigation }) {
           style={styles.input}
           value={email}
           onChangeText={setEmail}
+          maxLength={254}
           placeholder="firebase-test@example.com"
           autoCapitalize="none"
           autoCorrect={false}
