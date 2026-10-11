@@ -127,7 +127,6 @@ export default function SignupScreen({ navigation }) {
           <Text style={styles.label}>Mobile Number</Text>
 
           <View style={styles.phoneContainer}>
-            <Text style={styles.flag}>🇿🇦</Text>
             <Text style={styles.countryCode}>+27</Text>
 
             <TextInput
@@ -352,11 +351,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 12,
-  },
-
-  flag: {
-    fontSize: 17,
-    marginRight: 5,
   },
 
   countryCode: {

@@ -18,6 +18,7 @@ import { useCart } from '../hooks/useCart';
 import { fetchProducts } from '../services/salesService';
 import { getAuthenticatedStoreId } from '../services/firestore/paths';
 import { subscribeCustomers } from '../services/firestore/customersRepository';
+import { OfflineSyncNotice } from '../components/OfflineSyncNotice';
 
 const PAYMENT_METHODS = [
   { id: 'Cash', label: 'Cash', icon: 'cash-outline' },
@@ -139,7 +140,7 @@ export default function NewSaleScreen({ route }) {
       return;
     }
     try {
-      await completeSale({
+      const result = await completeSale({
         paymentMethod: payment.toLowerCase(),
         paidAmount,
         creditAmount,
@@ -147,7 +148,12 @@ export default function NewSaleScreen({ route }) {
         dueDate: creditAmount > 0 ? dueDate.trim() : null,
         schedule: creditAmount > 0 ? { frequency: scheduleFrequency } : null,
       });
-      Alert.alert('Success', `Sale of ${formatR(subtotal)} completed.`);
+      Alert.alert(
+        result?.pendingSync ? 'Sale saved offline' : 'Success',
+        result?.pendingSync
+          ? `Sale of ${formatR(subtotal)} was saved on this device and will sync when the connection returns. Stock and credit limits will be checked then.`
+          : `Sale of ${formatR(subtotal)} completed.`
+      );
       setSelectedCustomerId('');
       setSplitPaidAmount('');
       setDueDate('');
@@ -159,6 +165,7 @@ export default function NewSaleScreen({ route }) {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        <OfflineSyncNotice storeId={storeId} />
         <View style={styles.headerRow}>
           <View>
             <Text style={styles.title}>New Sale</Text>

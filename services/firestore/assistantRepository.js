@@ -1,21 +1,25 @@
 import { getDocs, query, collection, orderBy, limit } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath } from './paths';
-import { mapCustomer, mapLedgerEntry, mapProduct, mapSale } from './mappers';
+import { mapCustomer, mapLedgerEntry, mapProduct } from './mappers';
+import { fetchSales } from './salesRepository';
 
 export async function fetchAssistantData(storeId) {
   const authenticatedStoreId = assertStoreId(storeId);
-  const [productsSnapshot, salesSnapshot, customersSnapshot, ledgerSnapshot] = await Promise.all([
+  const [productsSnapshot, sales, customersSnapshot, ledgerSnapshot] = await Promise.all([
     getDocs(query(collection(db, ...storeCollectionPath(authenticatedStoreId, 'products')), orderBy('name'))),
-    getDocs(query(collection(db, ...storeCollectionPath(authenticatedStoreId, 'sales')), orderBy('createdAt', 'desc'), limit(200))),
+    fetchSales(authenticatedStoreId),
     getDocs(query(collection(db, ...storeCollectionPath(authenticatedStoreId, 'customers')), orderBy('name'))),
     getDocs(query(collection(db, ...storeCollectionPath(authenticatedStoreId, 'creditTransactions')), orderBy('createdAt', 'desc'), limit(500))),
   ]);
 
-  const sales = salesSnapshot.docs.map(mapSale);
   return {
     products: productsSnapshot.docs.map(mapProduct),
-    sales: sales.map((sale) => ({ ...sale, created_at: sale.createdAt, payment_method: sale.paymentMethod })),
+    sales: sales.map((sale) => ({
+      ...sale,
+      created_at: sale.createdAt ?? sale.created_at,
+      payment_method: sale.paymentMethod ?? sale.payment_method,
+    })),
     saleItems: sales.flatMap((sale) => (sale.items ?? []).map((item) => ({
       ...item,
       product_id: item.id,

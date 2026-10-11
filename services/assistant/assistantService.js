@@ -225,8 +225,9 @@ function salesForPeriod(sales, question, now = new Date()) {
   }
 
   return sales.filter((sale) => {
-    if (!sale.created_at) return false;
-    const createdAt = new Date(sale.created_at);
+    const timestamp = sale.created_at ?? sale.createdAt;
+    if (!timestamp) return false;
+    const createdAt = new Date(timestamp);
     return createdAt >= start && createdAt < end;
   });
 }

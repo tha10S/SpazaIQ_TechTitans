@@ -73,6 +73,28 @@ export function useCustomerBalances(storeId) {
     }
   };
 
+  const createCustomerWithCredit = async ({ customer, amount, dueDate, schedule }) => {
+    const signature = JSON.stringify({ customer, amount, dueDate, schedule });
+    if (!pendingCredit.current || pendingCredit.current.signature !== signature) {
+      pendingCredit.current = {
+        signature,
+        idempotencyKey: `credit-${storeId}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      };
+    }
+    const result = await addCreditTransaction({
+      storeId,
+      customerId: 'new',
+      customerName: customer.name,
+      newCustomer: customer,
+      amount,
+      dueDate,
+      schedule,
+      idempotencyKey: pendingCredit.current.idempotencyKey,
+    });
+    pendingCredit.current = null;
+    return result;
+  };
+
   const recordPayment = useCallback(async ({ customerId, amount, note, paymentMethod, paymentDate }) => {
     const signature = JSON.stringify({ customerId, amount, note, paymentMethod, paymentDate });
     if (!pendingPayment.current || pendingPayment.current.signature !== signature) {
@@ -98,5 +120,5 @@ export function useCustomerBalances(storeId) {
     }
   }, [storeId]);
 
-  return { customers, loading, error, confirmCredit, recordPayment };
+  return { customers, loading, error, confirmCredit, createCustomerWithCredit, recordPayment };
 }

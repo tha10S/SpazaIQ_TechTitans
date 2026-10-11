@@ -13,14 +13,90 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../config/ThemeContext';
 import { useCustomerBalances } from '../hooks/useCustomerBalances';
 import { getAuthenticatedStoreId } from '../services/firestore/paths';
 import { createCustomer } from '../services/creditService';
+import { OfflineSyncNotice } from '../components/OfflineSyncNotice';
 
 const BRAND_GREEN = '#004B49'; // solid buttons and hero card keep brand green in both themes
 
 const formatR = (n) => `R ${Number(n || 0).toFixed(2)}`;
+
+function parseDate(value) {
+  if (!value) return new Date();
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  return Number.isNaN(date.getTime()) ? new Date() : date;
+}
+
+function formatDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function DueDateField({ value, onChange, colors, styles, disabled }) {
+  const [pickerVisible, setPickerVisible] = useState(false);
+
+  if (Platform.OS === 'web') {
+    return (
+      <View style={styles.inputWrapper}>
+        <Ionicons name="calendar-outline" size={18} color={colors.textMuted} style={styles.inputIcon} />
+        {React.createElement('input', {
+          type: 'date',
+          'aria-label': 'Due date',
+          value,
+          onChange: (event) => onChange(event.target.value),
+          disabled,
+          style: {
+            flex: 1,
+            minWidth: 0,
+            height: '100%',
+            border: 0,
+            outline: 'none',
+            backgroundColor: 'transparent',
+            color: colors.textPrimary,
+            fontSize: 14,
+            fontWeight: 600,
+          },
+        })}
+      </View>
+    );
+  }
+
+  return (
+    <>
+      <TouchableOpacity
+        style={styles.inputWrapper}
+        onPress={() => setPickerVisible(true)}
+        disabled={disabled}
+        accessibilityRole="button"
+        accessibilityLabel={`Due date${value ? `, ${value}` : ''}`}
+      >
+        <Ionicons name="calendar-outline" size={18} color={colors.textMuted} style={styles.inputIcon} />
+        <Text style={[styles.modalInput, !value && { color: colors.textMuted }]}>
+          {value || 'Select due date'}
+        </Text>
+      </TouchableOpacity>
+      {pickerVisible && (
+        <DateTimePicker
+          value={parseDate(value)}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'compact' : 'default'}
+          onChange={(event, date) => {
+            if (Platform.OS !== 'ios' || event.type === 'dismissed') {
+              setPickerVisible(false);
+            }
+            if (date) onChange(formatDate(date));
+          }}
+        />
+      )}
+    </>
+  );
+}
 
 export default function CreditLedgerScreen({ route, navigation }) {
   const { colors } = useTheme();
@@ -53,7 +129,7 @@ export default function CreditLedgerScreen({ route, navigation }) {
   );
 
   const storeId = route?.params?.storeId || getAuthenticatedStoreId();
-  const { customers, loading, error, confirmCredit, recordPayment } = useCustomerBalances(storeId);
+  const { customers, loading, error, confirmCredit, createCustomerWithCredit, recordPayment } = useCustomerBalances(storeId);
 
   const [idModalVisible, setIdModalVisible] = useState(false);
   const [modalMode, setModalMode] = useState('credit');
@@ -117,10 +193,11 @@ export default function CreditLedgerScreen({ route, navigation }) {
 
     setSaving(true);
     try {
+      let result;
       if (modalMode === 'payment') {
-        await recordPayment({ customerId: activeCustomer.id, amount, note: 'Payment recorded in credit ledger' });
+        result = await recordPayment({ customerId: activeCustomer.id, amount, note: 'Payment recorded in credit ledger' });
       } else {
-        await confirmCredit({
+        result = await confirmCredit({
           customer: activeCustomer,
           amount,
           dueDate: pendingDueDate.trim(),
@@ -140,6 +217,12 @@ export default function CreditLedgerScreen({ route, navigation }) {
       setDurationMonths('');
       setDurationWeeks('');
       setActiveCustomer(null);
+      if (result?.pendingSync) {
+        Alert.alert(
+          modalMode === 'payment' ? 'Payment saved offline' : 'Credit entry saved offline',
+          'This change is stored on this device and will sync when the connection returns. The server will validate it then.'
+        );
+      }
     } catch (err) {
       Alert.alert(modalMode === 'payment' ? 'Could not make payment' : 'Could not log credit', err.message);
     } finally {
@@ -148,11 +231,50 @@ export default function CreditLedgerScreen({ route, navigation }) {
   };
 
   const handleCreateCustomer = async () => {
+    const amount = Number(pendingAmount);
+    const hasInitialCredit = pendingAmount.trim() !== '';
+    if (hasInitialCredit && (!Number.isFinite(amount) || amount <= 0)) {
+      setCustomerFormError('Enter an initial credit amount greater than zero, or leave it blank.');
+      return;
+    }
+    if (hasInitialCredit && !pendingDueDate.trim()) {
+      setCustomerFormError('Enter a due date for the initial credit.');
+      return;
+    }
+    if (hasInitialCredit && scheduleFrequency === 'monthly' && (!Number.isInteger(Number(durationMonths)) || Number(durationMonths) < 1 || Number(durationMonths) > 12)) {
+      setCustomerFormError('Enter a whole number of months between 1 and 12.');
+      return;
+    }
+    if (hasInitialCredit && scheduleFrequency === 'weekly' && (!Number.isInteger(Number(durationWeeks)) || Number(durationWeeks) < 1)) {
+      setCustomerFormError('Enter a whole number of weeks greater than zero.');
+      return;
+    }
+
     setSaving(true);
     setCustomerFormError('');
     try {
-      await createCustomer(storeId, customerForm);
+      if (hasInitialCredit) {
+        await createCustomerWithCredit({
+          customer: customerForm,
+          amount,
+          dueDate: pendingDueDate.trim(),
+          schedule: {
+            frequency: scheduleFrequency,
+            totalPayments: repaymentPeriods,
+            installmentAmount: Number(installmentAmount.toFixed(2)),
+            ...(scheduleFrequency === 'monthly' ? { durationMonths: Number(durationMonths) } : {}),
+            ...(scheduleFrequency === 'weekly' ? { durationWeeks: Number(durationWeeks) } : {}),
+          },
+        });
+      } else {
+        await createCustomer(storeId, customerForm);
+      }
       setCustomerForm({ name: '', phone: '', creditLimit: '' });
+      setPendingAmount('');
+      setPendingDueDate('');
+      setScheduleFrequency('one_time');
+      setDurationMonths('');
+      setDurationWeeks('');
       setCustomerFormVisible(false);
     } catch (err) {
       setCustomerFormError(err.message || 'Could not save customer.');
@@ -182,6 +304,7 @@ export default function CreditLedgerScreen({ route, navigation }) {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        <OfflineSyncNotice storeId={storeId} />
         {/* Header Section */}
         <View style={styles.headerRow}>
           <View>
@@ -288,6 +411,11 @@ export default function CreditLedgerScreen({ route, navigation }) {
           activeOpacity={0.88}
           onPress={() => {
             setCustomerFormError('');
+            setPendingAmount('');
+            setPendingDueDate('');
+            setScheduleFrequency('one_time');
+            setDurationMonths('');
+            setDurationWeeks('');
             setCustomerFormVisible(true);
           }}
         >
@@ -339,17 +467,13 @@ export default function CreditLedgerScreen({ route, navigation }) {
             {modalMode === 'credit' && (
               <>
                 <Text style={styles.inputLabel}>DUE DATE</Text>
-                <View style={styles.inputWrapper}>
-                  <Ionicons name="calendar-outline" size={18} color={COLORS.textMuted} style={styles.inputIcon} />
-                  <TextInput
-                    style={styles.modalInput}
-                    placeholder="YYYY-MM-DD"
-                    placeholderTextColor={COLORS.textMuted}
-                    value={pendingDueDate}
-                    onChangeText={setPendingDueDate}
-                    editable={!saving}
-                  />
-                </View>
+                <DueDateField
+                  value={pendingDueDate}
+                  onChange={setPendingDueDate}
+                  colors={colors}
+                  styles={styles}
+                  disabled={saving}
+                />
                 <Text style={styles.inputLabel}>REPAYMENT SCHEDULE</Text>
                 <View style={styles.scheduleRow}>
                   {['one_time', 'weekly', 'monthly'].map((frequency) => (
@@ -425,31 +549,116 @@ export default function CreditLedgerScreen({ route, navigation }) {
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add Customer</Text>
+              <Text style={styles.modalTitle}>Add Customer & Record Credit</Text>
               <TouchableOpacity onPress={() => setCustomerFormVisible(false)} disabled={saving}>
                 <Ionicons name="close-circle" size={24} color={COLORS.textMuted} />
               </TouchableOpacity>
             </View>
-            {[
-              ['name', 'Customer name', 'default'],
-              ['phone', 'Phone number', 'phone-pad'],
-              ['creditLimit', 'Credit limit (R)', 'decimal-pad'],
-            ].map(([key, label, keyboardType]) => (
-              <View key={key}>
-                <Text style={styles.inputLabel}>{label.toUpperCase()}</Text>
-                <View style={styles.inputWrapper}>
-                  <TextInput
-                    style={styles.modalInput}
-                    placeholder={label}
-                    placeholderTextColor={COLORS.textMuted}
-                    keyboardType={keyboardType}
-                    value={customerForm[key]}
-                    onChangeText={(value) => setCustomerForm((current) => ({ ...current, [key]: value }))}
-                    editable={!saving}
-                  />
+            <ScrollView style={styles.customerFormFields} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              {[
+                ['name', 'Customer name', 'default'],
+                ['phone', 'Phone number', 'phone-pad'],
+              ].map(([key, label, keyboardType]) => (
+                <View key={key}>
+                  <Text style={styles.inputLabel}>{label.toUpperCase()}</Text>
+                  <View style={styles.inputWrapper}>
+                    <TextInput
+                      style={styles.modalInput}
+                      placeholder={label}
+                      placeholderTextColor={COLORS.textMuted}
+                      keyboardType={keyboardType}
+                      value={customerForm[key]}
+                      onChangeText={(value) => setCustomerForm((current) => ({ ...current, [key]: value }))}
+                      editable={!saving}
+                    />
+                  </View>
                 </View>
+              ))}
+
+              <Text style={styles.formSectionTitle}>RECORD CREDIT</Text>
+              <Text style={styles.formHelperText}>Enter credit details here, or leave the amount blank to add only the customer.</Text>
+              <Text style={styles.inputLabel}>CREDIT AMOUNT (R)</Text>
+              <View style={styles.inputWrapper}>
+                <Text style={styles.currencyPrefix}>R</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="0.00"
+                  placeholderTextColor={COLORS.textMuted}
+                  keyboardType="decimal-pad"
+                  value={pendingAmount}
+                  onChangeText={(value) => setNumericInput(setPendingAmount, value, true)}
+                  editable={!saving}
+                />
               </View>
-            ))}
+              <Text style={styles.inputLabel}>DUE DATE</Text>
+              <DueDateField
+                value={pendingDueDate}
+                onChange={setPendingDueDate}
+                colors={colors}
+                styles={styles}
+                disabled={saving}
+              />
+              <Text style={styles.inputLabel}>REPAYMENT SCHEDULE</Text>
+              <View style={styles.scheduleRow}>
+                {['one_time', 'weekly', 'monthly'].map((frequency) => (
+                  <TouchableOpacity
+                    key={frequency}
+                    style={[styles.scheduleOption, scheduleFrequency === frequency && styles.scheduleOptionSelected]}
+                    onPress={() => {
+                      setScheduleFrequency(frequency);
+                      setDurationMonths('');
+                      setDurationWeeks('');
+                    }}
+                    disabled={saving}
+                  >
+                    <Text style={[styles.scheduleOptionText, scheduleFrequency === frequency && styles.scheduleOptionTextSelected]}>
+                      {frequency === 'one_time' ? 'Once' : frequency[0].toUpperCase() + frequency.slice(1)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {scheduleFrequency !== 'one_time' && (
+                <>
+                  <Text style={styles.inputLabel}>PLAN DURATION ({scheduleFrequency === 'monthly' ? 'MONTHS' : 'WEEKS'})</Text>
+                  <View style={styles.inputWrapper}>
+                    <Ionicons name="time-outline" size={18} color={COLORS.textMuted} style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.modalInput}
+                      placeholder={scheduleFrequency === 'monthly' ? '1 to 12' : 'e.g. 12'}
+                      placeholderTextColor={COLORS.textMuted}
+                      keyboardType="number-pad"
+                      value={scheduleFrequency === 'monthly' ? durationMonths : durationWeeks}
+                      onChangeText={(value) => setNumericInput(scheduleFrequency === 'monthly' ? setDurationMonths : setDurationWeeks, value)}
+                      editable={!saving}
+                    />
+                  </View>
+                </>
+              )}
+              <View style={styles.installmentPreview}>
+                <Ionicons name="calculator-outline" size={17} color={COLORS.emerald} />
+                <Text style={styles.installmentPreviewText}>
+                  {scheduleFrequency === 'one_time'
+                    ? `One payment of ${formatR(Number(pendingAmount) || 0)}`
+                    : `${formatR(installmentAmount)} ${scheduleFrequency === 'monthly' ? 'per month' : 'per week'} × ${repaymentPeriods || 0} payments`}
+                </Text>
+              </View>
+              <Text style={styles.inputLabel}>CREDIT LIMIT (R)</Text>
+              <View style={styles.inputWrapper}>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Credit limit (R)"
+                  placeholderTextColor={COLORS.textMuted}
+                  keyboardType="decimal-pad"
+                  value={customerForm.creditLimit}
+                  onChangeText={(value) => {
+                    if (/^\d*\.?\d{0,2}$/.test(value)) {
+                      setCustomerForm((current) => ({ ...current, creditLimit: value }));
+                    }
+                  }}
+                  editable={!saving}
+                />
+              </View>
+            </ScrollView>
             {customerFormError ? <Text style={styles.customerFormError}>{customerFormError}</Text> : null}
             <View style={styles.modalButtonRow}>
               <TouchableOpacity
@@ -464,7 +673,7 @@ export default function CreditLedgerScreen({ route, navigation }) {
                 onPress={handleCreateCustomer}
                 disabled={saving}
               >
-                {saving ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.modalButtonConfirmText}>Save Customer</Text>}
+                {saving ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.modalButtonConfirmText}>{pendingAmount.trim() ? 'Save Customer & Credit' : 'Save Customer'}</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -500,6 +709,22 @@ const makeStyles = (COLORS) =>
       color: COLORS.danger,
       fontSize: 12,
       marginBottom: 6,
+    },
+    customerFormFields: {
+      flexShrink: 1,
+    },
+    formSectionTitle: {
+      fontSize: 12,
+      fontWeight: '800',
+      color: COLORS.emerald,
+      letterSpacing: 0.6,
+      marginTop: 2,
+      marginBottom: 4,
+    },
+    formHelperText: {
+      fontSize: 12,
+      color: COLORS.textMuted,
+      marginBottom: 12,
     },
     container: {
       padding: 16,
@@ -808,6 +1033,7 @@ const makeStyles = (COLORS) =>
       backgroundColor: COLORS.cardBg,
       borderRadius: 20,
       padding: 22,
+      maxHeight: '90%',
       borderWidth: 1,
       borderColor: COLORS.border,
       ...Platform.select({

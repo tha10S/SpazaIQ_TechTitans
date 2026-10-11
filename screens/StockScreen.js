@@ -187,9 +187,12 @@ export default function StockScreen({ navigation, route }) {
                 onPress={() => openProductForm(product)}
               >
                 <View style={styles.productInformation}>
-                  <Text style={styles.productName} numberOfLines={1}>
-                    {statusType === 'low' ? '‼️ ' : ''}{product.name}
-                  </Text>
+                  <View style={styles.productNameRow}>
+                    {statusType === 'low' ? (
+                      <Ionicons name="alert-circle-outline" size={15} color={colors.warning} />
+                    ) : null}
+                    <Text style={styles.productName} numberOfLines={1}>{product.name}</Text>
+                  </View>
                   <View style={styles.detailsRow}>
                     <Text style={styles.productPrice}>R {product.unit_price.toFixed(2)}</Text>
                     <Text style={styles.dotSeparator}>•</Text>
@@ -395,7 +398,8 @@ function makeStyles(colors, typography, spacing, radius) {
       marginBottom: 8,
     },
     productInformation: { flex: 1, marginRight: spacing.sm },
-    productName: { fontSize: 14, fontWeight: '700', color: colors.textPrimary },
+    productNameRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    productName: { flexShrink: 1, fontSize: 14, fontWeight: '700', color: colors.textPrimary },
     detailsRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
     productPrice: { fontSize: 13, fontWeight: '700', color: colors.primary },
     dotSeparator: { marginHorizontal: 6, color: colors.textMuted },

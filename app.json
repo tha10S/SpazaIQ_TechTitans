@@ -14,7 +14,8 @@
         }
       ],
       "expo-asset",
-      "expo-image-picker"
+      "expo-image-picker",
+      "expo-font"
     ],
     "ios": {
       "supportsTablet": true

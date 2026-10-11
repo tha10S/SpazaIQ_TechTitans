@@ -27,7 +27,6 @@ export function useCart(storeId) {
         },
         (subscriptionError) => {
           if (!active) return;
-          setProducts([]);
           setError(subscriptionError);
           setLoading(false);
         }
@@ -92,7 +91,7 @@ export function useCart(storeId) {
           idempotencyKey: `sale-${storeId}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         };
       }
-      await recordSale({
+      const result = await recordSale({
         storeId,
         cart,
         total: subtotal,
@@ -101,6 +100,7 @@ export function useCart(storeId) {
       });
       pendingSale.current = null;
       setCart([]);
+      return result;
     } finally {
       setSubmitting(false);
     }
