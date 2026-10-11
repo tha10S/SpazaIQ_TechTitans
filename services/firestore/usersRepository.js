@@ -1,6 +1,14 @@
-import { doc, getDoc, onSnapshot, runTransaction, serverTimestamp } from 'firebase/firestore';
-import { updateProfile } from 'firebase/auth';
+import { doc, getDoc, onSnapshot, runTransaction, serverTimestamp, updateDoc } from 'firebase/firestore';
+import {
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  reload,
+  updateEmail,
+  updatePassword,
+  updateProfile,
+} from 'firebase/auth';
 import { auth, db } from '../firebase/firebaseConfig';
+import { isValidEmail, normalizeEmail, normalizePhoneNumber } from '../validation';
 
 function assertCurrentUser(userId) {
   const authenticatedUserId = auth.currentUser?.uid;
@@ -26,11 +34,46 @@ export function subscribeUserProfile(userId, onData, onError) {
   }, onError);
 }
 
+export async function updateLoginCredentials(userId, changes) {
+  assertCurrentUser(userId);
+  const user = auth.currentUser;
+  if (!user) throw new Error('You are not signed in.');
+
+  const email = normalizeEmail(changes.email);
+  const currentPassword = String(changes.currentPassword || '');
+  const newPassword = String(changes.newPassword || '');
+  if (!isValidEmail(email)) throw new Error('Enter a valid email address.');
+
+  const emailChanged = email !== normalizeEmail(user.email);
+  if (!emailChanged && !newPassword) throw new Error('Enter a new email or password before saving.');
+  if (!currentPassword) throw new Error('Enter your current password to change your login credentials.');
+  if (newPassword && newPassword.length < 6) {
+    throw new Error('Choose a new password with at least 6 characters.');
+  }
+  if (!user.email) throw new Error('This account does not have an email/password credential.');
+
+  const credential = EmailAuthProvider.credential(user.email, currentPassword);
+  await reauthenticateWithCredential(user, credential);
+  if (emailChanged) await updateEmail(user, email);
+  if (newPassword) await updatePassword(user, newPassword);
+  await reload(user);
+  await updateDoc(userReference(userId), {
+    email,
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export async function updateUserProfile(userId, changes) {
   assertCurrentUser(userId);
+  const user = auth.currentUser;
+  if (!user) throw new Error('You are not signed in.');
+
   const fullName = String(changes.fullName || '').trim();
   const shopName = String(changes.shopName || '').trim();
+  const email = normalizeEmail(changes.email);
   if (!fullName || !shopName) throw new Error('Name and shop name are required.');
+  if (!isValidEmail(email)) throw new Error('Enter a valid email address.');
+  const mobile = normalizePhoneNumber(changes.mobile, { required: true });
 
   const profileRef = userReference(userId);
   const storeRef = doc(db, 'stores', userId);
@@ -48,7 +91,8 @@ export async function updateUserProfile(userId, changes) {
       fullName,
       displayName: fullName,
       shopName,
-      mobile: String(changes.mobile || '').trim(),
+      email,
+      mobile,
       location: String(changes.location || '').trim(),
       shopRegistration: String(changes.shopRegistration || '').trim(),
       updatedAt: serverTimestamp(),
@@ -59,5 +103,5 @@ export async function updateUserProfile(userId, changes) {
     });
   });
 
-  await updateProfile(auth.currentUser, { displayName: fullName });
+  await updateProfile(user, { displayName: fullName });
 }

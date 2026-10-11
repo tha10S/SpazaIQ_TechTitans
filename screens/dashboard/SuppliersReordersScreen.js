@@ -14,7 +14,8 @@ import {
   subscribeSuppliers,
   updateSupplierItems,
 } from "../../services/firestore/suppliersRepository";
-import { normalizePhoneZA, openWhatsApp, supplierOrderMessage } from "../../services/whatsapp";
+import { normalizePhoneNumber, parseNonNegativeNumber } from "../../services/validation";
+import { openWhatsApp, supplierOrderMessage } from "../../services/whatsapp";
 
 const BRAND_GREEN = "#004B49"; // solid buttons keep brand green in both themes
 const WHATSAPP_GREEN = "#25D366";
@@ -192,13 +193,20 @@ function SuppliersTab({ query, setQuery, suppliers, products, loaded, storeId, s
       setNotice({ type: "error", text: "Enter the supplier name." });
       return;
     }
-    if (newPhone.trim() && !normalizePhoneZA(newPhone)) {
-      setNotice({ type: "error", text: "That phone number does not look right. Use the full number, for example 082 123 4567." });
+    if (suppliers.some((supplier) => supplier.name.trim().toLowerCase() === newName.trim().toLowerCase())) {
+      setNotice({ type: "error", text: "A supplier with that name already exists." });
+      return;
+    }
+    let phone;
+    try {
+      phone = normalizePhoneNumber(newPhone);
+    } catch (error) {
+      setNotice({ type: "error", text: error.message });
       return;
     }
     setSaving(true);
     try {
-      await createSupplier(storeId, { name: newName, category: newCategory, phone: newPhone });
+      await createSupplier(storeId, { name: newName, category: newCategory, phone });
       setNotice({ type: "success", text: `${newName.trim()} added.` });
       setNewName("");
       setNewPhone("");
@@ -219,12 +227,18 @@ function SuppliersTab({ query, setQuery, suppliers, products, loaded, storeId, s
   }
 
   async function submitItem(supplier) {
-    const qty = Number(newItemQty);
     if (!pickedProduct) {
       setNotice({ type: "error", text: "Pick a product from your stock first." });
       return;
     }
-    if (!Number.isInteger(qty) || qty < 1) {
+    let qty;
+    try {
+      qty = parseNonNegativeNumber(newItemQty, "quantity", { integer: true });
+    } catch (error) {
+      setNotice({ type: "error", text: error.message });
+      return;
+    }
+    if (qty < 1) {
       setNotice({ type: "error", text: "Enter a whole number quantity of 1 or more." });
       return;
     }

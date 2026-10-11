@@ -12,6 +12,7 @@ import {
 import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath } from './paths';
 import { mapCustomer, mapLedgerEntry } from './mappers';
+import { normalizePhoneNumber, parseNonNegativeNumber, todayIsoDate, validateIsoDate } from '../validation';
 import {
   enqueueOfflineOperation,
   getOfflineOperations,
@@ -229,18 +230,20 @@ export async function fetchRepaymentTrackerData(storeId) {
   }
 }
 
-function validatePaymentInput({ customerId, amount, idempotencyKey }) {
-  const numericAmount = Number(amount);
-  if (!customerId || !Number.isFinite(numericAmount) || numericAmount <= 0) {
+function validatePaymentInput({ customerId, amount, idempotencyKey, paymentDate, paymentMethod = 'Cash' }) {
+  const numericAmount = parseNonNegativeNumber(amount, 'payment amount');
+  if (!customerId || numericAmount <= 0) {
     throw new Error('Enter a valid customer and payment amount.');
   }
   if (!idempotencyKey) throw new Error('A payment idempotency key is required.');
+  if (!['Cash', 'EFT', 'Card'].includes(paymentMethod)) throw new Error('Choose a valid payment method.');
+  if (paymentDate) validateIsoDate(paymentDate, 'payment date', { max: todayIsoDate() });
   return numericAmount;
 }
 
 async function makePaymentOnline({ storeId, customerId, amount, idempotencyKey, note = '', paymentMethod = 'Cash', paymentDate }) {
   const authenticatedStoreId = assertStoreId(storeId);
-  const numericAmount = validatePaymentInput({ customerId, amount, idempotencyKey });
+  const numericAmount = validatePaymentInput({ customerId, amount, idempotencyKey, paymentDate, paymentMethod });
 
   return runTransaction(db, async (transaction) => {
     const operation = await transaction.get(operationRef(authenticatedStoreId, idempotencyKey));
@@ -317,7 +320,11 @@ async function makePaymentOnline({ storeId, customerId, amount, idempotencyKey, 
 
 export async function makePayment(input) {
   const authenticatedStoreId = assertStoreId(input.storeId);
-  const payload = { ...input, storeId: authenticatedStoreId };
+  const payload = {
+    ...input,
+    storeId: authenticatedStoreId,
+    paymentDate: validateIsoDate(input.paymentDate || todayIsoDate(), 'payment date', { max: todayIsoDate() }),
+  };
   const numericAmount = validatePaymentInput(payload);
   const result = { id: payload.idempotencyKey, customerId: payload.customerId, amount: -numericAmount };
   if (await isDeviceOffline()) {
@@ -334,24 +341,19 @@ export async function makePayment(input) {
   }
 }
 
-function validateCreditInput({ customerId, customerName, newCustomer, amount, idempotencyKey, schedule }) {
-  const numericAmount = Number(amount);
-  if (!customerId || !Number.isFinite(numericAmount) || numericAmount <= 0) throw new Error('Enter a valid credit amount.');
+function validateCreditInput({ customerId, customerName, newCustomer, amount, dueDate, idempotencyKey, schedule }) {
+  const numericAmount = parseNonNegativeNumber(amount, 'credit amount');
+  if (!customerId || numericAmount <= 0) throw new Error('Enter a valid credit amount.');
   if (!idempotencyKey) throw new Error('A credit idempotency key is required.');
+  validateIsoDate(dueDate, 'due date', { min: todayIsoDate() });
   const newCustomerData = customerId === 'new'
     ? {
         name: String(newCustomer?.name || customerName || '').trim(),
-        phone: String(newCustomer?.phone || '').trim(),
-        creditLimit: Number(newCustomer?.creditLimit || 0),
+        phone: normalizePhoneNumber(newCustomer?.phone, { required: true }),
+        creditLimit: parseNonNegativeNumber(newCustomer?.creditLimit || '0', 'credit limit'),
       }
     : null;
-  if (newCustomerData && (
-    !newCustomerData.name ||
-    !Number.isFinite(newCustomerData.creditLimit) ||
-    newCustomerData.creditLimit < 0
-  )) {
-    throw new Error('Enter a customer name and a valid non-negative credit limit.');
-  }
+  if (newCustomerData && !newCustomerData.name) throw new Error('Enter a customer name.');
   const frequency = schedule?.frequency ?? 'one_time';
   const periodCount = frequency === 'monthly'
     ? Number(schedule.durationMonths ?? schedule.totalPayments)

@@ -13,9 +13,13 @@
     const [permission, requestPermission] = useCameraPermissions();
     const [hasScanned, setHasScanned] = useState(false);
     const [manualValue, setManualValue] = useState('');
+    const [manualError, setManualError] = useState('');
 
     useEffect(() => {
-      if (visible) setHasScanned(false);
+      if (visible) {
+        setHasScanned(false);
+        setManualError('');
+      }
     }, [visible]);
 
     const closeScanner = () => {
@@ -45,7 +49,15 @@
 
     const handleManualSubmit = () => {
       const value = manualValue.trim();
-      if (!value) return;
+      if (!value) {
+        setManualError('Enter a product QR value.');
+        return;
+      }
+      if (value.length > 128) {
+        setManualError('QR values must be 128 characters or fewer.');
+        return;
+      }
+      setManualError('');
       returnScan(value);
     };
 
@@ -90,7 +102,11 @@
                 placeholder="Example: p1"
                 placeholderTextColor="#9CA3AF"
                 value={manualValue}
-                onChangeText={setManualValue}
+                onChangeText={(value) => {
+                  setManualValue(value);
+                  setManualError('');
+                }}
+                maxLength={128}
                 autoCapitalize="none"
                 editable={!hasScanned}
                 onSubmitEditing={handleManualSubmit}
@@ -99,6 +115,7 @@
                 <Text style={styles.manualButtonText}>Use value</Text>
               </TouchableOpacity>
             </View>
+            {manualError ? <Text accessibilityRole="alert" style={styles.error}>{manualError}</Text> : null}
           </View>
         </SafeAreaView>
       </Modal>
@@ -122,4 +139,5 @@
     manualInput: { flex: 1, height: 46, backgroundColor: '#FFFFFF', borderRadius: 10, paddingHorizontal: 12, color: '#111827', marginRight: 8 },
     manualButton: { height: 46, backgroundColor: '#0F9D58', borderRadius: 10, justifyContent: 'center', paddingHorizontal: 14 },
     manualButtonText: { color: '#FFFFFF', fontWeight: '700' },
+    error: { color: '#FCA5A5', marginTop: 8 },
   });

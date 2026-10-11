@@ -20,6 +20,7 @@ import { fetchProducts } from '../services/salesService';
 import { getAuthenticatedStoreId } from '../services/firestore/paths';
 import { subscribeCustomers } from '../services/firestore/customersRepository';
 import { OfflineSyncNotice } from '../components/OfflineSyncNotice';
+import { isValidDecimalInput, parseNonNegativeNumber } from '../services/validation';
 
 const PAYMENT_METHODS = [
   { id: 'Cash', label: 'Cash', icon: 'cash-outline' },
@@ -279,12 +280,20 @@ export default function NewSaleScreen({ route, navigation }) {
       setNotice({ type: 'error', text: 'Add at least one item to the cart first.' });
       return;
     }
-    if (isSplit && !(firstAmount > 0 && firstAmount < subtotal)) {
-      setNotice({
-        type: 'error',
-        text: `For a split payment, enter an amount for ${firstMethod.toLowerCase()} that is more than R 0.00 and less than the total.`,
-      });
-      return;
+    if (isSplit) {
+      try {
+        parseNonNegativeNumber(splitPaidAmount, 'paid amount');
+      } catch (error) {
+        setNotice({ type: 'error', text: 'Enter a valid split amount with no more than 2 decimal places.' });
+        return;
+      }
+      if (!(firstAmount > 0 && firstAmount < subtotal)) {
+        setNotice({
+          type: 'error',
+          text: `For a split payment, enter an amount for ${firstMethod.toLowerCase()} that is more than R 0.00 and less than the total.`,
+        });
+        return;
+      }
     }
 
     if (cardAmount > 0 && isOffline) {
@@ -592,7 +601,7 @@ export default function NewSaleScreen({ route, navigation }) {
               keyboardType="decimal-pad"
               value={splitPaidAmount}
               onChangeText={(value) => {
-                if (/^\d*\.?\d{0,2}$/.test(value)) setSplitPaidAmount(value);
+                if (isValidDecimalInput(value)) setSplitPaidAmount(value);
               }}
             />
 

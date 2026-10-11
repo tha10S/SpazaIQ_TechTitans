@@ -18,6 +18,7 @@ import { fetchRepaymentTrackerData, makePayment } from '../services/creditServic
 import { getAuthenticatedStoreId } from '../services/firestore/paths';
 import { buildRepaymentTracker } from '../services/repaymentTracker';
 import { OfflineSyncNotice } from '../components/OfflineSyncNotice';
+import { isValidDecimalInput, todayIsoDate, validateIsoDate } from '../services/validation';
 
 const PAYMENT_METHODS = ['Cash', 'EFT', 'Card'];
 const STATUS_STYLES = {
@@ -27,7 +28,7 @@ const STATUS_STYLES = {
 };
 
 const formatR = (value) => `R ${Number(value || 0).toFixed(2)}`;
-const todayString = () => new Date().toISOString().slice(0, 10);
+const todayString = todayIsoDate;
 
 function formatDate(value) {
   if (!value) return 'No payments yet';
@@ -90,7 +91,6 @@ export default function RepaymentTrackerScreen({ route }) {
 
   const savePayment = async () => {
     const amount = Number(paymentAmount);
-    const parsedDate = new Date(`${paymentDate}T00:00:00`);
     if (!Number.isFinite(amount) || amount <= 0) {
       Alert.alert('Invalid amount', 'Enter a payment amount greater than zero.');
       return;
@@ -99,8 +99,10 @@ export default function RepaymentTrackerScreen({ route }) {
       Alert.alert('Amount exceeds balance', 'The payment cannot be greater than the customer’s outstanding amount.');
       return;
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate) || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== paymentDate) {
-      Alert.alert('Invalid date', 'Enter a valid payment date in YYYY-MM-DD format.');
+    try {
+      validateIsoDate(paymentDate, 'payment date', { max: todayIsoDate() });
+    } catch (error) {
+      Alert.alert('Invalid date', error.message);
       return;
     }
 
@@ -291,7 +293,9 @@ export default function RepaymentTrackerScreen({ route }) {
               <TextInput
                 style={styles.input}
                 value={paymentAmount}
-                onChangeText={setPaymentAmount}
+                onChangeText={(value) => {
+                  if (isValidDecimalInput(value)) setPaymentAmount(value);
+                }}
                 placeholder="0.00"
                 placeholderTextColor={COLORS.textMuted}
                 keyboardType="decimal-pad"

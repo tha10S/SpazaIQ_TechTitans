@@ -14,8 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../config/ThemeContext";
 import { getAuthErrorMessage, logIn } from "../../services/auth/firebaseAuth";
-
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+import { isValidEmail, normalizeEmail } from "../../services/validation";
 
 export default function LoginScreen({ navigation }) {
   const { colors } = useTheme();
@@ -29,8 +28,8 @@ export default function LoginScreen({ navigation }) {
   async function handleLogin() {
     if (isSubmitting) return;
 
-    const normalizedEmail = email.trim();
-    if (!normalizedEmail || !EMAIL_PATTERN.test(normalizedEmail)) {
+    const normalizedEmail = normalizeEmail(email);
+    if (!isValidEmail(normalizedEmail)) {
       setError("Enter a valid email address.");
       return;
     }
@@ -93,6 +92,7 @@ export default function LoginScreen({ navigation }) {
                   autoCapitalize="none"
                   autoComplete="email"
                   keyboardType="email-address"
+                  maxLength={254}
                   textContentType="emailAddress"
                   returnKeyType="next"
                   accessibilityLabel="Email address"

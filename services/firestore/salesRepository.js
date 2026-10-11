@@ -11,6 +11,7 @@ import {
 import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath } from './paths';
 import { mapSale } from './mappers';
+import { parseNonNegativeNumber, todayIsoDate, validateIsoDate } from '../validation';
 import {
   enqueueOfflineOperation,
   getOfflineOperations,
@@ -110,21 +111,35 @@ export function subscribeSales(storeId, onData, onError) {
   };
 }
 
-function validateSaleInput({ cart, total, creditAmount = 0, paidAmount = total, customerId, idempotencyKey }) {
+function validateSaleInput({ cart, total, creditAmount = 0, paidAmount = total, customerId, idempotencyKey, dueDate, paymentMethod, schedule }) {
   if (!cart?.length) throw new Error('Add at least one product to the cart.');
   if (!idempotencyKey) throw new Error('A sale idempotency key is required.');
-  const numericTotal = Number(total);
-  const numericCredit = Number(creditAmount || 0);
-  const numericPaid = Number(paidAmount || 0);
+  if (!['cash', 'card', 'credit', 'split'].includes(paymentMethod)) throw new Error('Choose a valid payment method.');
+  const numericTotal = parseNonNegativeNumber(total, 'sale total');
+  const numericCredit = parseNonNegativeNumber(creditAmount, 'credit amount');
+  const numericPaid = parseNonNegativeNumber(paidAmount, 'paid amount');
+  cart.forEach((item) => {
+    if (!item?.id || !Number.isInteger(Number(item.qty)) || Number(item.qty) <= 0) {
+      throw new Error('Each sale item must have a product and a positive whole-number quantity.');
+    }
+    parseNonNegativeNumber(item.unitPrice, 'product price');
+  });
+  if (numericCredit > numericTotal || numericPaid > numericTotal) throw new Error('Payment amounts cannot exceed the sale total.');
   if (Math.abs(numericPaid + numericCredit - numericTotal) > 0.01) throw new Error('Payment amounts must equal the sale total.');
   if (numericCredit > 0 && !customerId) throw new Error('Select a customer for credit payment.');
+  if (numericCredit > 0) {
+    validateIsoDate(dueDate, 'due date', { min: todayIsoDate() });
+    if (schedule && !['one_time', 'weekly', 'monthly'].includes(schedule.frequency)) {
+      throw new Error('Choose a valid repayment frequency.');
+    }
+  }
   return { numericTotal, numericCredit, numericPaid };
 }
 
 async function recordSaleOnline({ storeId, cart, paymentMethod, total, customerId, creditAmount = 0, paidAmount = total, dueDate, schedule, idempotencyKey }) {
   const authenticatedStoreId = assertStoreId(storeId);
   const { numericTotal, numericCredit, numericPaid } = validateSaleInput({
-    cart, total, creditAmount, paidAmount, customerId, idempotencyKey,
+    cart, total, creditAmount, paidAmount, customerId, idempotencyKey, dueDate, paymentMethod, schedule,
   });
 
   return runTransaction(db, async (transaction) => {
