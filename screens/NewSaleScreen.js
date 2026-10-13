@@ -37,6 +37,15 @@ const BRAND_GREEN = '#004B49'; // solid buttons keep brand green in both themes
 const formatR = (n) => `R ${Number(n || 0).toFixed(2)}`;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Compares a scanned code with a stored product code. Ignores upper/lower case, and for all-digit
+// codes ignores leading zeros, because some phones drop the first zero of a barcode when scanning.
+const sameCode = (stored, scanned) => {
+  const left = String(stored).trim().toLowerCase();
+  const right = String(scanned).trim().toLowerCase();
+  if (left === right) return true;
+  return /^\d+$/.test(left) && /^\d+$/.test(right) && left.replace(/^0+/, '') === right.replace(/^0+/, '');
+};
+
 export default function NewSaleScreen({ route, navigation }) {
   const { colors } = useTheme();
 
@@ -139,10 +148,16 @@ export default function NewSaleScreen({ route, navigation }) {
     setScannerVisible(false);
     setScanError('');
 
-    let productCode = value.trim();
+    let productCode = String(value ?? '').trim();
     try {
       const payload = JSON.parse(productCode);
-      productCode = payload.productId || payload.product_id || payload.sku || payload.barcode || payload.id;
+      // A plain number such as 6009218004040 is valid JSON too, so only unwrap real JSON objects
+      // (QR codes that carry a product payload). Plain barcodes stay exactly as scanned.
+      if (payload && typeof payload === 'object') {
+        productCode = String(
+          payload.productId || payload.product_id || payload.sku || payload.barcode || payload.id || ''
+        ).trim();
+      }
     } catch (err) {}
 
     if (!productCode) {
@@ -155,7 +170,7 @@ export default function NewSaleScreen({ route, navigation }) {
       const product = allProducts.find((item) =>
         [item.id, item.sku, item.barcode, item.product_code]
           .filter(Boolean)
-          .some((identifier) => String(identifier).toLowerCase() === String(productCode).toLowerCase())
+          .some((identifier) => sameCode(identifier, productCode))
       );
 
       if (!product) {
