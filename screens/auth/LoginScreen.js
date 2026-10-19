@@ -50,6 +50,8 @@ export default function LoginScreen({ navigation }) {
   }
 
   return (
+
+    
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
       <KeyboardAvoidingView
         style={styles.keyboardAvoidingView}
@@ -176,10 +178,20 @@ export default function LoginScreen({ navigation }) {
                 <Text style={styles.signupLink}>Create an account</Text>
               </TouchableOpacity>
             </View>
+
+            <TouchableOpacity
+              onPress={() => navigation.navigate("AdminLogin")}
+              disabled={isSubmitting}
+              accessibilityRole="button"
+              style={styles.adminLinkWrap}
+            >
+              <Text style={styles.adminLink}>Admin login</Text>
+            </TouchableOpacity>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+    
   );
 }
 
@@ -351,6 +363,16 @@ function createStyles(colors) {
       color: colors.primary,
       fontSize: 14,
       fontWeight: "700",
+    },
+    adminLinkWrap: {
+      alignSelf: "center",
+      marginTop: 18,
+      padding: 8,
+    },
+    adminLink: {
+      color: colors.primary,
+      fontSize: 14,
+      fontWeight: "600",
     },
   });
 }

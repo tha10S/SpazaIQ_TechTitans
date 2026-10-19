@@ -13,8 +13,11 @@ import { TechTitansAssistant } from '../components/TechTitansAssistant';
 import { watchAuth } from '../services/auth/firebaseAuth';
 import { ensureStoreSeed } from '../services/firestore/seedRepository';
 import { getUserProfile } from '../services/firestore/usersRepository';
+import { isAdminUser } from '../services/admin/adminRepository';
 import LoginScreen from '../screens/auth/LoginScreen';
 import SignupScreen from '../screens/auth/SignupScreen';
+import AdminLoginScreen from '../screens/admin/AdminLoginScreen';
+import AdminDashboardScreen from '../screens/admin/AdminDashboardScreen';
 import Insights from '../screens/dashboard/InsightsScreen';
 import SuppliersOrders from '../screens/dashboard/SuppliersReordersScreen';
 import HomeScreen from '../screens/HomeScreen';
@@ -90,6 +93,8 @@ function AppContent() {
   const [userProfile, setUserProfile] = useState(null);
   const [offlineDemo, setOfflineDemo] = useState(false);
   const [loading, setLoading] = useState(true);
+  // true when the signed-in account has a document in the admins collection
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // Welcome screen: shown once per account, remembered on this device
   const [welcome, setWelcome] = useState({ uid: null, seen: false });
@@ -105,7 +110,8 @@ function AppContent() {
     };
   }, [uid]);
   const welcomeReady = Boolean(uid) && welcome.uid === uid;
-  const showWelcome = welcomeReady && !welcome.seen;
+  // An admin never sees the shop welcome screen
+  const showWelcome = welcomeReady && !welcome.seen && !isAdmin;
   const finishWelcome = () => {
     setWelcome({ uid, seen: true });
     AsyncStorage.setItem(`welcomeSeen:${uid}`, '1').catch(() => {});
@@ -119,6 +125,7 @@ function AppContent() {
       if (!active) return;
       setUser(authenticatedUser);
       setUserProfile(null);
+      setIsAdmin(false);
       setOfflineDemo(false);
       if (!authenticatedUser) {
         setLoading(false);
@@ -144,6 +151,11 @@ function AppContent() {
 
     async function loadProfile() {
       try {
+        // Admin accounts are checked FIRST. An admin has no shop, so no store or profile is created for it.
+        if (await isAdminUser(user.uid)) {
+          if (active) setIsAdmin(true);
+          return;
+        }
         await ensureStoreSeed(user.uid, {
           email: user.email,
           displayName: user.displayName,
@@ -208,6 +220,8 @@ function AppContent() {
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           {offlineDemo ? (
             <Stack.Screen name="OfflineDemo" component={OfflineDemoScreen} />
+          ) : user && isAdmin ? (
+            <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
           ) : user && showWelcome ? (
             <Stack.Screen name="Welcome">
               {() => <WelcomeScreen userName={userName} shopName={shopName} onStart={finishWelcome} />}
@@ -238,6 +252,7 @@ function AppContent() {
                 )}
               />
               <Stack.Screen name="Signup" component={SignupScreen} />
+              <Stack.Screen name="AdminLogin" component={AdminLoginScreen} />
             </>
           )}
           <Stack.Screen
@@ -247,7 +262,7 @@ function AppContent() {
           />
         </Stack.Navigator>
       </NavigationContainer>
-      {((user && welcomeReady && !showWelcome) || offlineDemo) && (
+      {((user && !isAdmin && welcomeReady && !showWelcome) || offlineDemo) && (
         <TechTitansAssistant storeId={storeId} userName={userName} shopName={shopName} />
       )}
     </View>

@@ -9,6 +9,9 @@ import { subscribeProducts } from '../../services/firestore/productsRepository';
 import { subscribeCustomers } from '../../services/firestore/customersRepository';
 import { getForecast } from '../../services/weather/weatherService';
 import { buildShopAdvice, summariseWeather } from '../../services/advice/shopAdvice';
+import { buildShopStats } from '../../services/admin/shopStats';
+import { publishShopStats } from '../../services/admin/shopStatsPublisher';
+import ShopHealthCard from '../../components/ShopHealthCard';
 
 const BRAND_GREEN = "#004B49"; // solid buttons keep brand green in both themes
 
@@ -176,6 +179,13 @@ export default function Insights({ route, navigation }) {
   );
   const weatherSummary = useMemo(() => summariseWeather(weather, new Date()), [weather, dayKey]);
 
+  // Shop-level totals only (no customer names or individual sales). They feed the shop health card
+  // below and are published for the admin area, which can read nothing else about this shop.
+  const shopStats = useMemo(() => buildShopStats({ products, sales, customers }), [products, sales, customers]);
+  useEffect(() => {
+    if (!loading && storeId) publishShopStats(storeId, shopStats);
+  }, [shopStats, loading, storeId]);
+
   const adviceTones = {
     danger: { color: colors.danger, bg: "rgba(220, 38, 38, 0.15)" },
     warning: { color: "#F59E0B", bg: "rgba(245, 158, 11, 0.15)" },
@@ -297,6 +307,9 @@ export default function Insights({ route, navigation }) {
           </View>
         </>
       )}
+
+      {/* How the shop is doing overall, and what to fix first */}
+      <ShopHealthCard stats={shopStats} />
 
       {/* Advice from the weather, the date, and the shop's own stock, sales and credit */}
       <Text style={styles.sectionLabel}>SHOP ADVICE</Text>

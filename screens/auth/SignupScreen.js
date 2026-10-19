@@ -251,6 +251,16 @@ export default function SignupScreen({ navigation }) {
             <Text style={styles.loginLink}>Log In</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Admin login (for the SpazaIQ team) */}
+        <TouchableOpacity
+          onPress={() => navigation.navigate("AdminLogin")}
+          disabled={isSubmitting}
+          accessibilityRole="button"
+          style={styles.adminLinkWrap}
+        >
+          <Text style={styles.adminLink}>Admin login</Text>
+        </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -452,6 +462,19 @@ const styles = StyleSheet.create({
   loginLink: {
     color: "#004B49",
     fontSize: 11,
+    fontWeight: "800",
+  },
+
+  // Admin login link
+  adminLinkWrap: {
+    alignSelf: "center",
+    marginTop: 14,
+    padding: 8,
+  },
+
+  adminLink: {
+    color: "#004B49",
+    fontSize: 14,
     fontWeight: "800",
   },
 });
