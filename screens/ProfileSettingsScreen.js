@@ -23,14 +23,14 @@ import {
   updateUserProfile,
 } from '../services/firestore/usersRepository';
 import { isValidEmail, normalizeEmail, normalizePhoneNumber } from '../services/validation';
+//import ProvincePicker from '../components/ProvincePicker';
 
 const DEFAULT_PROFILE = {
   name: '',
   shopName: '',
   phone: '',
   email: '',
-  location: '',
-  shopRegistration: '',
+  province: '',
 };
 
 const FIELDS = [
@@ -100,8 +100,7 @@ export default function ProfileSettingsScreen() {
           shopName: data.shopName || '',
           phone: data.mobile || '',
           email: auth.currentUser?.email || data.email || '',
-          location: data.location || '',
-          shopRegistration: data.shopRegistration || '',
+          province: data.province || '',
         };
         setProfile(nextProfile);
         if (!isEditingRef.current) setDraft(nextProfile);
@@ -132,6 +131,10 @@ export default function ProfileSettingsScreen() {
       Alert.alert('Invalid phone number', error.message);
       return;
     }
+    if (!draft.province) {
+      Alert.alert('Missing info', 'Select your province.');
+      return;
+    }
     setIsSavingProfile(true);
     try {
       await updateUserProfile(auth.currentUser.uid, {
@@ -139,8 +142,7 @@ export default function ProfileSettingsScreen() {
         shopName: draft.shopName,
         email: profile.email,
         mobile,
-        location: draft.location,
-        shopRegistration: draft.shopRegistration,
+        province: draft.province,
       });
       setProfile({ ...draft, phone: mobile });
       setIsEditing(false);
@@ -310,6 +312,13 @@ export default function ProfileSettingsScreen() {
                 {isEditing ? (
                   <View style={styles.fieldValueWrap}>
                     <Text style={styles.fieldLabel}>{field.label}</Text>
+                    {field.type === 'province' ? (
+                      <ProvincePicker
+                        value={draft.province}
+                        onChange={(v) => updateDraft('province', v)}
+                        theme={{ bg: colors.card, border: colors.border, text: colors.textPrimary, muted: colors.textMuted, primary: colors.primary }}
+                      />
+                    ) : (
                     <TextInput
                       style={styles.fieldInput}
                       value={draft[field.key]}
@@ -321,11 +330,12 @@ export default function ProfileSettingsScreen() {
                       autoComplete={field.key === 'phone' ? 'tel-national' : 'off'}
                       autoCapitalize="sentences"
                     />
+                    )}
                   </View>
                 ) : (
                   <View style={styles.fieldValueWrap}>
                     <Text style={styles.fieldLabel}>{field.label}</Text>
-                    <Text style={styles.fieldValue}>{profile[field.key]}</Text>
+                    <Text style={styles.fieldValue}>{profile[field.key] || (field.type === 'province' ? 'Not set' : '')}</Text>
                   </View>
                 )}
               </View>

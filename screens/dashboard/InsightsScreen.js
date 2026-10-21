@@ -9,13 +9,9 @@ import { subscribeProducts } from '../../services/firestore/productsRepository';
 import { subscribeCustomers } from '../../services/firestore/customersRepository';
 import { getForecast } from '../../services/weather/weatherService';
 import { buildShopAdvice, summariseWeather } from '../../services/advice/shopAdvice';
-import { buildShopStats } from '../../services/admin/shopStats';
-import { publishShopStats } from '../../services/admin/shopStatsPublisher';
-import ShopHealthCard from '../../components/ShopHealthCard';
-
-const BRAND_GREEN = "#004B49"; // solid buttons keep brand green in both themes
 
 function getPeriodData(sales, period) {
+  const allSales = Array.isArray(sales) ? sales : [];
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   let end = new Date(start);
@@ -29,65 +25,33 @@ function getPeriodData(sales, period) {
     start.setDate(1);
     end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
   }
-
-  const filteredSales = sales.filter(
-    (sale) => {
-      const createdAt = sale.createdAt ? new Date(sale.createdAt) : null;
-      return createdAt && !Number.isNaN(createdAt.getTime()) && createdAt >= start && createdAt < end;
-    }
-  );
-
+  const filteredSales = allSales.filter((sale) => {
+    if (!sale.createdAt) return false;
+    const createdAt = toDate(sale.createdAt);
+    return !Number.isNaN(createdAt.getTime()) && createdAt >= start && createdAt < end;
+  });
   const productTotals = new Map();
   let itemsSold = 0;
   let profit = 0;
-
-  filteredSales.forEach((sale) =>
-    (sale.items || []).forEach((item) => {
-      const quantity = Number(item.qty ?? item.quantity ?? 0);
-      const name = item.name || item.productName || "Product";
-      const key = item.id || name;
-      const total = productTotals.get(key) || {
-        name,
-        sold: 0,
-      };
-
-      total.sold += quantity;
-      productTotals.set(key, total);
-      itemsSold += quantity;
-
-      const cost = Number(item.costPrice ?? item.cost_price);
-      const unitPrice = Number(item.unitPrice ?? item.unit_price ?? 0);
-      if (Number.isFinite(cost) && Number.isFinite(unitPrice)) {
-        profit += (unitPrice - cost) * quantity;
-      }
-    })
-  );
-
-  const topProducts = [...productTotals.values()]
-    .sort((left, right) => right.sold - left.sold)
-    .slice(0, 3);
-
-  if (topProducts.length) {
-    const maxProductSales = Math.max(1, ...topProducts.map((item) => item.sold));
-    topProducts.forEach((item) => {
-      item.fill = item.sold / maxProductSales;
-    });
-  }
+  filteredSales.forEach((sale) => (sale.items || []).forEach((item) => {
+    const quantity = Number(item.qty || 0);
+    const key = item.id || item.name;
+    const total = productTotals.get(key) || { name: item.name || 'Product', sold: 0 };
+    total.sold += quantity;
+    productTotals.set(key, total);
+    itemsSold += quantity;
+    const cost = Number(item.costPrice);
+    if (Number.isFinite(cost)) profit += (Number(item.unitPrice || 0) - cost) * quantity;
+  }));
+  const topProducts = [...productTotals.values()].sort((left, right) => right.sold - left.sold).slice(0, 3);
+  const maxProductSales = Math.max(1, ...topProducts.map((item) => item.sold));
+  topProducts.forEach((item) => { item.fill = item.sold / maxProductSales; });
 
   const buckets = period === "Week"
-    ? Array.from({ length: 7 }, (_, index) => ({
-        day: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][index],
-        value: 0,
-      }))
-    : period === "Month"
-      ? Array.from({ length: Math.ceil(now.getDate() / 7) }, (_, index) => ({
-          day: `Week ${index + 1}`,
-          value: 0,
-        }))
-      : [{ day: "Today", value: 0 }];
-
+    ? Array.from({ length: 7 }, (_, index) => ({ day: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][index], value: 0 }))
+    : Array.from({ length: Math.ceil(now.getDate() / 7) }, (_, index) => ({ day: `Week ${index + 1}`, value: 0 }));
   filteredSales.forEach((sale) => {
-    const date = new Date(sale.createdAt);
+    const date = toDate(sale.createdAt);
     const index =
       period === "Week"
         ? (date.getDay() + 6) % 7
@@ -110,6 +74,10 @@ function getPeriodData(sales, period) {
     topProducts,
     filteredSales,
   };
+}
+
+function toDate(value) {
+  return value?.toDate ? value.toDate() : new Date(value);
 }
 
 export default function Insights({ route, navigation }) {
@@ -179,13 +147,6 @@ export default function Insights({ route, navigation }) {
   );
   const weatherSummary = useMemo(() => summariseWeather(weather, new Date()), [weather, dayKey]);
 
-  // Shop-level totals only (no customer names or individual sales). They feed the shop health card
-  // below and are published for the admin area, which can read nothing else about this shop.
-  const shopStats = useMemo(() => buildShopStats({ products, sales, customers }), [products, sales, customers]);
-  useEffect(() => {
-    if (!loading && storeId) publishShopStats(storeId, shopStats);
-  }, [shopStats, loading, storeId]);
-
   const adviceTones = {
     danger: { color: colors.danger, bg: "rgba(220, 38, 38, 0.15)" },
     warning: { color: "#F59E0B", bg: "rgba(245, 158, 11, 0.15)" },
@@ -193,18 +154,13 @@ export default function Insights({ route, navigation }) {
   };
 
   const data = getPeriodData(sales, period);
-  const recentlyPurchased = [...data.filteredSales]
-    .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))
-    .flatMap((sale) =>
-      (sale.items || []).map((item) => ({
-        name: item.name || item.productName || "Product",
-        qty: item.qty ?? item.quantity ?? 0,
-        time: new Date(sale.createdAt).toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      }))
-    )
+  const recentlyPurchased = data.filteredSales
+    .sort((left, right) => toDate(right.createdAt) - toDate(left.createdAt))
+    .flatMap((sale) => (sale.items || []).map((item) => ({
+      name: item.name || 'Product',
+      qty: item.qty,
+      time: toDate(sale.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    })))
     .slice(0, 4);
 
   // Scale chart bars so large rand values don't overflow the chart area
@@ -256,19 +212,17 @@ export default function Insights({ route, navigation }) {
 
       {period !== "Today" && (
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>
-            {period === "Week" ? "Sales by Day" : "Sales by Week"}
-          </Text>
+          <Text style={styles.cardTitle}>Sales by Day of Week</Text>
           <View style={styles.chartRow}>
-            {data.salesByDay.map((day) => (
-              <View key={day.day} style={styles.barColumn}>
+            {data.salesByDay.map((d) => (
+              <View key={d.day} style={styles.barColumn}>
                 <View
                   style={[
                     styles.bar,
-                    { height: day.value ? Math.max(4, (day.value / maxBarValue) * 80) : 0 },
+                    { height: Math.max(4, (d.value / maxBarValue) * 76) },
                   ]}
                 />
-                <Text style={styles.barLabel}>{day.day}</Text>
+                <Text style={styles.barLabel}>{d.day}</Text>
               </View>
             ))}
           </View>
@@ -307,9 +261,6 @@ export default function Insights({ route, navigation }) {
           </View>
         </>
       )}
-
-      {/* How the shop is doing overall, and what to fix first */}
-      <ShopHealthCard stats={shopStats} />
 
       {/* Advice from the weather, the date, and the shop's own stock, sales and credit */}
       <Text style={styles.sectionLabel}>SHOP ADVICE</Text>
@@ -362,11 +313,18 @@ export default function Insights({ route, navigation }) {
         })
       )}
 
-      <Text style={[styles.sectionLabel, styles.topLabel]}>TOP 3 BEST SELLING PRODUCTS</Text>
-      {data.topProducts.length === 0 && !loading ? (
-        <Text style={styles.recentTime}>No products sold in this period.</Text>
-      ) : data.topProducts.map((p, i) => (
-        <View key={`${p.name}-${i}`} style={styles.productCard}>
+      <View style={styles.forecastCard}>
+        <Text style={styles.forecastTitle}>Demand forecast</Text>
+        <Text style={styles.forecastText}>
+          {data.topProducts.length
+            ? `Most sold in this period: ${data.topProducts.map((product) => product.name).join(', ')}.`
+            : 'Record sales to see your best-selling products for this period.'}
+        </Text>
+      </View>
+
+      <Text style={styles.sectionLabel}>TOP 3 BEST SELLING PRODUCTS</Text>
+      {data.topProducts.map((p, i) => (
+        <View key={i} style={styles.productCard}>
           <View>
             <Text style={styles.productName}>{p.name}</Text>
             <Text style={styles.productSold}>{p.sold} sold</Text>
@@ -380,253 +338,248 @@ export default function Insights({ route, navigation }) {
   );
 }
 
-const makeStyles = (colors) =>
-  StyleSheet.create({
-    screen: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
-    content: {
-      padding: 20,
-      paddingBottom: 40,
-    },
-    header: {
-      fontSize: 24,
-      fontWeight: "800",
-      marginBottom: 16,
-      color: colors.textPrimary,
-    },
-    segmentWrap: {
-      flexDirection: "row",
-      backgroundColor: colors.card,
-      borderRadius: 24,
-      padding: 4,
-      marginBottom: 16,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-    segment: {
-      flex: 1,
-      paddingVertical: 8,
-      borderRadius: 20,
-      alignItems: "center",
-    },
-    segmentActive: {
-      backgroundColor: BRAND_GREEN,
-    },
-    segmentText: {
-      color: colors.textMuted,
-      fontWeight: "600",
-    },
-    segmentTextActive: {
-      color: "#FFFFFF",
-    },
-    statsRow: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      marginBottom: 16,
-    },
-    statCard: {
-      flex: 1,
-      backgroundColor: colors.card,
-      borderRadius: 14,
-      padding: 12,
-      marginRight: 8,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-    statLabel: {
-      fontSize: 10,
-      color: colors.textMuted,
-      marginBottom: 4,
-      fontWeight: "600",
-    },
-    statValue: {
-      fontSize: 16,
-      fontWeight: "800",
-      color: colors.textPrimary,
-    },
-    card: {
-      backgroundColor: colors.card,
-      borderRadius: 16,
-      padding: 16,
-      marginBottom: 16,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-    cardTitle: {
-      fontWeight: "800",
-      marginBottom: 16,
-      color: colors.textPrimary,
-    },
-    chartRow: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "flex-end",
-      height: 100,
-    },
-    barColumn: {
-      alignItems: "center",
-      justifyContent: "flex-end",
-      flex: 1,
-    },
-    bar: {
-      width: 10,
-      backgroundColor: colors.primary,
-      borderRadius: 4,
-    },
-    barLabel: {
-      marginTop: 6,
-      fontSize: 12,
-      color: colors.textMuted,
-      fontWeight: "600",
-    },
-    recentRow: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-      paddingBottom: 10,
-      marginBottom: 10,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
-    },
-    recentName: {
-      fontWeight: "700",
-      fontSize: 13,
-      color: colors.textPrimary,
-    },
-    recentTime: {
-      color: colors.textMuted,
-      fontSize: 11,
-      marginTop: 2,
-    },
-    errorText: {
-      color: colors.danger,
-      marginBottom: 12,
-    },
-    recentQty: {
-      fontWeight: "700",
-      color: colors.primary,
-      fontSize: 14,
-    },
-    sectionLabel: {
-      fontSize: 12,
-      color: colors.textMuted,
-      marginBottom: 10,
-      fontWeight: "700",
-    },
-    topLabel: {
-      marginTop: 8,
-    },
+const GREEN = "#004B49";
 
-    /* Shop advice */
-    weatherStrip: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-      backgroundColor: colors.primaryLight,
-      borderRadius: 12,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      marginBottom: 10,
-    },
-    weatherStripText: {
-      flex: 1,
-      fontSize: 12,
-      fontWeight: "600",
-      lineHeight: 17,
-      color: colors.primary,
-    },
-    weatherNote: {
-      marginBottom: 10,
-    },
-    adviceCard: {
-      flexDirection: "row",
-      gap: 12,
-      backgroundColor: colors.card,
-      borderRadius: 14,
-      padding: 14,
-      marginBottom: 10,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-    adviceIcon: {
-      width: 36,
-      height: 36,
-      borderRadius: 10,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    adviceBody: {
-      flex: 1,
-    },
-    adviceTitle: {
-      fontWeight: "700",
-      fontSize: 14,
-      color: colors.textPrimary,
-    },
-    adviceDetail: {
-      fontSize: 13,
-      lineHeight: 19,
-      color: colors.textMuted,
-      marginTop: 3,
-    },
-    adviceAction: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 5,
-      alignSelf: "flex-start",
-      marginTop: 10,
-    },
-    adviceActionText: {
-      fontSize: 13,
-      fontWeight: "700",
-      color: colors.primary,
-    },
-
-    productCard: {
-      backgroundColor: colors.card,
-      borderRadius: 14,
-      padding: 14,
-      marginBottom: 10,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-    productName: {
-      fontWeight: "700",
-      marginBottom: 2,
-      color: colors.textPrimary,
-    },
-    productSold: {
-      color: colors.textMuted,
-      fontSize: 12,
-      marginBottom: 10,
-    },
-    progressTrack: {
-      height: 6,
-      backgroundColor: colors.primaryLight,
-      borderRadius: 3,
-      overflow: "hidden",
-    },
-    progressFill: {
-      height: "100%",
-      backgroundColor: colors.primary,
-    },
-    recentRight: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-    },
-    reverseBtn: {
-      borderWidth: 1,
-      borderColor: colors.danger,
-      borderRadius: 8,
-      paddingVertical: 4,
-      paddingHorizontal: 10,
-    },
-    reverseBtnText: {
-      color: colors.danger,
-      fontSize: 11,
-      fontWeight: "700",
-    },
+function makeStyles(colors) {
+  return StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  content: {
+    padding: 20,
+    paddingBottom: 40,
+  },
+  header: {
+    fontSize: 24,
+    fontWeight: "800",
+    marginBottom: 16,
+    color: colors.textPrimary,
+  },
+  segmentWrap: {
+    flexDirection: "row",
+    backgroundColor: colors.card,
+    borderRadius: 24,
+    padding: 4,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  segment: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 20,
+    alignItems: "center",
+  },
+  segmentActive: {
+    backgroundColor: GREEN,
+  },
+  segmentText: {
+    color: colors.textSecondary,
+    fontWeight: "600",
+  },
+  segmentTextActive: {
+    color: "#fff",
+  },
+  statsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: colors.card,
+    borderRadius: 14,
+    padding: 12,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  statLabel: {
+    fontSize: 10,
+    color: colors.textSecondary,
+    marginBottom: 4,
+    fontWeight: "600",
+  },
+  statValue: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: colors.textPrimary,
+  },
+  card: {
+    backgroundColor: colors.card,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  cardTitle: {
+    fontWeight: "800",
+    marginBottom: 16,
+    color: colors.textPrimary,
+  },
+  chartRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+    height: 100,
+  },
+  barColumn: {
+    alignItems: "center",
+    justifyContent: "flex-end",
+    flex: 1,
+  },
+  bar: {
+    width: 10,
+    backgroundColor: GREEN,
+    borderRadius: 4,
+  },
+  barLabel: {
+    marginTop: 6,
+    fontSize: 12,
+    color: colors.textSecondary,
+    fontWeight: "600",
+  },
+  recentRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingBottom: 10,
+    marginBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
+  },
+  recentName: {
+    fontWeight: "700",
+    fontSize: 13,
+    color: colors.textPrimary,
+  },
+  recentTime: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  recentQty: {
+    fontWeight: "700",
+    color: GREEN,
+    fontSize: 14,
+  },
+  forecastCard: {
+    backgroundColor: "#E6F4F1",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+  },
+  forecastTitle: {
+    color: GREEN,
+    fontWeight: "800",
+    marginBottom: 8,
+  },
+  forecastText: {
+    color: "#374151",
+    lineHeight: 20,
+  },
+  bold: {
+    fontWeight: "700",
+  },
+  sectionLabel: {
+    fontSize: 12,
+    color: "#6B7280",
+    marginBottom: 10,
+    fontWeight: "700",
+  },
+  productCard: {
+    backgroundColor: colors.card,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  productName: {
+    fontWeight: "700",
+    marginBottom: 2,
+    color: colors.textPrimary,
+  },
+  productSold: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    marginBottom: 10,
+  },
+  progressTrack: {
+    height: 6,
+    backgroundColor: "#E6F4F1",
+    borderRadius: 3,
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%",
+    backgroundColor: GREEN,
+  },
+  errorText: {
+    color: colors.danger,
+    marginBottom: 12,
+  },
+  weatherStrip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: colors.primaryLight,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  weatherStripText: {
+    flex: 1,
+    color: colors.textPrimary,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  weatherNote: {
+    marginBottom: 12,
+  },
+  adviceCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 10,
+  },
+  adviceIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  adviceBody: {
+    flex: 1,
+  },
+  adviceTitle: {
+    color: colors.textPrimary,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  adviceDetail: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  adviceAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 10,
+  },
+  adviceActionText: {
+    color: colors.primary,
+    fontWeight: "700",
+    fontSize: 12,
+  },
   });
+}

@@ -15,7 +15,8 @@
       ],
       "expo-asset",
       "expo-image-picker",
-      "expo-font"
+      "expo-font",
+      "@react-native-community/datetimepicker"
     ],
     "ios": {
       "supportsTablet": true
