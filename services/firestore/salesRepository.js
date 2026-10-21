@@ -162,6 +162,9 @@ async function recordSaleOnline({ storeId, cart, paymentMethod, total, customerI
       customerSnapshot = await transaction.get(customerReference);
       if (!customerSnapshot.exists()) throw new Error('Customer account not found.');
       const customerData = customerSnapshot.data();
+      if (customerData.blacklisted) {
+        throw new Error('This customer has been blacklisted and cannot receive more credit.');
+      }
       const balance = Number(customerData.balance ?? 0);
       const limit = Number(customerData.creditLimit ?? 0);
       const overdueByDate = customerData.nextDueDate && new Date(customerData.nextDueDate) < new Date() && balance > 0;
@@ -211,6 +214,9 @@ async function recordSaleOnline({ storeId, cart, paymentMethod, total, customerI
       transaction.update(customerReference, {
         balance: balance + numericCredit,
         nextDueDate: dueDate || null,
+        ...(balance <= 0
+          ? { overdue: false, overdueBalance: 0, interestAppliedAt: null, interestAmount: 0 }
+          : {}),
         updatedAt: serverTimestamp(),
       });
       if (scheduleReference) {

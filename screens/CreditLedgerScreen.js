@@ -155,6 +155,7 @@ export default function CreditLedgerScreen({ route, navigation }) {
   const [customerFormVisible, setCustomerFormVisible] = useState(false);
   const [customerForm, setCustomerForm] = useState({ name: '', phone: '', creditLimit: '' });
   const [customerFormError, setCustomerFormError] = useState('');
+  const [balanceFilter, setBalanceFilter] = useState({ min: '', max: '' });
 
   // Leaving this screen drops a half-finished credit sale, so the banner doesn't linger
   useEffect(() => {
@@ -165,6 +166,16 @@ export default function CreditLedgerScreen({ route, navigation }) {
   }, [navigation]);
 
   const totalOutstanding = customers.reduce((sum, c) => sum + (c.balance || 0), 0);
+  const minBalance = balanceFilter.min.trim() ? Number(balanceFilter.min) : null;
+  const maxBalance = balanceFilter.max.trim() ? Number(balanceFilter.max) : null;
+  const invalidBalanceFilter = minBalance !== null && maxBalance !== null && maxBalance < minBalance;
+  const displayedCustomers = saleDraft || invalidBalanceFilter
+    ? customers
+    : customers.filter((customer) =>
+      (minBalance === null || customer.balance >= minBalance)
+      && (maxBalance === null || customer.balance <= maxBalance)
+    );
+  const hasBalanceFilter = Boolean(balanceFilter.min.trim() || balanceFilter.max.trim());
   const repaymentPeriods = scheduleFrequency === 'monthly'
     ? Number(durationMonths)
     : scheduleFrequency === 'weekly'
@@ -478,16 +489,68 @@ export default function CreditLedgerScreen({ route, navigation }) {
 
         <Text style={styles.sectionTitle}>CUSTOMER BALANCES</Text>
 
-        {customers.length === 0 ? (
+        {!saleDraft && customers.length > 0 && (
+          <View style={styles.balanceFilterCard}>
+            <Text style={styles.balanceFilterTitle}>FILTER BY OUTSTANDING BALANCE</Text>
+            <View style={styles.balanceFilterRow}>
+              <View style={styles.balanceFilterField}>
+                <Text style={styles.balanceFilterLabel}>MIN (R)</Text>
+                <TextInput
+                  style={styles.balanceFilterInput}
+                  value={balanceFilter.min}
+                  onChangeText={(value) => setNumericInput((next) => setBalanceFilter((current) => ({ ...current, min: next })), value, true)}
+                  placeholder="No minimum"
+                  placeholderTextColor={COLORS.textMuted}
+                  keyboardType="decimal-pad"
+                />
+              </View>
+              <View style={styles.balanceFilterField}>
+                <Text style={styles.balanceFilterLabel}>MAX (R)</Text>
+                <TextInput
+                  style={styles.balanceFilterInput}
+                  value={balanceFilter.max}
+                  onChangeText={(value) => setNumericInput((next) => setBalanceFilter((current) => ({ ...current, max: next })), value, true)}
+                  placeholder="No maximum"
+                  placeholderTextColor={COLORS.textMuted}
+                  keyboardType="decimal-pad"
+                />
+              </View>
+              {hasBalanceFilter && (
+                <TouchableOpacity
+                  style={styles.balanceFilterClear}
+                  onPress={() => setBalanceFilter({ min: '', max: '' })}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear balance filter"
+                >
+                  <Ionicons name="close-circle-outline" size={20} color={COLORS.emerald} />
+                </TouchableOpacity>
+              )}
+            </View>
+            {invalidBalanceFilter && (
+              <Text style={styles.balanceFilterError}>Maximum balance must be greater than or equal to minimum.</Text>
+            )}
+          </View>
+        )}
+
+        {displayedCustomers.length === 0 ? (
           <View style={styles.emptyCard}>
             <View style={styles.emptyIconCircle}>
-              <Ionicons name="folder-open-outline" size={32} color={COLORS.emerald} />
+              <Ionicons name={customers.length > 0 ? 'filter-outline' : 'folder-open-outline'} size={32} color={COLORS.emerald} />
             </View>
-            <Text style={styles.emptyText}>No customers on credit yet</Text>
-            <Text style={styles.emptySubtext}>Add a customer to start tracking credit</Text>
+            <Text style={styles.emptyText}>
+              {customers.length > 0 ? 'No customer balances match this filter' : 'No customers on credit yet'}
+            </Text>
+            <Text style={styles.emptySubtext}>
+              {customers.length > 0 ? 'Adjust or clear the balance range.' : 'Add a customer to start tracking credit'}
+            </Text>
+            {customers.length > 0 && (
+              <TouchableOpacity onPress={() => setBalanceFilter({ min: '', max: '' })}>
+                <Text style={styles.balanceFilterClearText}>Clear amount filter</Text>
+              </TouchableOpacity>
+            )}
           </View>
         ) : (
-          customers.map((customer) => {
+          displayedCustomers.map((customer) => {
             const status = STATUS_CONFIG[customer.status] ?? STATUS_CONFIG.good;
             const dueDate = customer.nextDueDate || customer.dueBy;
 
@@ -528,6 +591,11 @@ export default function CreditLedgerScreen({ route, navigation }) {
                       {blockedReason || (dueDate ? `Due by ${dueDate}` : 'No due date set')}
                     </Text>
                   </View>
+                  {customer.balance > 0 && customer.interestAmount > 0 && (
+                    <Text style={styles.customerInterest}>
+                      Includes {formatR(customer.interestAmount)} one-time overdue interest
+                    </Text>
+                  )}
                 </View>
 
                 <View style={styles.customerRight}>
@@ -1053,6 +1121,61 @@ const makeStyles = (COLORS) =>
       marginBottom: 12,
       marginTop: 4,
     },
+    balanceFilterCard: {
+      backgroundColor: COLORS.cardBg,
+      borderWidth: 1,
+      borderColor: COLORS.border,
+      borderRadius: 12,
+      padding: 12,
+      marginBottom: 12,
+    },
+    balanceFilterTitle: {
+      color: COLORS.textMuted,
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 0.7,
+      marginBottom: 8,
+    },
+    balanceFilterRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      gap: 8,
+    },
+    balanceFilterField: {
+      flex: 1,
+    },
+    balanceFilterLabel: {
+      color: COLORS.textMuted,
+      fontSize: 10,
+      fontWeight: '700',
+      marginBottom: 4,
+    },
+    balanceFilterInput: {
+      minHeight: 40,
+      borderWidth: 1,
+      borderColor: COLORS.border,
+      borderRadius: 8,
+      color: COLORS.textDark,
+      backgroundColor: COLORS.bg,
+      paddingHorizontal: 10,
+      fontSize: 13,
+    },
+    balanceFilterClear: {
+      minHeight: 40,
+      justifyContent: 'center',
+      paddingHorizontal: 2,
+    },
+    balanceFilterClearText: {
+      color: COLORS.emerald,
+      fontWeight: '700',
+      fontSize: 12,
+      marginTop: 10,
+    },
+    balanceFilterError: {
+      color: COLORS.danger,
+      fontSize: 11,
+      marginTop: 7,
+    },
     trackerButton: {
       minHeight: 48,
       flexDirection: 'row',
@@ -1159,6 +1282,12 @@ const makeStyles = (COLORS) =>
       fontSize: 12,
       fontWeight: '500',
       color: COLORS.textMuted,
+    },
+    customerInterest: {
+      color: COLORS.danger,
+      fontSize: 10,
+      fontWeight: '600',
+      marginTop: 4,
     },
     customerBlockedText: {
       flexShrink: 1,
