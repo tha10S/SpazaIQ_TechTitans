@@ -161,11 +161,11 @@ export default function HomeScreen({ navigation, route }) {
         <View style={styles.header}>
           <View style={styles.headerMain}>
             <Text style={styles.greeting}>
-              {getGreeting()}{userName ? `, ${userName}` : ''}
+              {getGreeting()}{shopName ? `, ${shopName}` : ''}
             </Text>
-            {shopName ? (
+            {userName ? (
               <View style={styles.shopBadge}>
-                <Text style={styles.shopBadgeText}>{shopName}</Text>
+                <Text style={styles.shopBadgeText}>{userName}</Text>
               </View>
             ) : null}
             <View style={styles.clockRow}>

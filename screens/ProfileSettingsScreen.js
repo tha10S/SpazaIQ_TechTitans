@@ -37,8 +37,8 @@ const FIELDS = [
   { key: 'name', label: 'Full Name', keyboardType: 'default' },
   { key: 'shopName', label: 'Shop Name', keyboardType: 'default' },
   { key: 'phone', label: 'Phone', keyboardType: 'phone-pad' },
-  { key: 'location', label: 'Location', keyboardType: 'default' },
-  { key: 'shopRegistration', label: 'Shop Registration', keyboardType: 'default' },
+  //{ key: 'location', label: 'Location', keyboardType: 'default' },
+  //{ key: 'shopRegistration', label: 'Shop Registration', keyboardType: 'default' },
 ];
 
 const getInitials = (name) =>
