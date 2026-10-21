@@ -9,7 +9,8 @@ import { subscribeProducts } from '../services/firestore/productsRepository';
 import { subscribeSales } from '../services/firestore/salesRepository';
 import { buildHomeFeed, countNeedsAttention } from '../services/feed/homeFeed';
 import { OfflineSyncNotice } from '../components/OfflineSyncNotice';
-
+import { subscribeUserProfile } from '../services/firestore/usersRepository';
+import { auth } from '../services/firebase/firebaseConfig';
 // Shop location isn't stored yet, so weather is for Johannesburg.
 const WEATHER_URL =
   'https://api.open-meteo.com/v1/forecast?latitude=-26.2041&longitude=28.0473&current=temperature_2m,weather_code&timezone=auto';
@@ -149,8 +150,26 @@ export default function HomeScreen({ navigation, route }) {
   // Opens the scanner; the scanned code is handed to Sell, which adds the product to the cart.
   const openScanner = () => navigation.navigate('Scanner', { returnTo: 'Sell' });
 
-  const userName = route?.params?.userName;
-  const shopName = route?.params?.shopName;
+  // Start from the params passed at login, then follow the saved profile so edits show up immediately.
+const [userName, setUserName] = useState(route?.params?.userName);
+const [shopName, setShopName] = useState(route?.params?.shopName);
+useEffect(() => {
+  const userId = auth.currentUser?.uid;
+  if (!userId) return undefined; // offline demo: keep the params
+  try {
+    return subscribeUserProfile(
+      userId,
+      (data) => {
+        if (!data) return;
+        if (data.fullName || data.displayName) setUserName(data.fullName || data.displayName);
+        if (data.shopName) setShopName(data.shopName);
+      },
+      () => {}
+    );
+  } catch (error) {
+    return undefined;
+  }
+}, []);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -161,11 +180,11 @@ export default function HomeScreen({ navigation, route }) {
         <View style={styles.header}>
           <View style={styles.headerMain}>
             <Text style={styles.greeting}>
-              {getGreeting()}{userName ? `, ${userName}` : ''}
+              {getGreeting()}{shopName ? `, ${shopName}` : ''}.
             </Text>
-            {shopName ? (
+            {userName ? (
               <View style={styles.shopBadge}>
-                <Text style={styles.shopBadgeText}>{shopName}</Text>
+                <Text style={styles.shopBadgeText}>{userName}</Text>
               </View>
             ) : null}
             <View style={styles.clockRow}>
