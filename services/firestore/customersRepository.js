@@ -5,8 +5,9 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
-  setDoc,
+  where,
 } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath } from './paths';
@@ -39,17 +40,22 @@ function applyPendingBalances(customers, operations) {
   });
 }
 
+function activeCustomers(customers) {
+  return customers.filter((customer) => !customer.blacklisted);
+}
+
 export async function fetchCustomers(storeId) {
   const authenticatedStoreId = assertStoreId(storeId);
   try {
     const snapshot = await getDocs(query(customersCollection(authenticatedStoreId), orderBy('name')));
-    const customers = snapshot.docs.map(mapCustomer);
+    const customers = activeCustomers(snapshot.docs.map(mapCustomer));
     await savePosCreditSnapshot(authenticatedStoreId, 'customers', customers);
     return applyPendingBalances(customers, await getOfflineOperations(authenticatedStoreId));
   } catch (error) {
     if (!isNetworkError(error)) throw error;
-    const customers = await readPosCreditSnapshot(authenticatedStoreId, 'customers');
-    if (!Array.isArray(customers)) throw error;
+    const cachedCustomers = await readPosCreditSnapshot(authenticatedStoreId, 'customers');
+    if (!Array.isArray(cachedCustomers)) throw error;
+    const customers = activeCustomers(cachedCustomers);
     return applyPendingBalances(customers, await getOfflineOperations(authenticatedStoreId));
   }
 }
@@ -68,14 +74,14 @@ export function subscribeCustomers(storeId, onData, onError) {
       if (cachedCustomers !== null && !Array.isArray(cachedCustomers)) {
         throw new Error('The saved offline customer list is invalid.');
       }
-      if (active && cachedCustomers) publishCustomers(cachedCustomers);
+      if (active && cachedCustomers) publishCustomers(activeCustomers(cachedCustomers));
     } catch (error) {
       if (active) onError(error);
     }
     if (!active) return;
     unsubscribeQueue = subscribeOfflineOperations(authenticatedStoreId, (operations) => {
       queuedOperations = operations;
-      if (active && cachedCustomers) publishCustomers(cachedCustomers);
+      if (active && cachedCustomers) publishCustomers(activeCustomers(cachedCustomers));
     }, onError);
     unsubscribe = onSnapshot(query(customersCollection(authenticatedStoreId), orderBy('name')), (snapshot) => {
       if (snapshot.metadata.fromCache && cachedCustomers?.length) return;
@@ -85,9 +91,9 @@ export function subscribeCustomers(storeId, onData, onError) {
         savePosCreditSnapshot(authenticatedStoreId, 'customers', customers).catch(onError);
       }
       cachedCustomers = customers;
-      publishCustomers(customers);
+      publishCustomers(activeCustomers(customers));
     }, (error) => {
-      if (cachedCustomers) publishCustomers(cachedCustomers);
+      if (cachedCustomers) publishCustomers(activeCustomers(cachedCustomers));
       onError(error);
     });
   };
@@ -111,16 +117,32 @@ export async function createCustomer(storeId, input) {
   const creditLimit = parseNonNegativeNumber(input.creditLimit || '0', 'credit limit');
 
   const reference = doc(customersCollection(authenticatedStoreId));
-  await setDoc(reference, {
-    storeId: authenticatedStoreId,
-    name,
-    phone,
-    creditLimit,
-    balance: 0,
-    overdue: false,
-    overdueBalance: 0,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
+  try {
+    await runTransaction(db, async (transaction) => {
+      const matches = await transaction.get(query(customersCollection(authenticatedStoreId), where('phone', '==', phone)));
+      const matchingCustomers = matches.docs.map((snapshot) => snapshot.data());
+      if (matchingCustomers.some((customer) => customer.blacklisted)) {
+        throw new Error('This customer has been blacklisted and cannot be added again.');
+      }
+      if (matchingCustomers.length > 0) throw new Error('A customer with this phone number already exists.');
+
+      transaction.set(reference, {
+        storeId: authenticatedStoreId,
+        name,
+        phone,
+        creditLimit,
+        balance: 0,
+        overdue: false,
+        overdueBalance: 0,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (isNetworkError(error)) {
+      throw new Error('Connect to the internet to verify this customer before adding them.');
+    }
+    throw error;
+  }
   return reference.id;
 }

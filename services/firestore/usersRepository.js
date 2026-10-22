@@ -1,3 +1,4 @@
+
 import { doc, getDoc, onSnapshot, runTransaction, serverTimestamp, updateDoc } from 'firebase/firestore';
 import {
   EmailAuthProvider,
@@ -9,6 +10,7 @@ import {
 } from 'firebase/auth';
 import { auth, db } from '../firebase/firebaseConfig';
 import { assertValidPassword, isValidEmail, normalizeEmail, normalizePhoneNumber } from '../validation';
+
 
 function assertCurrentUser(userId) {
   const authenticatedUserId = auth.currentUser?.uid;
@@ -72,6 +74,7 @@ export async function updateUserProfile(userId, changes) {
   if (!fullName || !shopName) throw new Error('Name and shop name are required.');
   if (!isValidEmail(email)) throw new Error('Enter a valid email address.');
   const mobile = normalizePhoneNumber(changes.mobile, { required: true });
+  const province = normalizeProvince(changes.province, { required: true });
 
   const profileRef = userReference(userId);
   const storeRef = doc(db, 'stores', userId);
@@ -91,8 +94,7 @@ export async function updateUserProfile(userId, changes) {
       shopName,
       email,
       mobile,
-      location: String(changes.location || '').trim(),
-      shopRegistration: String(changes.shopRegistration || '').trim(),
+      province,
       updatedAt: serverTimestamp(),
     });
     transaction.update(storeRef, {

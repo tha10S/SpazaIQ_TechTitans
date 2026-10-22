@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"name": "scripts",
+			"path": "../../../../Downloads/spazaiq_csv_insights/spazaiq_csv_insights/scripts"
+		},
+		{
+			"name": "data",
+			"path": "../../../../Downloads/spazaiq_csv_insights/spazaiq_csv_insights/data"
+		},
+		{
+			"name": "SpazaIQ_TechTitans",
+			"path": ".."
+		}
+	],
+	"settings": {}
+}

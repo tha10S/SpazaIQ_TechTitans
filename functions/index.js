@@ -1,7 +1,9 @@
 const admin = require('firebase-admin');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { onDocumentDeleted } = require('firebase-functions/v2/firestore');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 const functionsV1 = require('firebase-functions/v1');
+const { calculateOverdueInterest, getOverduePolicy } = require('./creditPolicy');
 
 admin.initializeApp();
 
@@ -15,6 +17,17 @@ function userReference(userId) {
 
 function storeReference(storeId) {
   return db.collection('stores').doc(storeId);
+}
+
+function johannesburgToday() {
+  const dateParts = new Intl.DateTimeFormat('en', {
+    timeZone: 'Africa/Johannesburg',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const date = Object.fromEntries(dateParts.map(({ type, value }) => [type, value]));
+  return new Date(Date.UTC(Number(date.year), Number(date.month) - 1, Number(date.day)));
 }
 
 async function deleteAuthUserIfPresent(userId) {
@@ -120,3 +133,91 @@ exports.deleteStoreWhenAuthUserIsDeleted = functionsV1
     const profileSnapshot = await profileRef.get();
     if (profileSnapshot.exists) await profileRef.delete();
   });
+
+exports.applyOverdueCreditPolicy = onSchedule(
+  { schedule: 'every day 00:05', timeZone: 'Africa/Johannesburg', region, timeoutSeconds: 540 },
+  async () => {
+    const batchSize = 300;
+    const transactionConcurrency = 20;
+    let lastDocument = null;
+    let processed = 0;
+    const today = johannesburgToday();
+
+    const applyCustomerPolicy = async (customerSnapshot) => {
+      const customerReference = customerSnapshot.ref;
+      await db.runTransaction(async (transaction) => {
+        const currentSnapshot = await transaction.get(customerReference);
+        if (!currentSnapshot.exists) return;
+        const customer = currentSnapshot.data();
+        if (customer.blacklisted) return;
+
+        const balance = Number(customer.balance ?? 0);
+        const policy = getOverduePolicy({
+          dueDate: customer.nextDueDate,
+          balance,
+          interestAppliedAt: customer.interestAppliedAt,
+          now: today,
+        });
+        if (policy.overdueDays === 0) return;
+
+        const updates = {
+          overdue: true,
+          overdueBalance: balance,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+        let updatedBalance = balance;
+        if (policy.applyInterest) {
+          const interestAmount = calculateOverdueInterest(balance);
+          updatedBalance += interestAmount;
+          if (interestAmount > 0) {
+            const storeId = customerReference.parent.parent.id;
+            const interestEntry = db.collection('stores').doc(storeId)
+              .collection('creditTransactions').doc();
+            transaction.set(interestEntry, {
+              storeId,
+              customerId: customerReference.id,
+              type: 'interest',
+              amount: interestAmount,
+              dueDate: customer.nextDueDate,
+              note: 'One-time 5% interest for overdue credit',
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+          updates.balance = updatedBalance;
+          updates.overdueBalance = updatedBalance;
+          updates.interestAmount = interestAmount;
+          updates.interestAppliedAt = admin.firestore.FieldValue.serverTimestamp();
+        }
+
+        if (policy.blacklist) {
+          updates.blacklisted = true;
+          updates.blacklistedAt = admin.firestore.FieldValue.serverTimestamp();
+          updates.blacklistReason = 'Unpaid credit remained overdue for 60 days.';
+          updates.blacklistedDueDate = customer.nextDueDate;
+        }
+        transaction.update(customerReference, updates);
+      });
+      processed += 1;
+    };
+
+    while (true) {
+      let customersQuery = db.collectionGroup('customers')
+        .where('balance', '>', 0)
+        .limit(batchSize);
+      if (lastDocument) customersQuery = customersQuery.startAfter(lastDocument);
+      const snapshot = await customersQuery.get();
+      if (snapshot.empty) break;
+
+      for (let offset = 0; offset < snapshot.docs.length; offset += transactionConcurrency) {
+        await Promise.all(snapshot.docs
+          .slice(offset, offset + transactionConcurrency)
+          .map(applyCustomerPolicy));
+      }
+
+      lastDocument = snapshot.docs[snapshot.docs.length - 1];
+      if (snapshot.size < batchSize) break;
+    }
+
+    console.info('Applied overdue credit policy', { processed });
+  }
+);

@@ -53,6 +53,10 @@ function applyPendingBalances(customers, operations) {
   });
 }
 
+function activeCustomers(customers) {
+  return customers.filter((customer) => !customer.blacklisted);
+}
+
 function pendingLedgerEntries(operations) {
   return operations
     .filter((operation) => operation.status !== 'failed')
@@ -110,13 +114,14 @@ export async function fetchCustomerBalances(storeId) {
   const authenticatedStoreId = assertStoreId(storeId);
   try {
     const snapshot = await getDocs(query(customersCollection(authenticatedStoreId), orderBy('name')));
-    const customers = snapshot.docs.map(mapCustomer);
+    const customers = activeCustomers(snapshot.docs.map(mapCustomer));
     await savePosCreditSnapshot(authenticatedStoreId, 'customers', customers);
     return applyPendingBalances(customers, await getOfflineOperations(authenticatedStoreId));
   } catch (error) {
     if (!isNetworkError(error)) throw error;
-    const customers = await readPosCreditSnapshot(authenticatedStoreId, 'customers');
-    if (!Array.isArray(customers)) throw error;
+    const cachedCustomers = await readPosCreditSnapshot(authenticatedStoreId, 'customers');
+    if (!Array.isArray(cachedCustomers)) throw error;
+    const customers = activeCustomers(cachedCustomers);
     return applyPendingBalances(customers, await getOfflineOperations(authenticatedStoreId));
   }
 }
@@ -128,7 +133,9 @@ export function subscribeCustomerBalances(storeId, onData, onError) {
   let queuedOperations = [];
   let unsubscribeSnapshot = () => {};
   let unsubscribeQueue = () => {};
-  const publishCustomers = (customers) => onData(applyPendingBalances(customers, queuedOperations));
+  const publishCustomers = (customers) => onData(
+    applyPendingBalances(activeCustomers(customers), queuedOperations)
+  );
   const start = async () => {
     try {
       cachedCustomers = await readPosCreditSnapshot(authenticatedStoreId, 'customers');
@@ -196,7 +203,7 @@ export async function fetchRepaymentTrackerData(storeId) {
       getDocs(query(ledgerCollection(authenticatedStoreId), orderBy('createdAt', 'desc'))),
     ]);
     const data = {
-      customers: customersSnapshot.docs.map(mapCustomer),
+      customers: activeCustomers(customersSnapshot.docs.map(mapCustomer)),
       schedules: schedulesSnapshot.docs.map((snapshot) => {
         const schedule = snapshot.data();
         return {
@@ -388,9 +395,23 @@ async function addCreditTransactionOnline(input) {
       : doc(db, ...storeCollectionPath(authenticatedStoreId, 'customers'), customerId);
     const customerSnapshot = await transaction.get(customer);
     if (customerId !== 'new' && !customerSnapshot.exists()) throw new Error('Customer account not found.');
+    if (customerId === 'new') {
+      const matches = await transaction.get(query(
+        customersCollection(authenticatedStoreId),
+        where('phone', '==', newCustomerData.phone)
+      ));
+      const matchingCustomers = matches.docs.map((snapshot) => snapshot.data());
+      if (matchingCustomers.some((customer) => customer.blacklisted)) {
+        throw new Error('This customer has been blacklisted and cannot be added again.');
+      }
+      if (matchingCustomers.length > 0) throw new Error('A customer with this phone number already exists.');
+    }
     const customerData = customerSnapshot.exists()
       ? customerSnapshot.data()
       : { ...newCustomerData, balance: 0, creditLimit: newCustomerData?.creditLimit ?? 0 };
+    if (customerData.blacklisted) {
+      throw new Error('This customer has been blacklisted and cannot receive more credit.');
+    }
     const balance = Number(customerData.balance ?? 0);
     const creditLimit = Number(customerData.creditLimit ?? 0);
     const overdueByDate = customerData.nextDueDate && new Date(customerData.nextDueDate) < new Date() && balance > 0;
@@ -422,6 +443,7 @@ async function addCreditTransactionOnline(input) {
       overdueBalance: 0,
       balance: balance + numericAmount,
       nextDueDate: dueDate || null,
+      ...(balance <= 0 ? { interestAppliedAt: null, interestAmount: 0 } : {}),
       updatedAt: serverTimestamp(),
     }, { merge: true });
     if (scheduleReference) {

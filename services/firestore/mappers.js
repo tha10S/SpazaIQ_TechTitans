@@ -36,6 +36,9 @@ export function mapCustomer(snapshot) {
     nextDueDate,
     overdue,
     overdueBalance: overdue ? Number(data.overdueBalance ?? balance) : 0,
+    interestAmount: Number(data.interestAmount ?? 0),
+    blacklisted: Boolean(data.blacklisted),
+    blacklistedAt: timestampToIso(data.blacklistedAt),
     status: overdue ? 'at_risk' : balance > 0 ? 'fair' : 'good',
   };
 }

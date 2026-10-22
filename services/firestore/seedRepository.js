@@ -32,6 +32,7 @@ export async function ensureStoreSeed(storeId, profile = {}) {
       displayName,
       mobile: profile.mobile || existingUser.mobile || '',
       shopName,
+      province: profile.province || existingUser.province || '',
       defaultStoreId: authenticatedStoreId,
       createdAt: existingUser.createdAt || serverTimestamp(),
       updatedAt: serverTimestamp(),

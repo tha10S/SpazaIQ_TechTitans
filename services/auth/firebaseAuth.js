@@ -11,7 +11,11 @@ import {
 
 import { auth } from "../firebase/firebaseConfig";
 import { ensureStoreSeed } from '../firestore/seedRepository';
+
 import { assertValidPassword, isValidEmail, normalizeEmail, normalizePhoneNumber } from '../validation';
+
+//import { normalizeProvince } from '../provinces';
+
 
 export async function signUp(email, password, profile = {}) {
   const normalizedEmail = normalizeEmail(email);
@@ -24,6 +28,7 @@ export async function signUp(email, password, profile = {}) {
     ...profile,
     fullName,
     shopName,
+    province: normalizeProvince(profile.province, { required: true }),
     mobile: normalizePhoneNumber(profile.mobile, { required: true }),
   };
   const cred = await createUserWithEmailAndPassword(auth, normalizedEmail, password);

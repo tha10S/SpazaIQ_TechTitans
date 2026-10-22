@@ -23,7 +23,9 @@ import {
   updateLoginCredentials,
   updateUserProfile,
 } from '../services/firestore/usersRepository';
+
 import { getPasswordError, isValidEmail, normalizeEmail, normalizePhoneNumber } from '../services/validation';
+
 //import ProvincePicker from '../components/ProvincePicker';
 
 import { KEYBOARD_BEHAVIOR } from '../components/keyboard';
