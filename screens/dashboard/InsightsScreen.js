@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../config/ThemeContext";
@@ -9,11 +9,24 @@ import { subscribeProducts } from '../../services/firestore/productsRepository';
 import { subscribeCustomers } from '../../services/firestore/customersRepository';
 import { getForecast } from '../../services/weather/weatherService';
 import { buildShopAdvice, summariseWeather } from '../../services/advice/shopAdvice';
+import { reverseSale } from '../../services/firestore/saleReversal';
 import { buildShopStats } from '../../services/admin/shopStats';
 import { publishShopStats } from '../../services/admin/shopStatsPublisher';
 import ShopHealthCard from '../../components/ShopHealthCard';
 
 const BRAND_GREEN = "#004B49"; // solid buttons keep brand green in both themes
+
+// Chart bar colours: good, average and below-average days or weeks
+const BAR_GOOD = "#10B981";
+const BAR_AVERAGE = "#F59E0B";
+const BAR_BAD = "#DC2626";
+
+// Short rand amounts so the numbers fit above a thin bar: R850, R1.2k, R12k
+function shortRand(value) {
+  const amount = Math.round(Number(value) || 0);
+  if (amount < 1000) return `R${amount}`;
+  return `R${(amount / 1000).toFixed(amount >= 10000 ? 0 : 1)}k`;
+}
 
 function getPeriodData(sales, period) {
   const now = new Date();
@@ -125,6 +138,8 @@ export default function Insights({ route, navigation }) {
   const [weatherFailed, setWeatherFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [salesError, setSalesError] = useState(null);
+  const [reversingId, setReversingId] = useState(null);
+  const [reverseNotice, setReverseNotice] = useState(null); // { ok, text }
   const storeId = route?.params?.storeId || getAuthenticatedStoreId();
 
   useEffect(() => {
@@ -193,22 +208,73 @@ export default function Insights({ route, navigation }) {
   };
 
   const data = getPeriodData(sales, period);
-  const recentlyPurchased = [...data.filteredSales]
+  // Today's most recent sales, one row per sale, so a whole purchase can be reversed at once
+  const recentSales = [...data.filteredSales]
     .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))
-    .flatMap((sale) =>
-      (sale.items || []).map((item) => ({
-        name: item.name || item.productName || "Product",
-        qty: item.qty ?? item.quantity ?? 0,
-        time: new Date(sale.createdAt).toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      }))
-    )
-    .slice(0, 4);
+    .slice(0, 5)
+    .map((sale) => ({
+      id: sale.id,
+      pendingSync: Boolean(sale.pendingSync),
+      total: Number(sale.total || 0),
+      method: String(sale.paymentMethod || "").replace(/^./, (letter) => letter.toUpperCase()),
+      time: new Date(sale.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      lines: (sale.items || []).map(
+        (item) => `${item.name || item.productName || "Product"} ×${item.qty ?? item.quantity ?? 0}`
+      ),
+    }));
+
+  const runReverse = async (sale) => {
+    setReversingId(sale.id);
+    setReverseNotice(null);
+    try {
+      const result = await reverseSale(storeId, sale.id, { reason: "Reversed from Insights" });
+      const extra = result.creditReversed > 0 ? ` R${result.creditReversed.toFixed(2)} of credit was taken off the customer.` : "";
+      const missing = result.skipped.length ? ` ${result.skipped.join(", ")} no longer exists in Stock, so it was not restocked.` : "";
+      setReverseNotice({ ok: true, text: `Sale reversed. Stock was put back.${extra}${missing}` });
+    } catch (error) {
+      const offline = String(error?.code || error?.message || "").includes("unavailable");
+      setReverseNotice({
+        ok: false,
+        text: offline
+          ? "You need an internet connection to reverse a sale."
+          : error?.code === "permission-denied"
+            ? "The security rules refused this. Sign in again and try once more."
+            : error?.message || "The sale could not be reversed.",
+      });
+    } finally {
+      setReversingId(null);
+    }
+  };
+
+  // Alert.alert shows nothing on web, so use the browser's confirm there
+  const confirmReverse = (sale) => {
+    const message = `Reverse this R${sale.total.toFixed(2)} sale? The items go back into Stock${sale.method === "Credit" ? " and the credit is taken off the customer" : ""}.`;
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      if (window.confirm(message)) runReverse(sale);
+      return;
+    }
+    Alert.alert("Reverse sale", message, [
+      { text: "Keep sale", style: "cancel" },
+      { text: "Reverse", style: "destructive", onPress: () => runReverse(sale) },
+    ]);
+  };
 
   // Scale chart bars so large rand values don't overflow the chart area
   const maxBarValue = Math.max(1, ...data.salesByDay.map((d) => d.value));
+
+  // Colour each bar against the average of the days (or weeks) that had sales:
+  // green is clearly above it, yellow is around it, red is well below it. Zero sales stays an empty bar.
+  const sellingBars = data.salesByDay.filter((d) => d.value > 0);
+  const barAverage = sellingBars.length
+    ? sellingBars.reduce((sum, d) => sum + d.value, 0) / sellingBars.length
+    : 0;
+  const barColor = (value) => {
+    if (!value || !barAverage) return colors.primary;
+    const ratio = value / barAverage;
+    if (ratio >= 1.1) return BAR_GOOD;
+    if (ratio >= 0.7) return BAR_AVERAGE;
+    return BAR_BAD;
+  };
 
   return (
     <ScrollView
@@ -262,16 +328,32 @@ export default function Insights({ route, navigation }) {
           <View style={styles.chartRow}>
             {data.salesByDay.map((day) => (
               <View key={day.day} style={styles.barColumn}>
+                {day.value > 0 ? <Text style={styles.barValue}>{shortRand(day.value)}</Text> : null}
                 <View
                   style={[
                     styles.bar,
-                    { height: day.value ? Math.max(4, (day.value / maxBarValue) * 80) : 0 },
+                    {
+                      height: day.value ? Math.max(4, (day.value / maxBarValue) * 80) : 0,
+                      backgroundColor: barColor(day.value),
+                    },
                   ]}
                 />
                 <Text style={styles.barLabel}>{day.day}</Text>
               </View>
             ))}
           </View>
+
+          <View style={styles.legendRow}>
+            {[[BAR_GOOD, "Good"], [BAR_AVERAGE, "Average"], [BAR_BAD, "Below average"]].map(([color, label]) => (
+              <View key={label} style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: color }]} />
+                <Text style={styles.legendText}>{label}</Text>
+              </View>
+            ))}
+          </View>
+          <Text style={styles.legendNote}>
+            Compared with your average {period === "Week" ? "day" : "week"} that had sales. No bar means no sales.
+          </Text>
         </View>
       )}
 
@@ -281,28 +363,50 @@ export default function Insights({ route, navigation }) {
           <View style={styles.card}>
             {loading ? (
               <Text style={styles.recentTime}>Loading sales...</Text>
-            ) : recentlyPurchased.length === 0 ? (
+            ) : recentSales.length === 0 ? (
               <Text style={styles.recentTime}>No sales recorded today.</Text>
             ) : (
-              recentlyPurchased.map((item, index) => (
-                <View
-                  key={`${item.name}-${item.time}-${index}`}
-                  style={[
-                    styles.recentRow,
-                    index === recentlyPurchased.length - 1 && {
-                      marginBottom: 0,
-                      paddingBottom: 0,
-                      borderBottomWidth: 0,
-                    },
-                  ]}
-                >
-                  <View>
-                    <Text style={styles.recentName}>{item.name}</Text>
-                    <Text style={styles.recentTime}>{item.time}</Text>
+              <>
+                {reverseNotice ? (
+                  <Pressable onPress={() => setReverseNotice(null)}>
+                    <Text style={[styles.reverseNotice, { color: reverseNotice.ok ? colors.primary : colors.danger }]}>
+                      {reverseNotice.text}
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {recentSales.map((sale, index) => (
+                  <View
+                    key={sale.id}
+                    style={[
+                      styles.recentRow,
+                      index === recentSales.length - 1 && {
+                        marginBottom: 0,
+                        paddingBottom: 0,
+                        borderBottomWidth: 0,
+                      },
+                    ]}
+                  >
+                    <View style={styles.recentLeft}>
+                      <Text style={styles.recentName}>{sale.lines.join(", ") || "Sale"}</Text>
+                      <Text style={styles.recentTime}>
+                        {sale.time}{sale.method ? ` · ${sale.method}` : ""}{sale.pendingSync ? " · waiting to sync" : ""}
+                      </Text>
+                    </View>
+                    <View style={styles.recentRight}>
+                      <Text style={styles.recentQty}>R{sale.total.toFixed(2)}</Text>
+                      <Pressable
+                        style={[styles.reverseBtn, (sale.pendingSync || reversingId) && { opacity: 0.4 }]}
+                        disabled={sale.pendingSync || Boolean(reversingId)}
+                        onPress={() => confirmReverse(sale)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Reverse the sale of R${sale.total.toFixed(2)}`}
+                      >
+                        <Text style={styles.reverseBtnText}>{reversingId === sale.id ? "Reversing..." : "Reverse"}</Text>
+                      </Pressable>
+                    </View>
                   </View>
-                  <Text style={styles.recentQty}>×{item.qty}</Text>
-                </View>
-              ))
+                ))}
+              </>
             )}
           </View>
         </>
@@ -463,7 +567,7 @@ const makeStyles = (colors) =>
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "flex-end",
-      height: 100,
+      height: 124,
     },
     barColumn: {
       alignItems: "center",
@@ -471,9 +575,42 @@ const makeStyles = (colors) =>
       flex: 1,
     },
     bar: {
-      width: 10,
+      width: 16,
       backgroundColor: colors.primary,
       borderRadius: 4,
+    },
+    barValue: {
+      fontSize: 10,
+      fontWeight: "700",
+      color: colors.textPrimary,
+      marginBottom: 3,
+    },
+    legendRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 14,
+      marginTop: 14,
+    },
+    legendItem: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+    },
+    legendDot: {
+      width: 9,
+      height: 9,
+      borderRadius: 5,
+    },
+    legendText: {
+      fontSize: 11,
+      fontWeight: "600",
+      color: colors.textMuted,
+    },
+    legendNote: {
+      fontSize: 11,
+      color: colors.textMuted,
+      marginTop: 6,
+      lineHeight: 15,
     },
     barLabel: {
       marginTop: 6,
@@ -612,10 +749,20 @@ const makeStyles = (colors) =>
       height: "100%",
       backgroundColor: colors.primary,
     },
+    recentLeft: {
+      flex: 1,
+      paddingRight: 10,
+    },
     recentRight: {
       flexDirection: "row",
       alignItems: "center",
       gap: 10,
+    },
+    reverseNotice: {
+      fontSize: 12,
+      fontWeight: "600",
+      lineHeight: 17,
+      marginBottom: 12,
     },
     reverseBtn: {
       borderWidth: 1,

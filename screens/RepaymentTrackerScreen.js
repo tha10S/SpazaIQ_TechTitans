@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   SafeAreaView,
@@ -20,6 +21,7 @@ import { buildRepaymentTracker } from '../services/repaymentTracker';
 import { OfflineSyncNotice } from '../components/OfflineSyncNotice';
 import { isValidDecimalInput, todayIsoDate, validateIsoDate } from '../services/validation';
 
+import { KEYBOARD_BEHAVIOR } from '../components/keyboard';
 const PAYMENT_METHODS = ['Cash', 'EFT', 'Card'];
 const STATUS_STYLES = {
   Cleared: { color: '#047857', backgroundColor: '#D1FAE5', icon: 'checkmark-circle' },
@@ -273,7 +275,7 @@ export default function RepaymentTrackerScreen({ route }) {
       </ScrollView>
 
       <Modal visible={Boolean(activeCustomer)} transparent animationType="slide" onRequestClose={() => !saving && setActiveCustomer(null)}>
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={KEYBOARD_BEHAVIOR}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
               <View style={styles.modalHeading}>
@@ -340,7 +342,7 @@ export default function RepaymentTrackerScreen({ route }) {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

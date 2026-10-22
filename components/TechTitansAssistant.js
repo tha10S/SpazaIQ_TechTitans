@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Speech from 'expo-speech';
 import { answerSpazaIQQuestion } from '../services/assistant/assistantService';
 
+import { KEYBOARD_BEHAVIOR } from './keyboard';
 const QUICK_PROMPTS = [
   'How much did I sell today?',
   'What stock is running low?',
@@ -151,7 +152,7 @@ export function TechTitansAssistant({ storeId, userName, shopName }) {
         <SafeAreaView style={styles.overlay} edges={['top', 'bottom']}>
           <KeyboardAvoidingView
             style={styles.keyboardLayer}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            behavior={KEYBOARD_BEHAVIOR}
           >
             <View style={styles.sheet}>
               <View style={styles.sheetHandle} />

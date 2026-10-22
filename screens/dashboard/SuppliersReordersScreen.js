@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../config/ThemeContext";
@@ -17,6 +17,7 @@ import {
 import { normalizePhoneNumber, parseNonNegativeNumber } from "../../services/validation";
 import { openWhatsApp, supplierOrderMessage } from "../../services/whatsapp";
 
+import { KEYBOARD_BEHAVIOR } from "../../components/keyboard";
 const BRAND_GREEN = "#004B49"; // solid buttons keep brand green in both themes
 const WHATSAPP_GREEN = "#25D366";
 
@@ -93,8 +94,9 @@ export default function SuppliersAndReorders({ route }) {
   }, [notice]);
 
   return (
+    <KeyboardAvoidingView style={styles.screen} behavior={KEYBOARD_BEHAVIOR}>
     <ScrollView
-      style={styles.screen}
+      style={{ flex: 1 }}
       contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}
       keyboardShouldPersistTaps="handled"
     >
@@ -158,6 +160,7 @@ export default function SuppliersAndReorders({ route }) {
         />
       )}
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

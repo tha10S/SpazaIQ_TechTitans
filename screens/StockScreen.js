@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   TextInput,
   Modal,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,6 +17,7 @@ import { getAuthenticatedStoreId } from '../services/firestore/paths';
 import { createProduct, updateProduct } from '../services/salesService';
 import { isValidDecimalInput } from '../services/validation';
 
+import { KEYBOARD_BEHAVIOR } from '../components/keyboard';
 const EMPTY_PRODUCT = {
   name: '',
   sku: '',
@@ -248,11 +250,16 @@ export default function StockScreen({ navigation, route }) {
         <Modal
           visible={productFormVisible}
           transparent
+          statusBarTranslucent
           animationType="fade"
           onRequestClose={() => setProductFormVisible(false)}
         >
-          <View style={styles.formOverlay}>
-            <ScrollView contentContainerStyle={styles.formScroll} keyboardShouldPersistTaps="handled">
+          <KeyboardAvoidingView style={styles.formOverlay} behavior={KEYBOARD_BEHAVIOR}>
+            <ScrollView
+              contentContainerStyle={styles.formScroll}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+            >
               <View style={styles.formCard}>
                 <Text style={styles.formTitle}>{editingProduct ? 'Edit Product' : 'Add Product'}</Text>
                 {[
@@ -297,7 +304,7 @@ export default function StockScreen({ navigation, route }) {
                 </View>
               </View>
             </ScrollView>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
       </View>
     </SafeAreaView>
@@ -452,12 +459,11 @@ function makeStyles(colors, typography, spacing, radius) {
 
     /* Product form modal */
     formOverlay: { flex: 1, justifyContent: 'center', backgroundColor: 'rgba(17, 24, 39, 0.55)', padding: 18 },
-    formScroll: { flexGrow: 1, justifyContent: 'center' },
+    formScroll: { flexGrow: 1, justifyContent: 'center', paddingVertical: 12 },
     formCard: {
       width: '100%',
       maxWidth: 520,
       alignSelf: 'center',
-      maxHeight: '90%',
       backgroundColor: colors.card,
       borderRadius: 14,
       padding: 18,

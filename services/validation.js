@@ -75,3 +75,39 @@ export function parseNonNegativeNumber(value, label, { required = true, integer 
   }
   return number;
 }
+
+// ---- Passwords (sign up and password change) ----
+export const PASSWORD_RULES = { minLength: 6, maxLength: 12 };
+
+// A special character is anything that isn't a letter, a digit or whitespace.
+const SPECIAL_CHARACTER = /[^A-Za-z0-9\s]/;
+
+// One entry per rule, so the sign up screen can tick them off as the user types.
+export function getPasswordChecks(password) {
+  const value = String(password ?? '');
+  const { minLength, maxLength } = PASSWORD_RULES;
+  return [
+    { key: 'length', label: `${minLength} to ${maxLength} characters`, met: value.length >= minLength && value.length <= maxLength },
+    { key: 'lowercase', label: 'One lowercase letter (a-z)', met: /[a-z]/.test(value) },
+    { key: 'number', label: 'One number (0-9)', met: /[0-9]/.test(value) },
+    { key: 'special', label: 'One special character, for example ! @ # $ %', met: SPECIAL_CHARACTER.test(value) },
+  ];
+}
+
+// Returns '' when the password is fine, otherwise the first problem in plain words.
+export function getPasswordError(password) {
+  const value = String(password ?? '');
+  const { minLength, maxLength } = PASSWORD_RULES;
+  if (!value) return 'Enter a password.';
+  if (value.length < minLength) return `Password must be at least ${minLength} characters.`;
+  if (value.length > maxLength) return `Password must be no more than ${maxLength} characters.`;
+  if (!/[a-z]/.test(value)) return 'Password needs at least one lowercase letter.';
+  if (!/[0-9]/.test(value)) return 'Password needs at least one number.';
+  if (!SPECIAL_CHARACTER.test(value)) return 'Password needs at least one special character, for example ! @ # $ %.';
+  return '';
+}
+
+export function assertValidPassword(password) {
+  const message = getPasswordError(password);
+  if (message) throw new Error(message);
+}

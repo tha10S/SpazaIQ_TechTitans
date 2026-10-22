@@ -8,7 +8,7 @@ import {
   updateProfile,
 } from 'firebase/auth';
 import { auth, db } from '../firebase/firebaseConfig';
-import { isValidEmail, normalizeEmail, normalizePhoneNumber } from '../validation';
+import { assertValidPassword, isValidEmail, normalizeEmail, normalizePhoneNumber } from '../validation';
 
 function assertCurrentUser(userId) {
   const authenticatedUserId = auth.currentUser?.uid;
@@ -47,9 +47,7 @@ export async function updateLoginCredentials(userId, changes) {
   const emailChanged = email !== normalizeEmail(user.email);
   if (!emailChanged && !newPassword) throw new Error('Enter a new email or password before saving.');
   if (!currentPassword) throw new Error('Enter your current password to change your login credentials.');
-  if (newPassword && newPassword.length < 6) {
-    throw new Error('Choose a new password with at least 6 characters.');
-  }
+  if (newPassword) assertValidPassword(newPassword);
   if (!user.email) throw new Error('This account does not have an email/password credential.');
 
   const credential = EmailAuthProvider.credential(user.email, currentPassword);

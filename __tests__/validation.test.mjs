@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const {
+  getPasswordChecks,
+  getPasswordError,
+  assertValidPassword,
   isValidEmail,
   isValidIsoDate,
   normalizeEmail,
@@ -40,4 +43,27 @@ test('numeric validation rejects negative, malformed, and over-precision values'
   assert.throws(() => parseNonNegativeNumber('-1', 'price'), /non-negative/);
   assert.throws(() => parseNonNegativeNumber('1.234', 'price'), /non-negative/);
   assert.throws(() => parseNonNegativeNumber('1.5', 'quantity', { integer: true }), /whole number/);
+});
+
+test('password rules: 6 to 12 characters with a lowercase letter, a number and a special character', () => {
+  assert.equal(getPasswordError('abc1!x'), '');
+  assert.equal(getPasswordError('spaza#2026'), '');
+  assert.equal(getPasswordError('a1!bcdefghij'), ''); // exactly 12
+  assert.match(getPasswordError(''), /Enter a password/);
+  assert.match(getPasswordError('a1!bc'), /at least 6 characters/);
+  assert.match(getPasswordError('a1!bcdefghijk'), /no more than 12 characters/); // 13
+  assert.match(getPasswordError('ABC123!X'), /lowercase letter/);
+  assert.match(getPasswordError('abcdef!x'), /one number/);
+  assert.match(getPasswordError('abcdef12'), /special character/);
+  assert.match(getPasswordError('abc 12 x'), /special character/); // a space is not special
+  assert.throws(() => assertValidPassword('password'), /one number/);
+  assert.doesNotThrow(() => assertValidPassword('abc1!x'));
+});
+
+test('password checklist reports each rule so the sign up screen can tick them off', () => {
+  const met = (password) => Object.fromEntries(getPasswordChecks(password).map((check) => [check.key, check.met]));
+  assert.deepEqual(met(''), { length: false, lowercase: false, number: false, special: false });
+  assert.deepEqual(met('abc'), { length: false, lowercase: true, number: false, special: false });
+  assert.deepEqual(met('abc12!'), { length: true, lowercase: true, number: true, special: true });
+  assert.equal(met('a1!bcdefghijk').length, false);
 });

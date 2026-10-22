@@ -17,6 +17,7 @@ import { auth } from '../../services/firebase/firebaseConfig';
 import { isAdminUser } from '../../services/admin/adminRepository';
 import { useTheme } from '../../config/ThemeContext';
 
+import { KEYBOARD_BEHAVIOR } from '../../components/keyboard';
 const BRAND_GREEN = '#004B49';
 
 // Admin sign-in. It uses the same Firebase sign-in as the shops, then checks the admins collection.
@@ -61,7 +62,7 @@ export default function AdminLoginScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.screen}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+      <KeyboardAvoidingView behavior={KEYBOARD_BEHAVIOR} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <View style={styles.iconWrap}>
             <Ionicons name="shield-checkmark" size={34} color="#FFFFFF" />

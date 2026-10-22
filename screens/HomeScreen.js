@@ -9,6 +9,7 @@ import { subscribeProducts } from '../services/firestore/productsRepository';
 import { subscribeSales } from '../services/firestore/salesRepository';
 import { buildHomeFeed, countNeedsAttention } from '../services/feed/homeFeed';
 import { OfflineSyncNotice } from '../components/OfflineSyncNotice';
+import SubscriptionBanner from '../components/SubscriptionBanner';
 
 // Shop location isn't stored yet, so weather is for Johannesburg.
 const WEATHER_URL =
@@ -156,6 +157,9 @@ export default function HomeScreen({ navigation, route }) {
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <OfflineSyncNotice storeId={storeId} />
+
+        {/* Subscription status: only shows when a payment is due soon, overdue, or the shop is deactivated */}
+        <SubscriptionBanner storeId={storeId} />
 
         {/* Header with Greeting, Shop Name, Real-time Clock, Weather and Profile */}
         <View style={styles.header}>

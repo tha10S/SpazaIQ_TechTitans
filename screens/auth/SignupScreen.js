@@ -12,8 +12,9 @@ import {
 } from "react-native";
 import { sendEmailVerification } from "firebase/auth";
 import { getAuthErrorMessage, signUp, logOut } from "../../services/auth/firebaseAuth";
-import { isValidEmail, normalizeEmail, normalizePhoneNumber } from "../../services/validation";
+import { getPasswordChecks, getPasswordError, isValidEmail, normalizeEmail, normalizePhoneNumber } from "../../services/validation";
 
+import { KEYBOARD_BEHAVIOR } from "../../components/keyboard";
 export default function SignupScreen({ navigation }) {
   const [fullName, setFullName] = useState("");
   const [mobile, setMobile] = useState("");
@@ -47,8 +48,9 @@ export default function SignupScreen({ navigation }) {
       return;
     }
 
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters.");
+    const passwordError = getPasswordError(password);
+    if (passwordError) {
+      setError(passwordError);
       return;
     }
 
@@ -94,11 +96,12 @@ export default function SignupScreen({ navigation }) {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior={KEYBOARD_BEHAVIOR}
     >
       <ScrollView
         contentContainerStyle={styles.scrollContainer}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         {/* Logo */}
         <View style={styles.logoContainer}>
@@ -180,7 +183,7 @@ export default function SignupScreen({ navigation }) {
         <View style={styles.inputGroup}>
           <View style={styles.labelRow}>
             <Text style={styles.label}>Password</Text>
-            <Text style={styles.requirement}>At least 6 characters</Text>
+            <Text style={styles.requirement}>6 to 12 characters</Text>
           </View>
 
           <View style={styles.passwordContainer}>
@@ -200,16 +203,25 @@ export default function SignupScreen({ navigation }) {
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.helperText}>
-            Use at least 6 characters for your Firebase password
-          </Text>
+          <View style={styles.checklist}>
+            {getPasswordChecks(password).map((check) => (
+              <View key={check.key} style={styles.checkRow}>
+                <Text style={[styles.checkIcon, check.met && styles.checkMet]}>
+                  {check.met ? "✓" : "•"}
+                </Text>
+                <Text style={[styles.checkText, check.met && styles.checkMet]}>
+                  {check.label}
+                </Text>
+              </View>
+            ))}
+          </View>
         </View>
 
         {/* Confirm Password */}
         <View style={styles.inputGroup}>
           <View style={styles.labelRow}>
             <Text style={styles.label}>Confirm Password</Text>
-            <Text style={styles.requirement}>At least 6 characters</Text>
+            <Text style={styles.requirement}>Must match</Text>
           </View>
 
           <View style={styles.passwordContainer}>
@@ -412,6 +424,28 @@ const styles = StyleSheet.create({
     fontSize: 9,
     color: "#6B7280",
     marginTop: 6,
+  },
+  checklist: {
+    marginTop: 8,
+    gap: 3,
+  },
+  checkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  checkIcon: {
+    width: 12,
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#9CA3AF",
+  },
+  checkText: {
+    fontSize: 11,
+    color: "#6B7280",
+  },
+  checkMet: {
+    color: "#15803D",
   },
 
   // Button

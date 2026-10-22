@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Bar, Pill, SEVERITY_COLOR, TIER_META, TONE_META, confirmAction } from './adminUi';
@@ -22,6 +22,7 @@ import {
 } from '../../services/admin/adminRepository';
 import { openWhatsApp } from '../../services/whatsapp';
 
+import { KEYBOARD_BEHAVIOR } from '../../components/keyboard';
 const BRAND_GREEN = '#004B49';
 
 // Everything shown here is a shop-level total. There are no individual sales and no customer names.
@@ -137,7 +138,8 @@ export default function AdminShopDetail({ shop, onClose, colors, adminUid, media
           </Pressable>
         </View>
 
-        <ScrollView contentContainerStyle={styles.content}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={KEYBOARD_BEHAVIOR}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <View style={styles.headerRow}>
             <Pill label={`${tier.label} performer`} color={tier.color} bg={tier.bg} />
             <Pill label={state.label} color={tone.color} bg={tone.bg} />
@@ -269,6 +271,7 @@ export default function AdminShopDetail({ shop, onClose, colors, adminUid, media
             and the Firestore security rules enforce this, not just the screens.
           </Text>
         </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     </Modal>
   );

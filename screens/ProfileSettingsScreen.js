@@ -9,6 +9,7 @@ import {
   Switch,
   Alert,
   Modal,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,23 +23,24 @@ import {
   updateLoginCredentials,
   updateUserProfile,
 } from '../services/firestore/usersRepository';
-import { isValidEmail, normalizeEmail, normalizePhoneNumber } from '../services/validation';
+import { getPasswordError, isValidEmail, normalizeEmail, normalizePhoneNumber } from '../services/validation';
+//import ProvincePicker from '../components/ProvincePicker';
 
+import { KEYBOARD_BEHAVIOR } from '../components/keyboard';
 const DEFAULT_PROFILE = {
   name: '',
   shopName: '',
   phone: '',
   email: '',
-  location: '',
-  shopRegistration: '',
+  province: '',
 };
 
 const FIELDS = [
   { key: 'name', label: 'Full Name', keyboardType: 'default' },
   { key: 'shopName', label: 'Shop Name', keyboardType: 'default' },
   { key: 'phone', label: 'Phone', keyboardType: 'phone-pad' },
-  { key: 'location', label: 'Location', keyboardType: 'default' },
-  { key: 'shopRegistration', label: 'Shop Registration', keyboardType: 'default' },
+  //{ key: 'location', label: 'Location', keyboardType: 'default' },
+  //{ key: 'shopRegistration', label: 'Shop Registration', keyboardType: 'default' },
 ];
 
 const getInitials = (name) =>
@@ -100,8 +102,7 @@ export default function ProfileSettingsScreen() {
           shopName: data.shopName || '',
           phone: data.mobile || '',
           email: auth.currentUser?.email || data.email || '',
-          location: data.location || '',
-          shopRegistration: data.shopRegistration || '',
+          province: data.province || '',
         };
         setProfile(nextProfile);
         if (!isEditingRef.current) setDraft(nextProfile);
@@ -132,6 +133,10 @@ export default function ProfileSettingsScreen() {
       Alert.alert('Invalid phone number', error.message);
       return;
     }
+    if (!draft.province) {
+      Alert.alert('Missing info', 'Select your province.');
+      return;
+    }
     setIsSavingProfile(true);
     try {
       await updateUserProfile(auth.currentUser.uid, {
@@ -139,8 +144,7 @@ export default function ProfileSettingsScreen() {
         shopName: draft.shopName,
         email: profile.email,
         mobile,
-        location: draft.location,
-        shopRegistration: draft.shopRegistration,
+        province: draft.province,
       });
       setProfile({ ...draft, phone: mobile });
       setIsEditing(false);
@@ -177,8 +181,9 @@ export default function ProfileSettingsScreen() {
       Alert.alert('Invalid email', 'Enter a valid email address.');
       return;
     }
-    if (credentialDraft.newPassword && credentialDraft.newPassword.length < 6) {
-      Alert.alert('Password too short', 'Choose a new password with at least 6 characters.');
+    const newPasswordError = credentialDraft.newPassword ? getPasswordError(credentialDraft.newPassword) : '';
+    if (newPasswordError) {
+      Alert.alert('Password too weak', newPasswordError);
       return;
     }
     if (credentialDraft.newPassword !== credentialDraft.confirmPassword) {
@@ -281,7 +286,12 @@ export default function ProfileSettingsScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={KEYBOARD_BEHAVIOR}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         {/* Identity row */}
         <View style={styles.identityRow}>
           <View style={styles.avatarCircle}>
@@ -310,6 +320,13 @@ export default function ProfileSettingsScreen() {
                 {isEditing ? (
                   <View style={styles.fieldValueWrap}>
                     <Text style={styles.fieldLabel}>{field.label}</Text>
+                    {field.type === 'province' ? (
+                      <ProvincePicker
+                        value={draft.province}
+                        onChange={(v) => updateDraft('province', v)}
+                        theme={{ bg: colors.card, border: colors.border, text: colors.textPrimary, muted: colors.textMuted, primary: colors.primary }}
+                      />
+                    ) : (
                     <TextInput
                       style={styles.fieldInput}
                       value={draft[field.key]}
@@ -321,11 +338,12 @@ export default function ProfileSettingsScreen() {
                       autoComplete={field.key === 'phone' ? 'tel-national' : 'off'}
                       autoCapitalize="sentences"
                     />
+                    )}
                   </View>
                 ) : (
                   <View style={styles.fieldValueWrap}>
                     <Text style={styles.fieldLabel}>{field.label}</Text>
-                    <Text style={styles.fieldValue}>{profile[field.key]}</Text>
+                    <Text style={styles.fieldValue}>{profile[field.key] || (field.type === 'province' ? 'Not set' : '')}</Text>
                   </View>
                 )}
               </View>
@@ -492,6 +510,7 @@ export default function ProfileSettingsScreen() {
 
         <Text style={styles.versionText}>SpazalIQ v1.0.2</Text>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       <Modal
         visible={deleteModalVisible}
@@ -499,7 +518,7 @@ export default function ProfileSettingsScreen() {
         animationType="fade"
         onRequestClose={() => !isDeletingAccount && setDeleteModalVisible(false)}
       >
-        <View style={styles.deleteOverlay}>
+        <KeyboardAvoidingView style={styles.deleteOverlay} behavior={KEYBOARD_BEHAVIOR}>
           <View style={styles.deleteCard}>
             <Text style={styles.deleteTitle}>Permanently delete account?</Text>
             <Text style={styles.deleteDescription}>
@@ -552,7 +571,7 @@ export default function ProfileSettingsScreen() {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

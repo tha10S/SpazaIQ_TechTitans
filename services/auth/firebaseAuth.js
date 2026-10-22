@@ -11,14 +11,12 @@ import {
 
 import { auth } from "../firebase/firebaseConfig";
 import { ensureStoreSeed } from '../firestore/seedRepository';
-import { isValidEmail, normalizeEmail, normalizePhoneNumber } from '../validation';
+import { assertValidPassword, isValidEmail, normalizeEmail, normalizePhoneNumber } from '../validation';
 
 export async function signUp(email, password, profile = {}) {
   const normalizedEmail = normalizeEmail(email);
   if (!isValidEmail(normalizedEmail)) throw new Error('Enter a valid email address.');
-  if (!String(password || '').trim() || String(password).length < 6) {
-    throw new Error('Password must be at least 6 characters.');
-  }
+  assertValidPassword(password);
   const fullName = String(profile.fullName || profile.displayName || '').trim();
   const shopName = String(profile.shopName || '').trim();
   if (!fullName || !shopName) throw new Error('Enter your full name and shop name.');
@@ -68,7 +66,7 @@ export function getAuthErrorMessage(error) {
     case 'auth/email-already-in-use':
       return 'An account already exists with this email address.';
     case 'auth/weak-password':
-      return 'Choose a stronger password with at least 6 characters.';
+      return 'Choose a stronger password: 6 to 12 characters with a lowercase letter, a number and a special character.';
     case 'auth/operation-not-allowed':
       return 'Email and password sign-in is not enabled in Firebase Console.';
     case 'auth/network-request-failed':

@@ -119,6 +119,8 @@ export default function NewSaleScreen({ route, navigation }) {
   const secondAmount = Math.max(0, subtotal - firstAmount);
   const splitHasCard = isSplit && splitPair.includes('Card');
   const splitHasCredit = isSplit && splitPair.includes('Credit');
+  // A split needs exactly two methods chosen before amounts make sense
+  const splitReady = isSplit && splitPair.length === 2;
 
   const creditAmount = payment === 'Credit'
     ? subtotal
@@ -140,7 +142,11 @@ export default function NewSaleScreen({ route, navigation }) {
   const amountByMethod = { Cash: cashAmount, Card: cardAmount, Credit: creditAmount };
 
   const toggleSplitMethod = (id) => {
-    setSplitMethods((current) => (current.includes(id) ? current : [current[1], id]));
+    setSplitMethods((current) => {
+      if (current.includes(id)) return current.filter((method) => method !== id); // tap again to un-select
+      if (current.length >= 2) return current; // two already chosen, the others are greyed out
+      return [...current, id];
+    });
     setSplitPaidAmount('');
   };
 
@@ -293,6 +299,10 @@ export default function NewSaleScreen({ route, navigation }) {
     setNotice(null);
     if (cart.length === 0) {
       setNotice({ type: 'error', text: 'Add at least one item to the cart first.' });
+      return;
+    }
+    if (isSplit && !splitReady) {
+      setNotice({ type: 'error', text: 'Pick two payment methods for the split first.' });
       return;
     }
     if (isSplit) {
@@ -582,21 +592,31 @@ export default function NewSaleScreen({ route, navigation }) {
 
         {isSplit && (
           <View style={styles.creditOptionsCard}>
-            <Text style={styles.creditOptionsLabel}>SPLIT BETWEEN (PICK TWO)</Text>
+            <View style={styles.splitHeaderRow}>
+              <Text style={styles.creditOptionsLabel}>SPLIT BETWEEN (PICK TWO)</Text>
+              <Text style={styles.splitCounter}>{splitMethods.length} of 2 chosen</Text>
+            </View>
             <View style={styles.splitChipRow}>
               {SPLIT_METHODS.map((method) => {
                 const selected = splitMethods.includes(method.id);
+                // Once two are chosen, the third is greyed out. Tap a chosen one to un-select it and swap.
+                const unavailable = !selected && splitMethods.length >= 2;
                 return (
                   <TouchableOpacity
                     key={method.id}
-                    style={[styles.splitChip, selected && styles.splitChipSelected]}
+                    style={[
+                      styles.splitChip,
+                      selected && styles.splitChipSelected,
+                      unavailable && styles.splitChipDisabled,
+                    ]}
                     onPress={() => toggleSplitMethod(method.id)}
+                    disabled={unavailable}
                     activeOpacity={0.85}
                     accessibilityRole="button"
-                    accessibilityState={{ selected }}
+                    accessibilityState={{ selected, disabled: unavailable }}
                   >
                     <Ionicons
-                      name={method.icon}
+                      name={selected ? 'checkmark-circle' : method.icon}
                       size={16}
                       color={selected ? COLORS.primary : COLORS.textMuted}
                     />
@@ -608,49 +628,68 @@ export default function NewSaleScreen({ route, navigation }) {
               })}
             </View>
 
-            <Text style={styles.creditOptionsLabel}>{`${firstMethod.toUpperCase()} AMOUNT (R)`}</Text>
-            <TextInput
-              style={styles.creditTextInput}
-              placeholder="0.00"
-              placeholderTextColor={COLORS.textMuted}
-              keyboardType="decimal-pad"
-              value={splitPaidAmount}
-              onChangeText={(value) => {
-                if (isValidDecimalInput(value)) setSplitPaidAmount(value);
-              }}
-            />
-
-            <View style={styles.splitSummary}>
-              <View style={styles.splitSummaryRow}>
-                <Text style={styles.splitSummaryLabel}>{firstMethod}</Text>
-                <Text style={styles.splitSummaryValue}>{formatR(amountByMethod[firstMethod])}</Text>
+            {!splitReady ? (
+              <View style={styles.infoRow}>
+                <Ionicons name="information-circle-outline" size={18} color={COLORS.primary} />
+                <Text style={styles.infoText}>
+                  Pick two payment methods. Once two are chosen the third is greyed out. Tap a chosen one again to swap it.
+                </Text>
               </View>
-              <View style={styles.splitSummaryRow}>
-                <Text style={styles.splitSummaryLabel}>{`${secondMethod} (remainder)`}</Text>
-                <Text style={styles.splitSummaryValue}>{formatR(amountByMethod[secondMethod])}</Text>
-              </View>
-            </View>
+            ) : (
+              <>
+                <Text style={styles.creditOptionsLabel}>{`${firstMethod.toUpperCase()} AMOUNT (R)`}</Text>
+                <TextInput
+                  style={styles.creditTextInput}
+                  placeholder="0.00"
+                  placeholderTextColor={COLORS.textMuted}
+                  keyboardType="decimal-pad"
+                  value={splitPaidAmount}
+                  onChangeText={(value) => {
+                    if (isValidDecimalInput(value)) setSplitPaidAmount(value);
+                  }}
+                />
+                <TouchableOpacity
+                  style={styles.splitQuick}
+                  onPress={() => setSplitPaidAmount((subtotal / 2).toFixed(2))}
+                  disabled={subtotal <= 0}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.splitQuickText}>Split 50 / 50</Text>
+                </TouchableOpacity>
 
-            <View style={styles.infoRow}>
-              <Ionicons
-                name={splitHasCredit ? 'wallet-outline' : 'information-circle-outline'}
-                size={18}
-                color={COLORS.primary}
-              />
-              <Text style={styles.infoText}>
-                {splitHasCard && isOffline
-                  ? 'Card payments need an internet connection. Pick cash and credit while offline.'
-                  : `${splitHint}${splitHasCard ? ' Card payments are simulated. No real card is charged.' : ''}`}
-              </Text>
-            </View>
+                <View style={styles.splitSummary}>
+                  <View style={styles.splitSummaryRow}>
+                    <Text style={styles.splitSummaryLabel}>{firstMethod}</Text>
+                    <Text style={styles.splitSummaryValue}>{formatR(amountByMethod[firstMethod])}</Text>
+                  </View>
+                  <View style={styles.splitSummaryRow}>
+                    <Text style={styles.splitSummaryLabel}>{`${secondMethod} (remainder)`}</Text>
+                    <Text style={styles.splitSummaryValue}>{formatR(amountByMethod[secondMethod])}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.infoRow}>
+                  <Ionicons
+                    name={splitHasCredit ? 'wallet-outline' : 'information-circle-outline'}
+                    size={18}
+                    color={COLORS.primary}
+                  />
+                  <Text style={styles.infoText}>
+                    {splitHasCard && isOffline
+                      ? 'Card payments need an internet connection. Pick cash and credit while offline.'
+                      : `${splitHint}${splitHasCard ? ' Card payments are simulated. No real card is charged.' : ''}`}
+                  </Text>
+                </View>
+              </>
+            )}
           </View>
         )}
 
         <TouchableOpacity
-          style={[styles.completeCta, cart.length === 0 && styles.disabledCta]}
+          style={[styles.completeCta, (cart.length === 0 || (isSplit && !splitReady)) && styles.disabledCta]}
           onPress={handleCompleteSale}
           activeOpacity={0.88}
-          disabled={submitting || !!cardState || cart.length === 0}
+          disabled={submitting || !!cardState || cart.length === 0 || (isSplit && !splitReady)}
         >
           {submitting ? (
             <ActivityIndicator color="#FFFFFF" size="small" />
@@ -1141,6 +1180,34 @@ const makeStyles = (COLORS) =>
     splitChipSelected: {
       borderColor: COLORS.primary,
       backgroundColor: COLORS.primaryBg,
+    },
+    splitChipDisabled: {
+      opacity: 0.35,
+    },
+    splitHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    splitCounter: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: COLORS.textMuted,
+      marginTop: 4,
+    },
+    splitQuick: {
+      alignSelf: 'flex-start',
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: COLORS.primary,
+      marginBottom: 12,
+    },
+    splitQuickText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: COLORS.primary,
     },
     splitChipText: {
       fontSize: 13,
