@@ -9,8 +9,8 @@ const TIERS = {
   low: { label: 'Needs attention', color: '#DC2626', bg: 'rgba(220, 38, 38, 0.15)' },
 };
 
-// Shows a shop owner how their own shop is doing and what to fix first. `stats` comes from
-// buildShopStats(), which is built from the shop's own data, so nothing here is shared with anyone.
+// Shows a shop owner how their own shop is doing and what to fix first. Only shop-level totals are
+// shared with the admin area; individual sales and customer records remain private.
 // The score is measured against a typical shop, because a shop can't see other shops.
 export default function ShopHealthCard({ stats }) {
   const { colors } = useTheme();

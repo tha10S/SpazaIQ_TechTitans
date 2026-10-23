@@ -8,14 +8,16 @@ import {
   TextInput,
   Modal,
   KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../config/ThemeContext';
 import { useProducts } from '../hooks/useProducts';
 import { getAuthenticatedStoreId } from '../services/firestore/paths';
 import { createProduct, updateProduct } from '../services/salesService';
-import { isValidDecimalInput } from '../services/validation';
+import { isValidDecimalInput, isValidIsoDate } from '../services/validation';
 
 import { KEYBOARD_BEHAVIOR } from '../components/keyboard';
 const EMPTY_PRODUCT = {
@@ -27,7 +29,21 @@ const EMPTY_PRODUCT = {
   quantity: '0',
   reorderLevel: '0',
   category: 'General',
+  expiryDate: '',
 };
+
+function parseIsoDate(value) {
+  if (!isValidIsoDate(value)) return new Date();
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function formatIsoDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 export default function StockScreen({ navigation, route }) {
   const { colors, spacing, radius, typography } = useTheme();
@@ -37,6 +53,7 @@ export default function StockScreen({ navigation, route }) {
   );
   const [searchQuery, setSearchQuery] = useState('');
   const [productFormVisible, setProductFormVisible] = useState(false);
+  const [expiryPickerVisible, setExpiryPickerVisible] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [productForm, setProductForm] = useState(EMPTY_PRODUCT);
   const [productError, setProductError] = useState('');
@@ -47,11 +64,19 @@ export default function StockScreen({ navigation, route }) {
   const lowStockCount = products.filter((product) => product.quantity <= product.reorder_level).length;
   const totalQuantity = products.reduce((total, product) => total + product.quantity, 0);
   const expiringCount = products.filter((product) => {
-    const raw = product.expiry_date || product.expiryDate;
-    if (!raw) return false;
-    const date = raw?.toDate ? raw.toDate() : new Date(raw);
-    if (Number.isNaN(date.getTime())) return false;
-    return (date.getTime() - Date.now()) / 86400000 <= 7;
+    const batches = Array.isArray(product.stock_batches)
+      ? product.stock_batches
+      : [{ quantity: product.quantity, expiry_date: product.expiry_date || product.expiryDate }];
+    return batches.some((batch) => {
+      if (Number(batch.quantity) <= 0 || !batch.expiry_date || !isValidIsoDate(String(batch.expiry_date).slice(0, 10))) return false;
+      const date = parseIsoDate(String(batch.expiry_date).slice(0, 10));
+      const today = new Date();
+      const daysUntilExpiry = (
+        Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+        - Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
+      ) / 86400000;
+      return daysUntilExpiry >= 0 && daysUntilExpiry <= 7;
+    });
   }).length;
 
   const openProductForm = (product = null) => {
@@ -65,7 +90,9 @@ export default function StockScreen({ navigation, route }) {
       quantity: String(product.quantity),
       reorderLevel: String(product.reorder_level),
       category: product.category,
+      expiryDate: String(product.expiry_date || product.expiryDate || '').slice(0, 10),
     } : EMPTY_PRODUCT);
+    setExpiryPickerVisible(false);
     setProductError('');
     setProductFormVisible(true);
   };
@@ -189,6 +216,10 @@ export default function StockScreen({ navigation, route }) {
             {loading ? <Text style={styles.emptyText}>Loading products...</Text> : error ? <Text style={styles.emptyText}>{error.message}</Text> : products.length === 0 ? <Text style={styles.emptyText}>{searchQuery ? 'No products match your search.' : 'No products yet. Tap + to add your first product.'}</Text> : products.map((product) => {
               const statusType = product.quantity === 0 ? 'out' : product.quantity <= product.reorder_level ? 'low' : 'stock';
               const status = statusType === 'out' ? 'Out of Stock' : statusType === 'low' ? 'Low Stock' : 'In Stock';
+              const batchExpirySummary = (product.stock_batches || [])
+                .filter((batch) => batch.quantity > 0 && batch.expiry_date)
+                .map((batch) => `${batch.quantity} × ${batch.expiry_date}`)
+                .join(' · ');
               return (
               <TouchableOpacity
                 key={product.id}
@@ -210,6 +241,9 @@ export default function StockScreen({ navigation, route }) {
                       Qty: <Text style={styles.qtyBold}>{product.quantity}</Text>
                     </Text>
                   </View>
+                  {batchExpirySummary ? (
+                    <Text style={styles.batchExpiryText} numberOfLines={2}>Expiry batches: {batchExpirySummary}</Text>
+                  ) : null}
                 </View>
 
                 <View
@@ -293,6 +327,101 @@ export default function StockScreen({ navigation, route }) {
                     />
                   </View>
                 ))}
+                <View style={styles.formField}>
+                  <Text style={styles.formLabel}>Expiry date (optional)</Text>
+                  {Platform.OS === 'web' ? (
+                    <View style={styles.expiryInputRow}>
+                      {React.createElement('input', {
+                        type: 'date',
+                        'aria-label': 'Product expiry date',
+                        value: productForm.expiryDate,
+                        onChange: (event) => setProductForm((current) => ({
+                          ...current,
+                          expiryDate: event.target.value,
+                        })),
+                        disabled: savingProduct,
+                        style: {
+                          flex: 1,
+                          minWidth: 0,
+                          height: 40,
+                          border: `1px solid ${colors.border}`,
+                          borderRadius: 8,
+                          padding: '0 10px',
+                          backgroundColor: colors.background,
+                          color: colors.textPrimary,
+                          fontSize: 14,
+                        },
+                      })}
+                      {productForm.expiryDate ? (
+                        <TouchableOpacity
+                          style={styles.clearExpiryButton}
+                          onPress={() => setProductForm((current) => ({ ...current, expiryDate: '' }))}
+                          disabled={savingProduct}
+                          accessibilityRole="button"
+                          accessibilityLabel="Clear expiry date"
+                        >
+                          <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  ) : (
+                    <>
+                      <View style={styles.expiryInputRow}>
+                        <TouchableOpacity
+                          style={styles.expiryDateButton}
+                          onPress={() => setExpiryPickerVisible(true)}
+                          disabled={savingProduct}
+                          accessibilityRole="button"
+                          accessibilityLabel={productForm.expiryDate
+                            ? `Expiry date ${productForm.expiryDate}`
+                            : 'Select expiry date'}
+                        >
+                          <Ionicons name="calendar-outline" size={18} color={colors.textMuted} />
+                          <Text style={[
+                            styles.expiryDateText,
+                            !productForm.expiryDate && styles.expiryDatePlaceholder,
+                          ]}>
+                            {productForm.expiryDate || 'Select expiry date'}
+                          </Text>
+                        </TouchableOpacity>
+                        {productForm.expiryDate ? (
+                          <TouchableOpacity
+                            style={styles.clearExpiryButton}
+                            onPress={() => setProductForm((current) => ({ ...current, expiryDate: '' }))}
+                            disabled={savingProduct}
+                            accessibilityRole="button"
+                            accessibilityLabel="Clear expiry date"
+                          >
+                            <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                      {expiryPickerVisible ? (
+                        <DateTimePicker
+                          value={parseIsoDate(productForm.expiryDate)}
+                          mode="date"
+                          display={Platform.OS === 'ios' ? 'compact' : 'default'}
+                          onChange={(event, date) => {
+                            if (Platform.OS !== 'ios' || event.type === 'dismissed') {
+                              setExpiryPickerVisible(false);
+                            }
+                            if (date) {
+                              setProductForm((current) => ({
+                                ...current,
+                                expiryDate: formatIsoDate(date),
+                              }));
+                            }
+                          }}
+                        />
+                      ) : null}
+                    </>
+                  )}
+                </View>
+                {editingProduct?.stock_batches?.length > 1 ? (
+                  <Text style={styles.batchExpiryText}>
+                    Separate expiry batches are tracked. With no quantity change, this date edits the earliest-expiring batch or batches; record supplier deliveries in Suppliers to add another dated batch.
+                  </Text>
+                ) : null}
                 {productError ? <Text style={styles.formError}>{productError}</Text> : null}
                 <View style={styles.formActions}>
                   <TouchableOpacity style={styles.formSecondaryButton} onPress={() => setProductFormVisible(false)} disabled={savingProduct}>
@@ -424,6 +553,7 @@ function makeStyles(colors, typography, spacing, radius) {
     productNameRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
     productName: { flexShrink: 1, fontSize: 14, fontWeight: '700', color: colors.textPrimary },
     detailsRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
+    batchExpiryText: { color: colors.textMuted, fontSize: 11, marginTop: 4 },
     productPrice: { fontSize: 13, fontWeight: '700', color: colors.primary },
     dotSeparator: { marginHorizontal: 6, color: colors.textMuted },
     productQty: { fontSize: 12, color: colors.textMuted },
@@ -480,6 +610,22 @@ function makeStyles(colors, typography, spacing, radius) {
       paddingHorizontal: 10,
       color: colors.textPrimary,
     },
+    expiryInputRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    expiryDateButton: {
+      flex: 1,
+      minHeight: 40,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+      borderRadius: 8,
+      paddingHorizontal: 10,
+    },
+    expiryDateText: { color: colors.textPrimary, fontSize: 14 },
+    expiryDatePlaceholder: { color: colors.textMuted },
+    clearExpiryButton: { padding: 8 },
     formError: { color: colors.danger, fontSize: 12, marginTop: 4 },
     formActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 12 },
     formSecondaryButton: {

@@ -12,6 +12,8 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath, storeDocPath } from './paths';
+import { validateIsoDate } from '../validation';
+import { addStockBatch, getEarliestStockExpiry, normalizeStockBatches } from './stockBatches';
 
 // Data shape (all inside the signed-in shop's own store):
 //   stores/{storeId}/suppliers/{id}  { storeId, name, category, phone, items: [{ productId, name, qty, unitCost, selected }] }
@@ -162,7 +164,7 @@ export function planDelivery(items, stock) {
 
 // Marks an order delivered and adds its items to Stock. One transaction, so the order can't be
 // counted twice and stock never changes without the order changing. Needs an internet connection.
-export async function markOrderDelivered(storeId, orderId) {
+export async function markOrderDelivered(storeId, orderId, deliveryExpiryDates = []) {
   const sid = assertStoreId(storeId);
   const orderReference = doc(db, ...storeDocPath(sid, 'orders', orderId));
 
@@ -172,7 +174,10 @@ export async function markOrderDelivered(storeId, orderId) {
     const order = orderSnapshot.data();
     if (order.status === 'delivered') throw new Error('This order is already marked as delivered.');
 
-    const items = Array.isArray(order.items) ? order.items : [];
+    const items = (Array.isArray(order.items) ? order.items : []).map((item, index) => ({
+      ...item,
+      expiryDate: validateIsoDate(deliveryExpiryDates[index] || '', 'expiry date', { required: false }) || null,
+    }));
     const productIds = [...new Set(items.map((item) => item.productId).filter(Boolean))];
     const productReferences = productIds.map((id) => doc(db, ...storeDocPath(sid, 'products', id)));
     const productSnapshots = await Promise.all(productReferences.map((reference) => transaction.get(reference)));
@@ -183,12 +188,23 @@ export async function markOrderDelivered(storeId, orderId) {
 
     const plan = planDelivery(items, stock);
     plan.updates.forEach((update) => {
+      const productIndex = productIds.indexOf(update.productId);
+      const productData = productSnapshots[productIndex].data();
+      const stockBatches = items
+        .filter((item) => item.productId === update.productId)
+        .reduce(
+          (batches, item) => addStockBatch(batches, Number(item.qty || 0), item.expiryDate),
+          normalizeStockBatches(productData)
+        );
       transaction.update(doc(db, ...storeDocPath(sid, 'products', update.productId)), {
         quantity: update.newQuantity,
+        stockBatches,
+        expiryDate: getEarliestStockExpiry(stockBatches),
         updatedAt: serverTimestamp(),
       });
     });
     transaction.update(orderReference, {
+      items,
       status: 'delivered',
       deliveredAt: serverTimestamp(),
       updatedAt: serverTimestamp(),

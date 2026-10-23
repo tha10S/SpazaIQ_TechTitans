@@ -10,7 +10,6 @@ import {
   defaultCoveredMonth,
   formatDay,
   monthLabel,
-  paymentReminderMessage,
   shiftMonth,
 } from '../../services/admin/billing';
 import {
@@ -20,7 +19,6 @@ import {
   startSubscription,
   subscribePayments,
 } from '../../services/admin/adminRepository';
-import { openWhatsApp } from '../../services/whatsapp';
 
 import { KEYBOARD_BEHAVIOR } from '../../components/keyboard';
 const BRAND_GREEN = '#004B49';
@@ -66,14 +64,6 @@ export default function AdminShopDetail({ shop, onClose, colors, adminUid, media
     } finally {
       setBusy(false);
     }
-  };
-
-  const sendReminder = async () => {
-    const result = await openWhatsApp(
-      shop.contactPhone,
-      paymentReminderMessage({ shopName: shop.shopName, fee: sub?.monthlyFee ?? DEFAULT_FEE, dueDate: state.dueDate, accessUntil: state.accessUntil })
-    );
-    if (!result.ok) setMessage({ ok: false, text: result.error });
   };
 
   const totals = [
@@ -145,10 +135,6 @@ export default function AdminShopDetail({ shop, onClose, colors, adminUid, media
             <Pill label={state.label} color={tone.color} bg={tone.bg} />
           </View>
           <Text style={styles.score}>{shop.score}<Text style={styles.scoreOf}> / 100</Text></Text>
-
-          {shop.contactPhone || shop.contactEmail ? (
-            <Text style={styles.contact}>{[shop.contactEmail, shop.contactPhone].filter(Boolean).join('  ·  ')}</Text>
-          ) : null}
 
           <Text style={styles.section}>SCORE BREAKDOWN</Text>
           <View style={styles.card}>
@@ -243,11 +229,6 @@ export default function AdminShopDetail({ shop, onClose, colors, adminUid, media
                   <Text style={[styles.outlineBtnText, { color: colors.danger }]}>Deactivate</Text>
                 </Pressable>
               )}
-              {shop.contactPhone ? (
-                <Pressable style={styles.outlineBtn} onPress={sendReminder}>
-                  <Text style={styles.outlineBtnText}>WhatsApp reminder</Text>
-                </Pressable>
-              ) : null}
             </View>
             {message ? <Text style={[styles.msg, { color: message.ok ? '#10B981' : colors.danger }]}>{message.text}</Text> : null}
           </View>

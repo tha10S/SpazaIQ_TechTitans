@@ -10,7 +10,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeProvider, useTheme } from '../config/ThemeContext';
 import { TechTitansAssistant } from '../components/TechTitansAssistant';
-import { watchAuth } from '../services/auth/firebaseAuth';
+import { consumeAccountCreationPending, watchAuth } from '../services/auth/firebaseAuth';
 import { ensureStoreSeed } from '../services/firestore/seedRepository';
 import { getUserProfile } from '../services/firestore/usersRepository';
 import { isAdminUser } from '../services/admin/adminRepository';
@@ -100,7 +100,7 @@ function AppContent() {
   const [welcome, setWelcome] = useState({ uid: null, seen: false });
   const uid = user?.uid;
   useEffect(() => {
-    if (!uid) return undefined;
+    if (!uid || (welcome.uid === uid && welcome.seen)) return undefined;
     let active = true;
     AsyncStorage.getItem(`welcomeSeen:${uid}`)
       .then((value) => active && setWelcome({ uid, seen: value === '1' }))
@@ -108,7 +108,7 @@ function AppContent() {
     return () => {
       active = false;
     };
-  }, [uid]);
+  }, [uid, welcome.uid, welcome.seen]);
   const welcomeReady = Boolean(uid) && welcome.uid === uid;
   // An admin never sees the shop welcome screen
   const showWelcome = welcomeReady && !welcome.seen && !isAdmin;
@@ -123,6 +123,11 @@ function AppContent() {
     let active = true;
     const unsubscribe = watchAuth(async (authenticatedUser) => {
       if (!active) return;
+      if (authenticatedUser && consumeAccountCreationPending()) {
+        setWelcome({ uid: authenticatedUser.uid, seen: true });
+        AsyncStorage.setItem(`welcomeSeen:${authenticatedUser.uid}`, '1')
+          .catch((error) => console.warn('Could not save signup welcome state', error));
+      }
       setUser(authenticatedUser);
       setUserProfile(null);
       setIsAdmin(false);

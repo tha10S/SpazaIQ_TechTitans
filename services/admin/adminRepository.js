@@ -1,6 +1,6 @@
 // Admin-side Firestore access. Everything here is allowed by the Firestore rules only for an admin
 // account (a signed-in user with a document at admins/{uid}). It reads two things about a shop:
-//   shopStats/{storeId}      anonymous totals published by the shop
+//   shopStats/{storeId}      shop name and aggregate totals published by the shop
 //   subscriptions/{storeId}  billing status, written only by the admin
 // There is deliberately no function here that reads a shop's sales, customers or credit records.
 import {
@@ -36,7 +36,12 @@ export async function isAdminUser(uid) {
 export function subscribeShopStats(onData, onError) {
   return onSnapshot(
     collection(db, 'shopStats'),
-    (snapshot) => onData(snapshot.docs.map((item) => ({ storeId: item.id, ...item.data() }))),
+    (snapshot) => onData(snapshot.docs.map((item) => {
+      const stats = { ...item.data() };
+      delete stats.contactEmail;
+      delete stats.contactPhone;
+      return { storeId: item.id, ...stats };
+    })),
     onError
   );
 }

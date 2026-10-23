@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   onSnapshot,
   orderBy,
@@ -12,6 +13,7 @@ import {
 import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath } from './paths';
 import { mapCustomer, mapLedgerEntry } from './mappers';
+import { assertCustomerPhoneAvailable } from './customersRepository';
 import { normalizePhoneNumber, parseNonNegativeNumber, todayIsoDate, validateIsoDate } from '../validation';
 import {
   enqueueOfflineOperation,
@@ -361,6 +363,9 @@ function validateCreditInput({ customerId, customerName, newCustomer, amount, du
       }
     : null;
   if (newCustomerData && !newCustomerData.name) throw new Error('Enter a customer name.');
+  if (newCustomerData?.creditLimit > 0 && numericAmount > newCustomerData.creditLimit) {
+    throw new Error(`Credit limit exceeded. Available: R ${newCustomerData.creditLimit.toFixed(2)}.`);
+  }
   const frequency = schedule?.frequency ?? 'one_time';
   const periodCount = frequency === 'monthly'
     ? Number(schedule.durationMonths ?? schedule.totalPayments)
@@ -382,9 +387,15 @@ function validateCreditInput({ customerId, customerName, newCustomer, amount, du
 }
 
 async function addCreditTransactionOnline(input) {
-  const { storeId, customerId, customerName, newCustomer, amount, dueDate, idempotencyKey, schedule } = input;
+  const { storeId, customerId, amount, dueDate, idempotencyKey } = input;
   const authenticatedStoreId = assertStoreId(storeId);
   const { numericAmount, repaymentSchedule, newCustomerData } = validateCreditInput(input);
+  const operationReference = operationRef(authenticatedStoreId, idempotencyKey);
+  const existingOperation = await getDoc(operationReference);
+  if (existingOperation.exists()) return existingOperation.data().result;
+  if (customerId === 'new') {
+    await assertCustomerPhoneAvailable(authenticatedStoreId, newCustomerData.phone);
+  }
 
   return runTransaction(db, async (transaction) => {
     const operation = await transaction.get(operationRef(authenticatedStoreId, idempotencyKey));
@@ -395,17 +406,6 @@ async function addCreditTransactionOnline(input) {
       : doc(db, ...storeCollectionPath(authenticatedStoreId, 'customers'), customerId);
     const customerSnapshot = await transaction.get(customer);
     if (customerId !== 'new' && !customerSnapshot.exists()) throw new Error('Customer account not found.');
-    if (customerId === 'new') {
-      const matches = await transaction.get(query(
-        customersCollection(authenticatedStoreId),
-        where('phone', '==', newCustomerData.phone)
-      ));
-      const matchingCustomers = matches.docs.map((snapshot) => snapshot.data());
-      if (matchingCustomers.some((customer) => customer.blacklisted)) {
-        throw new Error('This customer has been blacklisted and cannot be added again.');
-      }
-      if (matchingCustomers.length > 0) throw new Error('A customer with this phone number already exists.');
-    }
     const customerData = customerSnapshot.exists()
       ? customerSnapshot.data()
       : { ...newCustomerData, balance: 0, creditLimit: newCustomerData?.creditLimit ?? 0 };

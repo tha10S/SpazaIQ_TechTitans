@@ -109,6 +109,15 @@ export function customerRef(storeId, customerId) {
   return doc(db, ...storeCollectionPath(storeId, 'customers'), customerId);
 }
 
+export async function assertCustomerPhoneAvailable(storeId, phone) {
+  const matches = await getDocs(query(customersCollection(storeId), where('phone', '==', phone)));
+  const matchingCustomers = matches.docs.map((snapshot) => snapshot.data());
+  if (matchingCustomers.some((customer) => customer.blacklisted)) {
+    throw new Error('This customer has been blacklisted and cannot be added again.');
+  }
+  if (matchingCustomers.length > 0) throw new Error('A customer with this phone number already exists.');
+}
+
 export async function createCustomer(storeId, input) {
   const authenticatedStoreId = assertStoreId(storeId);
   const name = String(input.name || '').trim();
@@ -118,14 +127,8 @@ export async function createCustomer(storeId, input) {
 
   const reference = doc(customersCollection(authenticatedStoreId));
   try {
+    await assertCustomerPhoneAvailable(authenticatedStoreId, phone);
     await runTransaction(db, async (transaction) => {
-      const matches = await transaction.get(query(customersCollection(authenticatedStoreId), where('phone', '==', phone)));
-      const matchingCustomers = matches.docs.map((snapshot) => snapshot.data());
-      if (matchingCustomers.some((customer) => customer.blacklisted)) {
-        throw new Error('This customer has been blacklisted and cannot be added again.');
-      }
-      if (matchingCustomers.length > 0) throw new Error('A customer with this phone number already exists.');
-
       transaction.set(reference, {
         storeId: authenticatedStoreId,
         name,

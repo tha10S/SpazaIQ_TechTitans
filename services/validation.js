@@ -24,6 +24,31 @@ export function normalizePhoneNumber(value, { required = false } = {}) {
   return digits;
 }
 
+const SOUTH_AFRICAN_PROVINCES = [
+  'Eastern Cape',
+  'Free State',
+  'Gauteng',
+  'KwaZulu-Natal',
+  'Limpopo',
+  'Mpumalanga',
+  'Northern Cape',
+  'North West',
+  'Western Cape',
+];
+
+export function normalizeProvince(value, { required = false } = {}) {
+  const province = String(value ?? '').trim();
+  if (!province) {
+    if (required) throw new Error('Select your province.');
+    return '';
+  }
+  const match = SOUTH_AFRICAN_PROVINCES.find(
+    (name) => name.toLowerCase() === province.toLowerCase()
+  );
+  if (!match) throw new Error('Select a valid South African province.');
+  return match;
+}
+
 export function isValidIsoDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const [year, month, day] = value.split('-').map(Number);

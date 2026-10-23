@@ -130,9 +130,9 @@ export default function Insights({ route, navigation }) {
         setSalesError(null);
       },
       (error) => {
-        console.warn("Insights sales subscription failed", error);
+        console.warn('Insights sales subscription failed', error);
         setLoading(false);
-        setSalesError(error?.message || "Sales data could not be loaded.");
+        setSalesError(error?.message || 'Sales data could not be loaded.');
       }
     );
   }, [storeId]);

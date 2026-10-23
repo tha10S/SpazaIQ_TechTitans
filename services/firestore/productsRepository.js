@@ -5,15 +5,16 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
-  updateDoc,
   where,
 } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath } from './paths';
 import { mapProduct } from './mappers';
-import { parseNonNegativeNumber } from '../validation';
+import { parseNonNegativeNumber, validateIsoDate } from '../validation';
+import { addStockBatch, getEarliestStockExpiry, reconcileStockBatches } from './stockBatches';
 import {
   getOfflineOperations,
   isNetworkError,
@@ -37,10 +38,22 @@ function applyPendingStock(products, operations) {
     const reserved = operations
       .filter((operation) => operation.type === 'recordSale' && operation.status !== 'failed')
       .reduce((quantity, operation) => {
-        const item = operation.payload.cart.find((cartItem) => cartItem.id === product.id);
-        return quantity + Number(item?.qty || 0);
+        const reserved = operation.payload.cart
+          .filter((cartItem) => cartItem.id === product.id)
+          .reduce((sum, cartItem) => sum + Number(cartItem.qty || 0), 0);
+        return quantity + reserved;
       }, 0);
-    return reserved ? { ...product, quantity: Math.max(0, product.quantity - reserved) } : product;
+    if (!reserved) return product;
+    const stockBatches = reconcileStockBatches(product, Math.max(0, product.quantity - reserved), product.expiry_date);
+    return {
+      ...product,
+      quantity: Math.max(0, product.quantity - reserved),
+      expiry_date: getEarliestStockExpiry(stockBatches) || '',
+      stock_batches: stockBatches.map((batch) => ({
+        quantity: batch.quantity,
+        expiry_date: batch.expiryDate || '',
+      })),
+    };
   });
 }
 
@@ -54,8 +67,10 @@ export async function createProduct(storeId, input) {
   const costPrice = parseNonNegativeNumber(input.costPrice || '0', 'cost price');
   const quantity = parseNonNegativeNumber(input.quantity, 'quantity', { integer: true });
   const reorderLevel = parseNonNegativeNumber(input.reorderLevel, 'low-stock threshold', { integer: true });
+  const expiryDate = validateIsoDate(input.expiryDate ?? input.expiry_date, 'expiry date', { required: false });
 
   const productReference = doc(productsCollection(authenticatedStoreId));
+  const stockBatches = addStockBatch([], quantity, expiryDate);
   await setDoc(productReference, {
     storeId: authenticatedStoreId,
     name,
@@ -66,6 +81,8 @@ export async function createProduct(storeId, input) {
     quantity,
     reorderLevel,
     category,
+    expiryDate: expiryDate || null,
+    stockBatches,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -82,17 +99,26 @@ export async function updateProduct(storeId, productId, input) {
   const costPrice = parseNonNegativeNumber(input.costPrice || '0', 'cost price');
   const quantity = parseNonNegativeNumber(input.quantity, 'quantity', { integer: true });
   const reorderLevel = parseNonNegativeNumber(input.reorderLevel, 'low-stock threshold', { integer: true });
+  const expiryDate = validateIsoDate(input.expiryDate ?? input.expiry_date, 'expiry date', { required: false });
 
-  await updateDoc(doc(productsCollection(authenticatedStoreId), productId), {
-    name,
-    sku: String(input.sku || '').trim(),
-    barcode: String(input.barcode || '').trim(),
-    unitPrice,
-    costPrice,
-    quantity,
-    reorderLevel,
-    category,
-    updatedAt: serverTimestamp(),
+  const productReference = doc(productsCollection(authenticatedStoreId), productId);
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(productReference);
+    if (!snapshot.exists()) throw new Error('This product no longer exists.');
+    const stockBatches = reconcileStockBatches(snapshot.data(), quantity, expiryDate);
+    transaction.update(productReference, {
+      name,
+      sku: String(input.sku || '').trim(),
+      barcode: String(input.barcode || '').trim(),
+      unitPrice,
+      costPrice,
+      quantity,
+      reorderLevel,
+      category,
+      expiryDate: getEarliestStockExpiry(stockBatches) || (quantity <= 0 ? expiryDate || null : null),
+      stockBatches,
+      updatedAt: serverTimestamp(),
+    });
   });
 }
 
