@@ -9,8 +9,6 @@ import { Pill, SEVERITY_COLOR, StatCard, TIER_META, TONE_META, confirmAction } f
 import AdminShopDetail from './AdminShopDetail';
 import { deactivateMany, publishShopScores, subscribeShopStats, subscribeSubscriptions } from '../../services/admin/adminRepository';
 import { DEFAULT_FEE, formatDay, paymentReminderMessage, subscriptionState, toDate } from '../../services/admin/billing';
-import { deactivateMany, subscribeShopStats, subscribeSubscriptions } from '../../services/admin/adminRepository';
-import { formatDay, subscriptionState, toDate } from '../../services/admin/billing';
 import {
   formatRand,
   formatValue,
