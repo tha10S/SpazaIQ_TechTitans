@@ -10,6 +10,9 @@ import { subscribeCustomers } from '../../services/firestore/customersRepository
 import { getForecast } from '../../services/weather/weatherService';
 import { buildShopAdvice, summariseWeather } from '../../services/advice/shopAdvice';
 import { reverseSale } from '../../services/firestore/saleReversal';
+import { buildShopStats } from '../../services/admin/shopStats';
+import { publishShopStats } from '../../services/admin/shopStatsPublisher';
+import ShopHealthCard from '../../components/ShopHealthCard';
 
 const BRAND_GREEN = "#004B49"; // solid buttons keep brand green in both themes
 
@@ -25,13 +28,7 @@ function shortRand(value) {
   return `R${(amount / 1000).toFixed(amount >= 10000 ? 0 : 1)}k`;
 }
 
-// Firestore Timestamps have toDate(); plain strings and numbers go through new Date()
-function toDate(value) {
-  return value?.toDate ? value.toDate() : new Date(value);
-}
-
 function getPeriodData(sales, period) {
-  const allSales = Array.isArray(sales) ? sales : [];
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   let end = new Date(start);
@@ -45,33 +42,65 @@ function getPeriodData(sales, period) {
     start.setDate(1);
     end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
   }
-  const filteredSales = allSales.filter((sale) => {
-    if (!sale.createdAt) return false;
-    const createdAt = toDate(sale.createdAt);
-    return !Number.isNaN(createdAt.getTime()) && createdAt >= start && createdAt < end;
-  });
+
+  const filteredSales = sales.filter(
+    (sale) => {
+      const createdAt = sale.createdAt ? new Date(sale.createdAt) : null;
+      return createdAt && !Number.isNaN(createdAt.getTime()) && createdAt >= start && createdAt < end;
+    }
+  );
+
   const productTotals = new Map();
   let itemsSold = 0;
   let profit = 0;
-  filteredSales.forEach((sale) => (sale.items || []).forEach((item) => {
-    const quantity = Number(item.qty || 0);
-    const key = item.id || item.name;
-    const total = productTotals.get(key) || { name: item.name || 'Product', sold: 0 };
-    total.sold += quantity;
-    productTotals.set(key, total);
-    itemsSold += quantity;
-    const cost = Number(item.costPrice);
-    if (Number.isFinite(cost)) profit += (Number(item.unitPrice || 0) - cost) * quantity;
-  }));
-  const topProducts = [...productTotals.values()].sort((left, right) => right.sold - left.sold).slice(0, 3);
-  const maxProductSales = Math.max(1, ...topProducts.map((item) => item.sold));
-  topProducts.forEach((item) => { item.fill = item.sold / maxProductSales; });
+
+  filteredSales.forEach((sale) =>
+    (sale.items || []).forEach((item) => {
+      const quantity = Number(item.qty ?? item.quantity ?? 0);
+      const name = item.name || item.productName || "Product";
+      const key = item.id || name;
+      const total = productTotals.get(key) || {
+        name,
+        sold: 0,
+      };
+
+      total.sold += quantity;
+      productTotals.set(key, total);
+      itemsSold += quantity;
+
+      const cost = Number(item.costPrice ?? item.cost_price);
+      const unitPrice = Number(item.unitPrice ?? item.unit_price ?? 0);
+      if (Number.isFinite(cost) && Number.isFinite(unitPrice)) {
+        profit += (unitPrice - cost) * quantity;
+      }
+    })
+  );
+
+  const topProducts = [...productTotals.values()]
+    .sort((left, right) => right.sold - left.sold)
+    .slice(0, 3);
+
+  if (topProducts.length) {
+    const maxProductSales = Math.max(1, ...topProducts.map((item) => item.sold));
+    topProducts.forEach((item) => {
+      item.fill = item.sold / maxProductSales;
+    });
+  }
 
   const buckets = period === "Week"
-    ? Array.from({ length: 7 }, (_, index) => ({ day: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][index], value: 0 }))
-    : Array.from({ length: Math.ceil(now.getDate() / 7) }, (_, index) => ({ day: `Week ${index + 1}`, value: 0 }));
+    ? Array.from({ length: 7 }, (_, index) => ({
+        day: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][index],
+        value: 0,
+      }))
+    : period === "Month"
+      ? Array.from({ length: Math.ceil(now.getDate() / 7) }, (_, index) => ({
+          day: `Week ${index + 1}`,
+          value: 0,
+        }))
+      : [{ day: "Today", value: 0 }];
+
   filteredSales.forEach((sale) => {
-    const date = toDate(sale.createdAt);
+    const date = new Date(sale.createdAt);
     const index =
       period === "Week"
         ? (date.getDay() + 6) % 7
@@ -84,10 +113,10 @@ function getPeriodData(sales, period) {
 
   return {
     stats: {
-      revenue: `R${filteredSales
+      revenue: `R ${filteredSales
         .reduce((sum, sale) => sum + Number(sale.total || 0), 0)
         .toFixed(2)}`,
-      profit: `R${profit.toFixed(2)}`,
+      profit: `R ${profit.toFixed(2)}`,
       itemsSold,
     },
     salesByDay: buckets,
@@ -165,6 +194,13 @@ export default function Insights({ route, navigation }) {
   );
   const weatherSummary = useMemo(() => summariseWeather(weather, new Date()), [weather, dayKey]);
 
+  // Shop-level totals only (no customer names or individual sales). They feed the shop health card
+  // below and are published for the admin area, which can read nothing else about this shop.
+  const shopStats = useMemo(() => buildShopStats({ products, sales, customers }), [products, sales, customers]);
+  useEffect(() => {
+    if (!loading && storeId) publishShopStats(storeId, shopStats);
+  }, [shopStats, loading, storeId]);
+
   const adviceTones = {
     danger: { color: colors.danger, bg: "rgba(220, 38, 38, 0.15)" },
     warning: { color: "#F59E0B", bg: "rgba(245, 158, 11, 0.15)" },
@@ -174,14 +210,14 @@ export default function Insights({ route, navigation }) {
   const data = getPeriodData(sales, period);
   // Today's most recent sales, one row per sale, so a whole purchase can be reversed at once
   const recentSales = [...data.filteredSales]
-    .sort((left, right) => toDate(right.createdAt) - toDate(left.createdAt))
+    .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))
     .slice(0, 5)
     .map((sale) => ({
       id: sale.id,
       pendingSync: Boolean(sale.pendingSync),
       total: Number(sale.total || 0),
       method: String(sale.paymentMethod || "").replace(/^./, (letter) => letter.toUpperCase()),
-      time: toDate(sale.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      time: new Date(sale.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       lines: (sale.items || []).map(
         (item) => `${item.name || item.productName || "Product"} ×${item.qty ?? item.quantity ?? 0}`
       ),
@@ -286,7 +322,9 @@ export default function Insights({ route, navigation }) {
 
       {period !== "Today" && (
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Sales by Day of Week</Text>
+          <Text style={styles.cardTitle}>
+            {period === "Week" ? "Sales by Day" : "Sales by Week"}
+          </Text>
           <View style={styles.chartRow}>
             {data.salesByDay.map((day) => (
               <View key={day.day} style={styles.barColumn}>
@@ -374,6 +412,9 @@ export default function Insights({ route, navigation }) {
         </>
       )}
 
+      {/* How the shop is doing overall, and what to fix first */}
+      <ShopHealthCard stats={shopStats} storeId={storeId} />
+
       {/* Advice from the weather, the date, and the shop's own stock, sales and credit */}
       <Text style={styles.sectionLabel}>SHOP ADVICE</Text>
 
@@ -425,18 +466,11 @@ export default function Insights({ route, navigation }) {
         })
       )}
 
-      <View style={styles.forecastCard}>
-        <Text style={styles.forecastTitle}>Demand forecast</Text>
-        <Text style={styles.forecastText}>
-          {data.topProducts.length
-            ? `Most sold in this period: ${data.topProducts.map((product) => product.name).join(', ')}.`
-            : 'Record sales to see your best-selling products for this period.'}
-        </Text>
-      </View>
-
-      <Text style={styles.sectionLabel}>TOP 3 BEST SELLING PRODUCTS</Text>
-      {data.topProducts.map((p, i) => (
-        <View key={i} style={styles.productCard}>
+      <Text style={[styles.sectionLabel, styles.topLabel]}>{`TOP 3 BEST SELLERS · ${period.toUpperCase()}`}</Text>
+      {data.topProducts.length === 0 && !loading ? (
+        <Text style={styles.recentTime}>No products sold in this period.</Text>
+      ) : data.topProducts.map((p, i) => (
+        <View key={`${p.name}-${i}`} style={styles.productCard}>
           <View>
             <Text style={styles.productName}>{p.name}</Text>
             <Text style={styles.productSold}>{p.sold} sold</Text>
@@ -687,24 +721,6 @@ const makeStyles = (colors) =>
       color: colors.primary,
     },
 
-    /* Demand forecast */
-    forecastCard: {
-      backgroundColor: colors.primaryLight,
-      borderRadius: 16,
-      padding: 16,
-      marginBottom: 16,
-    },
-    forecastTitle: {
-      color: colors.primary,
-      fontWeight: "800",
-      marginBottom: 8,
-    },
-    forecastText: {
-      color: colors.textPrimary,
-      lineHeight: 20,
-    },
-
-    /* Top products */
     productCard: {
       backgroundColor: colors.card,
       borderRadius: 14,
@@ -733,8 +749,6 @@ const makeStyles = (colors) =>
       height: "100%",
       backgroundColor: colors.primary,
     },
-
-    /* Recently sold */
     recentLeft: {
       flex: 1,
       paddingRight: 10,

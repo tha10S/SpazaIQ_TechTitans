@@ -23,13 +23,19 @@ export function buildShopStats({ products = [], sales = [], customers = [], now 
   let itemsSold30d = 0;
   let creditSales30d = 0;
   let lastSaleAt = null;
+  let firstSaleAt = null;
   const tradingDays = new Set();
+  // Revenue for each of the last 4 weeks. weekRevenue[0] is the most recent 7 days.
+  const weekRevenue = [0, 0, 0, 0];
 
   sales.forEach((sale) => {
     const date = toDate(sale.createdAt);
     if (!date) return;
     if (!lastSaleAt || date > lastSaleAt) lastSaleAt = date;
+    if (!firstSaleAt || date < firstSaleAt) firstSaleAt = date;
     const total = num(sale.total);
+    const weeksAgo = Math.floor((now - date) / (7 * DAY_MS));
+    if (date <= now && weeksAgo >= 0 && weeksAgo < 4) weekRevenue[weeksAgo] += total;
 
     if (date >= start30 && date <= now) {
       revenue30d += total;
@@ -81,6 +87,11 @@ export function buildShopStats({ products = [], sales = [], customers = [], now 
     activeDays30d: tradingDays.size,
     creditSales30d: round2(creditSales30d),
     lastSaleAt,
+    firstSaleAt,
+    weekRevenue1: round2(weekRevenue[0]),
+    weekRevenue2: round2(weekRevenue[1]),
+    weekRevenue3: round2(weekRevenue[2]),
+    weekRevenue4: round2(weekRevenue[3]),
     productCount: products.length,
     lowStockCount,
     outOfStockCount,

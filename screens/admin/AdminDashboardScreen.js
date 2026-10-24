@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,7 +7,7 @@ import { auth } from '../../services/firebase/firebaseConfig';
 import { useTheme } from '../../config/ThemeContext';
 import { Pill, SEVERITY_COLOR, StatCard, TIER_META, TONE_META, confirmAction } from './adminUi';
 import AdminShopDetail from './AdminShopDetail';
-import { deactivateMany, subscribeShopStats, subscribeSubscriptions } from '../../services/admin/adminRepository';
+import { deactivateMany, publishShopScores, subscribeShopStats, subscribeSubscriptions } from '../../services/admin/adminRepository';
 import { DEFAULT_FEE, formatDay, paymentReminderMessage, subscriptionState, toDate } from '../../services/admin/billing';
 import {
   formatRand,
@@ -72,6 +72,23 @@ export default function AdminDashboardScreen() {
     () => scoreAll(shops, now).map((shop) => ({ ...shop, sub: subs[shop.storeId] || null, state: subscriptionState(subs[shop.storeId], now) })),
     [shops, subs, now]
   );
+  // Each shop's finished score is published for that shop to read, so the shop owner sees the same number as here.
+  // Only scores that changed are written.
+  const publishedScores = useRef({});
+  useEffect(() => {
+    const changed = scored.filter((shop) => publishedScores.current[shop.storeId] !== `${shop.score}-${shop.tier}`);
+    if (!changed.length) return;
+    changed.forEach((shop) => {
+      publishedScores.current[shop.storeId] = `${shop.score}-${shop.tier}`;
+    });
+    publishShopScores(changed.map(({ storeId, score, tier }) => ({ storeId, score, tier }))).catch((err) => {
+      changed.forEach((shop) => {
+        delete publishedScores.current[shop.storeId]; // try again on the next change
+      });
+      console.warn('Could not publish shop scores', err?.code || err?.message);
+    });
+  }, [scored]);
+
   const totals = useMemo(() => platformTotals(scored), [scored]);
   const insights = useMemo(() => platformInsights(scored), [scored]);
   const comparison = useMemo(() => tierComparison(scored), [scored]);

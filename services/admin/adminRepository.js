@@ -153,6 +153,20 @@ export async function reactivateShop(storeId, existing, days = 7) {
   );
 }
 
+// Writes each shop's FINISHED score to shopScores/{storeId}. The admin dashboard works the score out (it is the
+// only place that can see every shop's revenue), and a shop reads only its own document, so a shop gets its final
+// number without ever downloading another shop's figures.
+// rows: [{ storeId, score, tier }]
+export async function publishShopScores(rows) {
+  for (let start = 0; start < rows.length; start += 400) {
+    const batch = writeBatch(db);
+    rows.slice(start, start + 400).forEach(({ storeId, score, tier }) => {
+      batch.set(doc(db, 'shopScores', storeId), { storeId, score, tier, updatedAt: serverTimestamp() });
+    });
+    await batch.commit();
+  }
+}
+
 // rows: [{ storeId, sub }]. Marks each one deactivated in a single batch.
 export async function deactivateMany(rows, reason = 'Unpaid') {
   for (let start = 0; start < rows.length; start += 400) {
