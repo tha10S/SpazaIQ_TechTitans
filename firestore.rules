@@ -4,12 +4,14 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function ownsStore(storeId) { return signedIn() && request.auth.uid == storeId; }
 
+    // ------------------------------------------------------------------------------------------
     // ADMIN ACCESS
     // An admin is a signed-in user who has a document at admins/{their uid}.
-    // That document can only be created in the Firebase console, never from the app.
-    // There is NO rule that lets an admin read stores/{storeId}/... so an admin can never
-    // read a shop's sales, customers, credit or products. Admins see only the shop-level
-    // totals in shopStats and the billing records in subscriptions.
+    // That document can only be created in the Firebase console, never from the app (see below).
+    // There is NO rule anywhere that lets an admin read stores/{storeId}/... so an admin can never
+    // read a shop's sales, customers, credit or products. Admins see only the shop-level totals in
+    // shopStats and the billing records in subscriptions.
+    // ------------------------------------------------------------------------------------------
     function isAdmin() {
       return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
@@ -34,8 +36,10 @@ service cloud.firestore {
       return d.keys().hasOnly([
           'storeId', 'shopName', 'contactEmail', 'contactPhone',
           'revenue30d', 'revenuePrev30d', 'profit30d', 'salesCount30d', 'itemsSold30d',
-          'activeDays30d', 'creditSales30d', 'lastSaleAt',
+          'activeDays30d', 'creditSales30d', 'lastSaleAt', 'firstSaleAt',
+          'weekRevenue1', 'weekRevenue2', 'weekRevenue3', 'weekRevenue4',
           'productCount', 'lowStockCount', 'outOfStockCount', 'stockCostValue',
+          'expiryTrackedCount', 'expiredCount', 'expiringSoonCount',
           'creditCustomers', 'creditOutstanding', 'creditOverdue', 'updatedAt'
         ])
         && d.keys().hasAll(['storeId', 'shopName', 'updatedAt'])
@@ -49,8 +53,13 @@ service cloud.firestore {
         && numberField(d, 'activeDays30d') && d.get('activeDays30d', 0) <= 31
         && numberField(d, 'creditSales30d')
         && (d.get('lastSaleAt', null) == null || d.get('lastSaleAt', null) is timestamp)
+        && (d.get('firstSaleAt', null) == null || d.get('firstSaleAt', null) is timestamp)
+        && numberField(d, 'weekRevenue1') && numberField(d, 'weekRevenue2')
+        && numberField(d, 'weekRevenue3') && numberField(d, 'weekRevenue4')
         && numberField(d, 'productCount') && numberField(d, 'lowStockCount')
         && numberField(d, 'outOfStockCount') && numberField(d, 'stockCostValue')
+        && numberField(d, 'expiryTrackedCount') && numberField(d, 'expiredCount')
+        && numberField(d, 'expiringSoonCount')
         && numberField(d, 'creditCustomers') && numberField(d, 'creditOutstanding')
         && numberField(d, 'creditOverdue')
         && d.updatedAt == request.time;
@@ -76,4 +85,130 @@ service cloud.firestore {
 
     function validPayment(d) {
       return d.keys().hasOnly(['amount', 'coveredMonth', 'paidAt', 'note', 'recordedBy'])
-        &&
+        && d.keys().hasAll(['amount', 'coveredMonth', 'paidAt', 'recordedBy'])
+        && d.amount is number && d.amount >= 0
+        && d.coveredMonth is string && d.coveredMonth.size() == 7
+        && d.get('note', '') is string && d.get('note', '').size() <= 200
+        && d.recordedBy == request.auth.uid
+        && d.paidAt == request.time;
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // NEW: admin, subscription and shop-total collections
+    // ------------------------------------------------------------------------------------------
+
+    // Who is an admin. A signed-in user may check ONLY their own document (so the app can decide whether to show
+    // the Admin area). Nobody can list it, and nobody can write it from the app. Add admins in the console.
+    match /admins/{adminId} {
+      allow get: if signedIn() && request.auth.uid == adminId;
+      allow list, create, update, delete: if false;
+    }
+
+    // Billing status. Only an admin can write it. A shop can read its own, to show a "payment due" banner.
+    match /subscriptions/{storeId} {
+      allow get: if ownsStore(storeId) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() && validSubscription(storeId, request.resource.data);
+      allow delete: if isAdmin();
+
+      // Payment history is append-only: it can be added to, but never edited or deleted.
+      match /payments/{paymentId} {
+        allow read: if ownsStore(storeId) || isAdmin();
+        allow create: if isAdmin() && validPayment(request.resource.data);
+        allow update, delete: if false;
+      }
+    }
+
+    // Anonymous shop-level totals. The shop writes its own (and only numbers and its name and contact are accepted).
+    // An admin can read all of them. This is the ONLY shop data an admin can read.
+    match /shopStats/{storeId} {
+      allow get: if ownsStore(storeId) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update: if ownsStore(storeId) && validShopStats(storeId, request.resource.data);
+      allow delete: if ownsStore(storeId);
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // A shop's FINISHED score. Only an admin can write it (the admin dashboard works it out, because only an admin can
+    // compare shops). A shop can read only its own, so it sees its final number and never another shop's figures.
+    function validShopScore(storeId, d) {
+      return d.keys().hasOnly(['storeId', 'score', 'tier', 'updatedAt'])
+        && d.keys().hasAll(['storeId', 'score', 'tier', 'updatedAt'])
+        && d.storeId == storeId
+        && d.score is number && d.score >= 0 && d.score <= 100
+        && d.tier in ['high', 'mid', 'low']
+        && d.updatedAt == request.time;
+    }
+
+    match /shopScores/{storeId} {
+      allow get: if ownsStore(storeId) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() && validShopScore(storeId, request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // EXISTING RULES (unchanged, except for the one marked CHANGED below)
+    // ------------------------------------------------------------------------------------------
+    match /test/{documentId} {
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow read: if signedIn() && resource.data.ownerUid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.uid == userId
+        && request.resource.data.defaultStoreId == userId
+        && request.resource.data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'fullName', 'mobile', 'shopName',
+          'defaultStoreId', 'createdAt', 'updatedAt', 'location', 'shopRegistration'
+        ]);
+      allow update: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.uid == userId
+        && request.resource.data.defaultStoreId == resource.data.defaultStoreId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'fullName', 'mobile', 'shopName',
+          'defaultStoreId', 'createdAt', 'updatedAt', 'location', 'shopRegistration'
+        ]);
+      allow delete: if signedIn() && request.auth.uid == userId;
+    }
+
+    match /stores/{storeId} {
+      allow read: if ownsStore(storeId);
+      allow create: if ownsStore(storeId)
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'ownerId', 'name', 'seedVersion', 'createdAt', 'updatedAt'
+        ]);
+      allow update: if ownsStore(storeId)
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'ownerId', 'name', 'seedVersion', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if ownsStore(storeId);
+
+      match /{collectionName}/{documentId} {
+        allow read: if ownsStore(storeId);
+        // CHANGED: a suspended (unpaid) shop cannot record new sales. Everything else is as before.
+        allow create: if ownsStore(storeId)
+          && request.resource.data.storeId == storeId
+          && (collectionName != 'sales' || !isSuspended(storeId));
+        allow update: if ownsStore(storeId)
+          && resource.data.storeId == storeId
+          && request.resource.data.storeId == storeId;
+        allow delete: if ownsStore(storeId);
+      }
+
+      // Nested subcollections at any depth: read and delete only
+      match /{path=**} {
+        allow read, delete: if ownsStore(storeId);
+      }
+    }
+  }
+}
