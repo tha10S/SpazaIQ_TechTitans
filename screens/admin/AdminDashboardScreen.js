@@ -9,6 +9,8 @@ import { Pill, SEVERITY_COLOR, StatCard, TIER_META, TONE_META, confirmAction } f
 import AdminShopDetail from './AdminShopDetail';
 import { deactivateMany, publishShopScores, subscribeShopStats, subscribeSubscriptions } from '../../services/admin/adminRepository';
 import { DEFAULT_FEE, formatDay, paymentReminderMessage, subscriptionState, toDate } from '../../services/admin/billing';
+import { deactivateMany, subscribeShopStats, subscribeSubscriptions } from '../../services/admin/adminRepository';
+import { formatDay, subscriptionState, toDate } from '../../services/admin/billing';
 import {
   formatRand,
   formatValue,
@@ -18,7 +20,6 @@ import {
   scoreAll,
   tierComparison,
 } from '../../services/admin/performance';
-import { openWhatsApp } from '../../services/whatsapp';
 
 const BRAND_GREEN = '#004B49';
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -148,14 +149,6 @@ export default function AdminDashboardScreen() {
         }
       }
     );
-  };
-
-  const remind = async (shop) => {
-    const result = await openWhatsApp(
-      shop.contactPhone,
-      paymentReminderMessage({ shopName: shop.shopName, fee: shop.sub?.monthlyFee ?? DEFAULT_FEE, dueDate: shop.state.dueDate, accessUntil: shop.state.accessUntil })
-    );
-    if (!result.ok) setNotice(result.error);
   };
 
   const selected = scored.find((shop) => shop.storeId === selectedId) || null;
@@ -304,7 +297,6 @@ export default function AdminDashboardScreen() {
       ) : (
         billingRows.map((shop) => {
           const tone = TONE_META[shop.state.tone];
-          const chase = shop.state.key === 'overdue' || shop.state.key === 'due-soon' || shop.state.key === 'deactivated';
           return (
             <Pressable key={shop.storeId} style={styles.billRow} onPress={() => setSelectedId(shop.storeId)}>
               <View style={{ flex: 1 }}>
@@ -315,11 +307,6 @@ export default function AdminDashboardScreen() {
               </View>
               <View style={{ alignItems: 'flex-end', gap: 6 }}>
                 <Pill label={shop.state.label} color={tone.color} bg={tone.bg} />
-                {chase && shop.contactPhone ? (
-                  <Pressable onPress={() => remind(shop)} hitSlop={8}>
-                    <Text style={styles.link}>WhatsApp</Text>
-                  </Pressable>
-                ) : null}
               </View>
             </Pressable>
           );

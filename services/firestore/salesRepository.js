@@ -12,6 +12,7 @@ import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath } from './paths';
 import { mapSale } from './mappers';
 import { parseNonNegativeNumber, todayIsoDate, validateIsoDate } from '../validation';
+import { consumeStockBatches, getEarliestStockExpiry, normalizeStockBatches } from './stockBatches';
 import {
   enqueueOfflineOperation,
   getOfflineOperations,
@@ -146,13 +147,39 @@ async function recordSaleOnline({ storeId, cart, paymentMethod, total, customerI
     const operation = await transaction.get(operationRef(authenticatedStoreId, idempotencyKey));
     if (operation.exists()) return operation.data().result;
 
-    const productReferences = cart.map((item) => doc(db, ...storeCollectionPath(authenticatedStoreId, 'products'), item.id));
+    const productIds = [...new Set(cart.map((item) => item.id))];
+    const productReferences = productIds.map((id) => doc(db, ...storeCollectionPath(authenticatedStoreId, 'products'), id));
     const productSnapshots = [];
     for (const productReference of productReferences) productSnapshots.push(await transaction.get(productReference));
     productSnapshots.forEach((snapshot, index) => {
-      if (!snapshot.exists()) throw new Error(`Product ${cart[index].name} no longer exists.`);
+      if (!snapshot.exists()) {
+        const name = cart.find((item) => item.id === productIds[index])?.name || 'Product';
+        throw new Error(`${name} no longer exists.`);
+      }
+    });
+    const quantities = new Map();
+    cart.forEach((item) => quantities.set(item.id, (quantities.get(item.id) || 0) + Number(item.qty)));
+    productSnapshots.forEach((snapshot, index) => {
+      const productId = productIds[index];
       const available = Number(snapshot.data().quantity ?? 0);
-      if (available < cart[index].qty) throw new Error(`${cart[index].name} has only ${available} in stock.`);
+      const requested = quantities.get(productId);
+      if (available < requested) {
+        const name = cart.find((item) => item.id === productId)?.name || 'Product';
+        throw new Error(`${name} has only ${available} in stock.`);
+      }
+    });
+
+    const batchesByProduct = new Map(productSnapshots.map((snapshot, index) => [
+      productIds[index],
+      normalizeStockBatches(snapshot.data()),
+    ]));
+    const saleItems = cart.map((item) => {
+      const { batches, allocations } = consumeStockBatches(
+        batchesByProduct.get(item.id),
+        Number(item.qty)
+      );
+      batchesByProduct.set(item.id, batches);
+      return { ...item, stockBatchAllocations: allocations };
     });
 
     let customerSnapshot = null;
@@ -184,14 +211,17 @@ async function recordSaleOnline({ storeId, cart, paymentMethod, total, customerI
       paidAmount: numericPaid,
       creditAmount: numericCredit,
       customerId: customerId || null,
-      items: cart,
+      items: saleItems,
       idempotencyKey,
       createdAt: serverTimestamp(),
     });
     productSnapshots.forEach((snapshot, index) => {
-      const product = cart[index];
+      const productId = productIds[index];
+      const stockBatches = batchesByProduct.get(productId);
       transaction.update(productReferences[index], {
-        quantity: Number(snapshot.data().quantity ?? 0) - product.qty,
+        quantity: Number(snapshot.data().quantity ?? 0) - quantities.get(productId),
+        stockBatches,
+        expiryDate: getEarliestStockExpiry(stockBatches),
         updatedAt: serverTimestamp(),
       });
     });
