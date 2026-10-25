@@ -14,6 +14,7 @@ import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath } from './paths';
 import { mapProduct } from './mappers';
 import { parseNonNegativeNumber } from '../validation';
+import { filterProductsBySearch } from '../productSearch';
 import {
   getOfflineOperations,
   isNetworkError,
@@ -21,12 +22,6 @@ import {
   savePosCreditSnapshot,
   subscribeOfflineOperations,
 } from '../offline/posCreditQueue';
-
-function matchesSearch(product, term) {
-  return !term || [product.name, product.sku, product.barcode]
-    .map((value) => String(value ?? '').toLowerCase())
-    .some((value) => value.includes(term));
-}
 
 function productsCollection(storeId) {
   return collection(db, ...storeCollectionPath(storeId, 'products'));
@@ -109,13 +104,11 @@ export async function fetchProducts(storeId, searchTerm = '') {
     if (!Array.isArray(products)) throw error;
   }
   const operations = await getOfflineOperations(authenticatedStoreId);
-  const term = searchTerm.trim().toLowerCase();
-  return applyPendingStock(products, operations).filter((product) => matchesSearch(product, term));
+  return filterProductsBySearch(applyPendingStock(products, operations), searchTerm);
 }
 
 export function subscribeProducts(storeId, searchTerm, onData, onError) {
   const authenticatedStoreId = assertStoreId(storeId);
-  const term = searchTerm.trim().toLowerCase();
   const productsQuery = query(productsCollection(authenticatedStoreId), orderBy('name'));
   let active = true;
   let cachedProducts = null;
@@ -123,7 +116,7 @@ export function subscribeProducts(storeId, searchTerm, onData, onError) {
   let unsubscribe = () => {};
   let unsubscribeQueue = () => {};
   const publishProducts = (products) => onData(
-    applyPendingStock(products, queuedOperations).filter((product) => matchesSearch(product, term))
+    filterProductsBySearch(applyPendingStock(products, queuedOperations), searchTerm)
   );
   const start = async () => {
     try {
