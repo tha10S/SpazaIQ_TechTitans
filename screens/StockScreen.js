@@ -16,6 +16,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../config/ThemeContext';
 import { useProducts } from '../hooks/useProducts';
 import { getAuthenticatedStoreId } from '../services/firestore/paths';
+import { deleteProduct } from '../services/firestore/productsRepository';
 import { createProduct, updateProduct } from '../services/salesService';
 import { isValidDecimalInput, isValidIsoDate } from '../services/validation';
 
@@ -58,6 +59,8 @@ export default function StockScreen({ navigation, route }) {
   const [productForm, setProductForm] = useState(EMPTY_PRODUCT);
   const [productError, setProductError] = useState('');
   const [savingProduct, setSavingProduct] = useState(false);
+  // Removing a product asks for a second tap, because Alert.alert shows nothing on web
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const storeId = route?.params?.storeId || getAuthenticatedStoreId();
   const { products, loading, error } = useProducts(storeId, searchQuery);
 
@@ -93,6 +96,7 @@ export default function StockScreen({ navigation, route }) {
       expiryDate: String(product.expiry_date || product.expiryDate || '').slice(0, 10),
     } : EMPTY_PRODUCT);
     setExpiryPickerVisible(false);
+    setConfirmRemove(false);
     setProductError('');
     setProductFormVisible(true);
   };
@@ -109,6 +113,21 @@ export default function StockScreen({ navigation, route }) {
       setProductFormVisible(false);
     } catch (error) {
       setProductError(error.message || 'Could not save this product.');
+    } finally {
+      setSavingProduct(false);
+    }
+  };
+
+  const removeProduct = async () => {
+    if (!editingProduct) return;
+    setSavingProduct(true);
+    setProductError('');
+    try {
+      await deleteProduct(storeId, editingProduct.id);
+      setConfirmRemove(false);
+      setProductFormVisible(false);
+    } catch (error) {
+      setProductError(error.message || 'Could not remove this product.');
     } finally {
       setSavingProduct(false);
     }
@@ -177,7 +196,7 @@ export default function StockScreen({ navigation, route }) {
               <View style={[styles.statIconBadge, { backgroundColor: 'rgba(245,158,11,0.15)' }]}>
                 <Ionicons name="time" size={16} color="#F59E0B" />
               </View>
-              <Text style={styles.summaryLabel}>Expiring</Text>
+              <Text style={styles.summaryLabel}>Sell By Soon</Text>
               <Text style={[styles.summaryValue, { color: '#F59E0B' }]}>{expiringCount}</Text>
             </View>
           </View>
@@ -242,7 +261,7 @@ export default function StockScreen({ navigation, route }) {
                     </Text>
                   </View>
                   {batchExpirySummary ? (
-                    <Text style={styles.batchExpiryText} numberOfLines={2}>Expiry batches: {batchExpirySummary}</Text>
+                    <Text style={styles.batchExpiryText} numberOfLines={2}>Sell-by batches: {batchExpirySummary}</Text>
                   ) : null}
                 </View>
 
@@ -328,12 +347,12 @@ export default function StockScreen({ navigation, route }) {
                   </View>
                 ))}
                 <View style={styles.formField}>
-                  <Text style={styles.formLabel}>Expiry date (optional)</Text>
+                  <Text style={styles.formLabel}>Sell by date (optional)</Text>
                   {Platform.OS === 'web' ? (
                     <View style={styles.expiryInputRow}>
                       {React.createElement('input', {
                         type: 'date',
-                        'aria-label': 'Product expiry date',
+                        'aria-label': 'Product sell by date',
                         value: productForm.expiryDate,
                         onChange: (event) => setProductForm((current) => ({
                           ...current,
@@ -358,7 +377,7 @@ export default function StockScreen({ navigation, route }) {
                           onPress={() => setProductForm((current) => ({ ...current, expiryDate: '' }))}
                           disabled={savingProduct}
                           accessibilityRole="button"
-                          accessibilityLabel="Clear expiry date"
+                          accessibilityLabel="Clear sell by date"
                         >
                           <Ionicons name="close-circle" size={20} color={colors.textMuted} />
                         </TouchableOpacity>
@@ -373,15 +392,15 @@ export default function StockScreen({ navigation, route }) {
                           disabled={savingProduct}
                           accessibilityRole="button"
                           accessibilityLabel={productForm.expiryDate
-                            ? `Expiry date ${productForm.expiryDate}`
-                            : 'Select expiry date'}
+                            ? `Sell by date ${productForm.expiryDate}`
+                            : 'Select sell by date'}
                         >
                           <Ionicons name="calendar-outline" size={18} color={colors.textMuted} />
                           <Text style={[
                             styles.expiryDateText,
                             !productForm.expiryDate && styles.expiryDatePlaceholder,
                           ]}>
-                            {productForm.expiryDate || 'Select expiry date'}
+                            {productForm.expiryDate || 'Select sell by date'}
                           </Text>
                         </TouchableOpacity>
                         {productForm.expiryDate ? (
@@ -390,7 +409,7 @@ export default function StockScreen({ navigation, route }) {
                             onPress={() => setProductForm((current) => ({ ...current, expiryDate: '' }))}
                             disabled={savingProduct}
                             accessibilityRole="button"
-                            accessibilityLabel="Clear expiry date"
+                            accessibilityLabel="Clear sell by date"
                           >
                             <Ionicons name="close-circle" size={20} color={colors.textMuted} />
                           </TouchableOpacity>
@@ -419,10 +438,49 @@ export default function StockScreen({ navigation, route }) {
                 </View>
                 {editingProduct?.stock_batches?.length > 1 ? (
                   <Text style={styles.batchExpiryText}>
-                    Separate expiry batches are tracked. With no quantity change, this date edits the earliest-expiring batch or batches; record supplier deliveries in Suppliers to add another dated batch.
+                    Separate sell-by batches are tracked. With no quantity change, this date edits the earliest batch or batches; record supplier deliveries in Suppliers to add another dated batch.
                   </Text>
                 ) : null}
                 {productError ? <Text style={styles.formError}>{productError}</Text> : null}
+
+                {editingProduct ? (
+                  confirmRemove ? (
+                    <View style={styles.removeConfirmBox}>
+                      <Text style={styles.removeConfirmText}>
+                        Remove {editingProduct.name} from Stock? This cannot be undone.
+                      </Text>
+                      <View style={styles.removeConfirmActions}>
+                        <TouchableOpacity
+                          style={styles.formSecondaryButton}
+                          onPress={() => setConfirmRemove(false)}
+                          disabled={savingProduct}
+                        >
+                          <Text style={styles.formSecondaryText}>Keep</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.removeConfirmButton}
+                          onPress={removeProduct}
+                          disabled={savingProduct}
+                          accessibilityRole="button"
+                        >
+                          <Text style={styles.removeConfirmButtonText}>{savingProduct ? 'Removing...' : 'Yes, remove'}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.removeButton}
+                      onPress={() => setConfirmRemove(true)}
+                      disabled={savingProduct}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${editingProduct.name} from Stock`}
+                    >
+                      <Ionicons name="trash-outline" size={16} color={colors.danger} />
+                      <Text style={styles.removeButtonText}>Remove Product</Text>
+                    </TouchableOpacity>
+                  )
+                ) : null}
+
                 <View style={styles.formActions}>
                   <TouchableOpacity style={styles.formSecondaryButton} onPress={() => setProductFormVisible(false)} disabled={savingProduct}>
                     <Text style={styles.formSecondaryText}>Cancel</Text>
@@ -639,5 +697,37 @@ function makeStyles(colors, typography, spacing, radius) {
     formSecondaryText: { color: colors.textPrimary, fontWeight: '700' },
     formPrimaryButton: { minWidth: 120, paddingVertical: 11, backgroundColor: brandGreen, borderRadius: 8, alignItems: 'center' },
     formPrimaryText: { color: '#FFFFFF', fontWeight: '700' },
+
+    /* Remove product */
+    removeButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      marginTop: 14,
+      paddingVertical: 10,
+      borderWidth: 1,
+      borderColor: colors.danger,
+      borderRadius: 8,
+    },
+    removeButtonText: { color: colors.danger, fontWeight: '700', fontSize: 13 },
+    removeConfirmBox: {
+      marginTop: 14,
+      padding: 12,
+      borderWidth: 1,
+      borderColor: 'rgba(220, 38, 38, 0.4)',
+      backgroundColor: 'rgba(220, 38, 38, 0.1)',
+      borderRadius: 8,
+    },
+    removeConfirmText: { color: colors.danger, fontSize: 13, fontWeight: '600', lineHeight: 18 },
+    removeConfirmActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 10 },
+    removeConfirmButton: {
+      minWidth: 120,
+      paddingVertical: 11,
+      backgroundColor: colors.danger,
+      borderRadius: 8,
+      alignItems: 'center',
+    },
+    removeConfirmButtonText: { color: '#FFFFFF', fontWeight: '700' },
   });
 }

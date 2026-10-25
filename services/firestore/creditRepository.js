@@ -38,6 +38,9 @@ function operationRef(storeId, key) {
   return doc(db, ...storeCollectionPath(storeId, 'operations'), key);
 }
 
+// Rands to whole cents, so a balance never ends up as 0.0000000001 after a payment
+const roundMoney = (value) => Math.round(Number(value) * 100) / 100;
+
 function pendingBalanceChange(operation, customerId) {
   if (operation.status === 'failed') return 0;
   const payload = operation.payload;
@@ -254,6 +257,19 @@ async function makePaymentOnline({ storeId, customerId, amount, idempotencyKey, 
   const authenticatedStoreId = assertStoreId(storeId);
   const numericAmount = validatePaymentInput({ customerId, amount, idempotencyKey, paymentDate, paymentMethod });
 
+  // A Firestore transaction can only read single documents, not queries.
+  // Passing a query to transaction.get() is what caused "Cannot read properties of undefined (reading 'path')".
+  // So find this customer's active repayment schedules first, oldest due date first,
+  // then read each one again by reference inside the transaction.
+  const schedulesSnapshot = await getDocs(query(
+    collection(db, ...storeCollectionPath(authenticatedStoreId, 'repaymentSchedules')),
+    where('customerId', '==', customerId)
+  ));
+  const scheduleReferences = schedulesSnapshot.docs
+    .filter((scheduleSnapshot) => scheduleSnapshot.data().status === 'active')
+    .sort((left, right) => String(left.data().dueDate || '').localeCompare(String(right.data().dueDate || '')))
+    .map((scheduleSnapshot) => scheduleSnapshot.ref);
+
   return runTransaction(db, async (transaction) => {
     const operation = await transaction.get(operationRef(authenticatedStoreId, idempotencyKey));
     if (operation.exists()) return operation.data().result;
@@ -262,30 +278,33 @@ async function makePaymentOnline({ storeId, customerId, amount, idempotencyKey, 
     const customerSnapshot = await transaction.get(customer);
     if (!customerSnapshot.exists()) throw new Error('Customer account not found.');
     const currentBalance = Number(customerSnapshot.data().balance ?? 0);
-    if (numericAmount > currentBalance) throw new Error('Payment cannot exceed the customer balance.');
-    const schedulesQuery = query(
-      collection(db, ...storeCollectionPath(authenticatedStoreId, 'repaymentSchedules')),
-      where('customerId', '==', customerId)
-    );
-    const schedulesSnapshot = await transaction.get(schedulesQuery);
+    if (roundMoney(numericAmount) > roundMoney(currentBalance)) throw new Error('Payment cannot exceed the customer balance.');
+
+    // All reads must happen before any write in a transaction
+    const scheduleSnapshots = [];
+    for (const reference of scheduleReferences) {
+      const scheduleSnapshot = await transaction.get(reference);
+      if (scheduleSnapshot.exists() && scheduleSnapshot.data().status === 'active') {
+        scheduleSnapshots.push(scheduleSnapshot);
+      }
+    }
+
     let unappliedPayment = numericAmount;
     const scheduleUpdates = [];
-    schedulesSnapshot.docs
-      .filter((scheduleSnapshot) => scheduleSnapshot.data().status === 'active')
-      .sort((left, right) => String(left.data().dueDate || '').localeCompare(String(right.data().dueDate || '')))
-      .forEach((scheduleSnapshot) => {
-        if (unappliedPayment <= 0) return;
-        const remainingAmount = Number(scheduleSnapshot.data().remainingAmount ?? 0);
-        if (remainingAmount <= 0) return;
-        const appliedAmount = Math.min(unappliedPayment, remainingAmount);
-        unappliedPayment -= appliedAmount;
-        scheduleUpdates.push({
-          reference: scheduleSnapshot.ref,
-          remainingAmount: remainingAmount - appliedAmount,
-          appliedAmount,
-        });
+    scheduleSnapshots.forEach((scheduleSnapshot) => {
+      if (unappliedPayment <= 0) return;
+      const remainingAmount = Number(scheduleSnapshot.data().remainingAmount ?? 0);
+      if (remainingAmount <= 0) return;
+      const appliedAmount = Math.min(unappliedPayment, remainingAmount);
+      unappliedPayment -= appliedAmount;
+      scheduleUpdates.push({
+        reference: scheduleSnapshot.ref,
+        remainingAmount: roundMoney(remainingAmount - appliedAmount),
+        appliedAmount,
       });
+    });
 
+    const newBalance = roundMoney(currentBalance - numericAmount);
     const ledger = doc(ledgerCollection(authenticatedStoreId));
     const result = { id: ledger.id, customerId, amount: -numericAmount };
     transaction.set(ledger, {
@@ -304,10 +323,10 @@ async function makePaymentOnline({ storeId, customerId, amount, idempotencyKey, 
       createdAt: serverTimestamp(),
     });
     transaction.update(customer, {
-      balance: currentBalance - numericAmount,
-        overdue: false,
-        overdueBalance: 0,
-        nextDueDate: currentBalance - numericAmount <= 0 ? null : customerSnapshot.data().nextDueDate ?? null,
+      balance: newBalance,
+      overdue: false,
+      overdueBalance: 0,
+      nextDueDate: newBalance <= 0 ? null : customerSnapshot.data().nextDueDate ?? null,
       updatedAt: serverTimestamp(),
     });
     scheduleUpdates.forEach(({ reference, remainingAmount }) => {
@@ -321,7 +340,7 @@ async function makePaymentOnline({ storeId, customerId, amount, idempotencyKey, 
       type: 'makePayment',
       result,
       createdAt: serverTimestamp(),
-        storeId: authenticatedStoreId,
+      storeId: authenticatedStoreId,
     });
     return result;
   });

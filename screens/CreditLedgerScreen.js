@@ -136,10 +136,19 @@ export default function CreditLedgerScreen({ route, navigation }) {
   );
 
   const storeId = route?.params?.storeId || getAuthenticatedStoreId();
-  const { customers, loading, error, confirmCredit, createCustomerWithCredit, recordPayment } = useCustomerBalances(storeId);
+  const { customers: allCustomers, loading, error, confirmCredit, createCustomerWithCredit, recordPayment } = useCustomerBalances(storeId);
 
   // Set when a credit sale was started on the Sell screen: { creditAmount, total, itemCount, paymentMethod }
   const saleDraft = route?.params?.saleDraft;
+
+  // Only customers who still owe money are listed, so a paid-up customer drops off the ledger.
+  // During a credit sale every customer can still be picked.
+  const customers = useMemo(
+    () => (saleDraft
+      ? (allCustomers || [])
+      : (allCustomers || []).filter((customer) => Math.round(Number(customer.balance || 0) * 100) > 0)),
+    [allCustomers, saleDraft]
+  );
 
   const [idModalVisible, setIdModalVisible] = useState(false);
   const [modalMode, setModalMode] = useState('credit');

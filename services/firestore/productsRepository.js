@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteDoc,
   doc,
   getDocs,
   onSnapshot,
@@ -120,6 +121,14 @@ export async function updateProduct(storeId, productId, input) {
       updatedAt: serverTimestamp(),
     });
   });
+}
+
+// Removes a product from Stock. Past sales keep their own copy of the item name and price,
+// so they are not affected.
+export async function deleteProduct(storeId, productId) {
+  const authenticatedStoreId = assertStoreId(storeId);
+  if (!productId) throw new Error('Choose a product to remove.');
+  await deleteDoc(doc(productsCollection(authenticatedStoreId), productId));
 }
 
 export async function fetchProducts(storeId, searchTerm = '') {

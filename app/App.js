@@ -63,18 +63,18 @@ function MainTabs({ route }) {
   return (
     <Tab.Navigator
       screenOptions={({ route: screenRoute }) => ({
-  headerShown: false,
-  tabBarStyle: {
-    backgroundColor: colors.card,
-    borderTopColor: colors.border,
-  },
-  tabBarActiveTintColor: colors.primary,
-  tabBarInactiveTintColor: colors.textMuted,
-  tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
-  tabBarIcon: ({ color, size }) => (
-    <Ionicons name={icons[screenRoute.name]} size={size} color={color} />
-  ),
-})}
+        headerShown: false,
+        tabBarStyle: {
+          backgroundColor: colors.card,
+          borderTopColor: colors.border,
+        },
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textMuted,
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        tabBarIcon: ({ color, size }) => (
+          <Ionicons name={icons[screenRoute.name]} size={size} color={color} />
+        ),
+      })}
     >
       <Tab.Screen name="Home" component={HomeScreen} initialParams={account} />
       <Tab.Screen name="Stock" component={StockScreen} initialParams={account} />
@@ -242,11 +242,8 @@ function AppContent() {
               <Stack.Screen name="Notifications" component={NotificationsScreen} />
               <Stack.Screen name="Placeholder" component={PlaceholderScreen} />
               <Stack.Screen name="Profile" component={ProfileSettingsScreen} />
-              <Stack.Screen
-                name="RepaymentTracker"
-                component={RepaymentTrackerScreen}
-                options={{ headerShown: true, title: 'Repayment Tracker' }}
-              />
+              {/* No stack header here: the screen draws its own title and back button */}
+              <Stack.Screen name="RepaymentTracker" component={RepaymentTrackerScreen} />
             </>
           ) : (
             <>
