@@ -45,7 +45,8 @@ const formatR = (value) => `R${Number(value || 0).toFixed(2)}`;
 
 // An item from Stock is identified by its productId. An item typed in by hand has no productId,
 // so it is identified by its name instead.
-const itemKey = (item) => item.productId || `name:${String(item.name || "").trim().toLowerCase()}`;
+const nameKey = (value) => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+const itemKey = (item) => item.productId || `name:${nameKey(item.name)}`;
 
 // Small helper so every component below gets theme colors + styles
 function useThemedStyles() {
@@ -292,7 +293,7 @@ function SuppliersTab({ query, setQuery, suppliers, products, loaded, storeId, s
 
     // Link to Stock when the item was picked from Stock, or the typed name matches a Stock product exactly
     const stockProduct = pickedProduct
-      || products.find((product) => String(product.name || "").trim().toLowerCase() === name.toLowerCase())
+      || products.find((product) => nameKey(product.name) === nameKey(name))
       || null;
 
     let unitCost = 0;

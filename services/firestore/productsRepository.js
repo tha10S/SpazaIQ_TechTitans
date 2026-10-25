@@ -15,7 +15,7 @@ import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath } from './paths';
 import { mapProduct } from './mappers';
 import { parseNonNegativeNumber, validateIsoDate } from '../validation';
-import { addStockBatch, getEarliestStockExpiry, reconcileStockBatches } from './stockBatches';
+import { addStockBatch, getEarliestStockExpiry, normalizeStockBatches, reconcileStockBatches } from './stockBatches';
 import {
   getOfflineOperations,
   isNetworkError,
@@ -58,7 +58,20 @@ function applyPendingStock(products, operations) {
   });
 }
 
-export async function createProduct(storeId, input) {
+// Product names are compared ignoring capitals and extra spaces
+const nameKey = (value) => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+// The existing product with this name, if there is one
+async function findProductByName(storeId, name, excludeId = null) {
+  const snapshot = await getDocs(productsCollection(storeId));
+  const key = nameKey(name);
+  return snapshot.docs.find((item) => item.id !== excludeId && nameKey(item.data().name) === key) || null;
+}
+
+// Adds a product. If a product with the same name already exists, the quantity is added to that
+// product instead of creating a second entry, and its other details are left as they are.
+// Returns { id, name, merged, added, quantity }.
+export async function saveNewProduct(storeId, input) {
   const authenticatedStoreId = assertStoreId(storeId);
   const name = String(input.name || '').trim();
   const category = String(input.category || 'General').trim();
@@ -69,6 +82,25 @@ export async function createProduct(storeId, input) {
   const quantity = parseNonNegativeNumber(input.quantity, 'quantity', { integer: true });
   const reorderLevel = parseNonNegativeNumber(input.reorderLevel, 'low-stock threshold', { integer: true });
   const expiryDate = validateIsoDate(input.expiryDate ?? input.expiry_date, 'expiry date', { required: false });
+
+  const existing = await findProductByName(authenticatedStoreId, name);
+  if (existing) {
+    let newQuantity = 0;
+    await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(existing.ref);
+      if (!snapshot.exists()) throw new Error('This product no longer exists. Try adding it again.');
+      const data = snapshot.data();
+      newQuantity = Number(data.quantity || 0) + quantity;
+      const stockBatches = addStockBatch(normalizeStockBatches(data), quantity, expiryDate);
+      transaction.update(existing.ref, {
+        quantity: newQuantity,
+        stockBatches,
+        expiryDate: getEarliestStockExpiry(stockBatches),
+        updatedAt: serverTimestamp(),
+      });
+    });
+    return { id: existing.id, name: String(existing.data().name || name), merged: true, added: quantity, quantity: newQuantity };
+  }
 
   const productReference = doc(productsCollection(authenticatedStoreId));
   const stockBatches = addStockBatch([], quantity, expiryDate);
@@ -87,7 +119,11 @@ export async function createProduct(storeId, input) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  return productReference.id;
+  return { id: productReference.id, name, merged: false, added: quantity, quantity };
+}
+
+export async function createProduct(storeId, input) {
+  return (await saveNewProduct(storeId, input)).id;
 }
 
 export async function updateProduct(storeId, productId, input) {
@@ -101,6 +137,11 @@ export async function updateProduct(storeId, productId, input) {
   const quantity = parseNonNegativeNumber(input.quantity, 'quantity', { integer: true });
   const reorderLevel = parseNonNegativeNumber(input.reorderLevel, 'low-stock threshold', { integer: true });
   const expiryDate = validateIsoDate(input.expiryDate ?? input.expiry_date, 'expiry date', { required: false });
+
+  const duplicate = await findProductByName(authenticatedStoreId, name, productId);
+  if (duplicate) {
+    throw new Error(`A product named "${name}" already exists. Edit that one instead, or choose a different name.`);
+  }
 
   const productReference = doc(productsCollection(authenticatedStoreId), productId);
   await runTransaction(db, async (transaction) => {

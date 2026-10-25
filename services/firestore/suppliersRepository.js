@@ -186,7 +186,7 @@ export function planDelivery(items, stock) {
   return { updates, skipped };
 }
 
-const nameKey = (value) => String(value || '').trim().toLowerCase();
+const nameKey = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
 
 // Marks an order delivered and adds its items to Stock. One transaction, so the order can't be
 // counted twice and stock never changes without the order changing. Needs an internet connection.

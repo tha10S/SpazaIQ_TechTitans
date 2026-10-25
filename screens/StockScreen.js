@@ -16,8 +16,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../config/ThemeContext';
 import { useProducts } from '../hooks/useProducts';
 import { getAuthenticatedStoreId } from '../services/firestore/paths';
-import { deleteProduct } from '../services/firestore/productsRepository';
-import { createProduct, updateProduct } from '../services/salesService';
+import { deleteProduct, saveNewProduct, updateProduct } from '../services/firestore/productsRepository';
 import { isValidDecimalInput, isValidIsoDate } from '../services/validation';
 
 import { KEYBOARD_BEHAVIOR } from '../components/keyboard';
@@ -61,6 +60,8 @@ export default function StockScreen({ navigation, route }) {
   const [savingProduct, setSavingProduct] = useState(false);
   // Removing a product asks for a second tap, because Alert.alert shows nothing on web
   const [confirmRemove, setConfirmRemove] = useState(false);
+  // Inline message on the page, for example when a new product was merged into an existing one
+  const [notice, setNotice] = useState('');
   const storeId = route?.params?.storeId || getAuthenticatedStoreId();
   const { products, loading, error } = useProducts(storeId, searchQuery);
 
@@ -97,6 +98,7 @@ export default function StockScreen({ navigation, route }) {
     } : EMPTY_PRODUCT);
     setExpiryPickerVisible(false);
     setConfirmRemove(false);
+    setNotice('');
     setProductError('');
     setProductFormVisible(true);
   };
@@ -108,7 +110,10 @@ export default function StockScreen({ navigation, route }) {
       if (editingProduct) {
         await updateProduct(storeId, editingProduct.id, productForm);
       } else {
-        await createProduct(storeId, productForm);
+        const result = await saveNewProduct(storeId, productForm);
+        if (result.merged) {
+          setNotice(`${result.name} is already in Stock, so ${result.added} was added to it. It now has ${result.quantity}.`);
+        }
       }
       setProductFormVisible(false);
     } catch (error) {
@@ -146,6 +151,19 @@ export default function StockScreen({ navigation, route }) {
           <View style={styles.headerRow}>
             <Text style={styles.pageTitle}>Stock Management</Text>
           </View>
+
+          {notice ? (
+            <TouchableOpacity
+              style={styles.noticeCard}
+              onPress={() => setNotice('')}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss message"
+            >
+              <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
+              <Text style={styles.noticeText}>{notice}</Text>
+              <Ionicons name="close" size={16} color={colors.primary} />
+            </TouchableOpacity>
+          ) : null}
 
           {/* Search & Scan Row */}
           <View style={styles.searchRow}>
@@ -509,6 +527,21 @@ function makeStyles(colors, typography, spacing, radius) {
     /* Header */
     headerRow: { marginBottom: spacing.md },
     pageTitle: { fontSize: 24, fontWeight: '800', color: colors.textPrimary },
+
+    /* Inline message */
+    noticeCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: colors.primaryLight,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      marginBottom: spacing.md,
+    },
+    noticeText: { flex: 1, color: colors.primary, fontSize: 13, fontWeight: '600', lineHeight: 18 },
 
     /* Search Bar */
     searchRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.md },
