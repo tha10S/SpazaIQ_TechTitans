@@ -1,37 +1,35 @@
-// Writes a shop's anonymous totals to shopStats/{storeId}, which is what the admin area reads.
-// Call it from a screen that already has the shop's products, sales and customers (Insights does).
-// It is throttled, and it never throws, so a failure can't break the shop screen.
-//
-// Only these fields are written. The Firestore rules accept nothing else in this document:
-//   the shop name and the owner's own contact details (needed to chase the subscription),
-//   plus the totals from buildShopStats().
+// Writes aggregate shop activity to shopStats/{storeId}; individual sales and customer details
+// remain private to the shop. The shop name is used only to identify the summary.
 import { doc, getDoc, serverTimestamp, setDoc, Timestamp } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
-
-const MIN_GAP_MS = 2 * 60 * 1000;
-let last = { storeId: null, signature: '', at: 0 };
 
 const clip = (value, max) => String(value || '').trim().slice(0, max);
 
 export async function publishShopStats(storeId, stats) {
+  if (!storeId || !stats) {
+    throw new Error('A shop and its activity totals are required.');
+  }
+
   try {
-    if (!storeId || !stats) return false;
-    const signature = JSON.stringify(stats);
-    const now = Date.now();
-    if (last.storeId === storeId && (signature === last.signature || now - last.at < MIN_GAP_MS)) return false;
-    last = { storeId, signature, at: now };
+    const snapshot = await getDoc(doc(db, 'stores', storeId));
+    const shopName = snapshot.exists() ? clip(snapshot.data().name, 80) : '';
+    if (!shopName) {
+      throw new Error('The shop name is not available for its activity summary.');
+    }
 
     let profile = {};
     try {
-      const snapshot = await getDoc(doc(db, 'users', storeId));
-      if (snapshot.exists()) profile = snapshot.data();
-    } catch (error) {
-      // The shop name is only a label. Carry on without it.
+      const userSnapshot = await getDoc(doc(db, 'users', storeId));
+      if (userSnapshot.exists()) {
+        profile = userSnapshot.data();
+      }
+    } catch (profileError) {
+      // The profile data is optional. Carry on without it.
     }
 
     await setDoc(doc(db, 'shopStats', storeId), {
       storeId,
-      shopName: clip(profile.shopName, 80) || 'Shop',
+      shopName: clip(profile.shopName, 80) || shopName,
       contactEmail: clip(profile.email, 120),
       contactPhone: clip(profile.mobile, 30),
       revenue30d: stats.revenue30d,
@@ -42,6 +40,11 @@ export async function publishShopStats(storeId, stats) {
       activeDays30d: stats.activeDays30d,
       creditSales30d: stats.creditSales30d,
       lastSaleAt: stats.lastSaleAt ? Timestamp.fromDate(stats.lastSaleAt) : null,
+      firstSaleAt: stats.firstSaleAt ? Timestamp.fromDate(stats.firstSaleAt) : null,
+      weekRevenue1: stats.weekRevenue1,
+      weekRevenue2: stats.weekRevenue2,
+      weekRevenue3: stats.weekRevenue3,
+      weekRevenue4: stats.weekRevenue4,
       productCount: stats.productCount,
       lowStockCount: stats.lowStockCount,
       outOfStockCount: stats.outOfStockCount,
@@ -51,6 +54,7 @@ export async function publishShopStats(storeId, stats) {
       creditOverdue: stats.creditOverdue,
       updatedAt: serverTimestamp(),
     });
+
     return true;
   } catch (error) {
     console.warn('Could not publish shop stats', error?.code || error?.message);

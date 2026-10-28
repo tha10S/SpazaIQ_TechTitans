@@ -3,6 +3,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
@@ -12,12 +13,19 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath, storeDocPath } from './paths';
+import { validateIsoDate } from '../validation';
+import { addStockBatch, getEarliestStockExpiry, normalizeStockBatches } from './stockBatches';
 
 // Data shape (all inside the signed-in shop's own store):
-//   stores/{storeId}/suppliers/{id}  { storeId, name, category, phone, items: [{ productId, name, qty, unitCost, selected }] }
+//   stores/{storeId}/suppliers/{id}  { storeId, name, category, phone,
+//                                      items: [{ productId, name, qty, unitCost, sellingPrice, reorderLevel, selected }] }
 //   stores/{storeId}/orders/{id}     { storeId, supplierId, supplierName, supplierPhone, orderNumber,
-//                                      items: [{ productId, name, qty, unitCost }], total,
+//                                      items: [{ productId, name, qty, unitCost, sellingPrice, reorderLevel }], total,
 //                                      status: 'pending' | 'delivered', createdAt, deliveredAt }
+// productId is '' for an item the shop typed in that is not in Stock yet. Such an item can be ordered.
+// When the order is delivered it is linked to the Stock product with the same name, or, if there is
+// none, a new Stock product is created for it from the item's name, quantity, cost price,
+// selling price and low-stock threshold.
 // Both collections are covered by the existing store rules, so no rules change is needed.
 
 const suppliersCollection = (storeId) => collection(db, ...storeCollectionPath(storeId, 'suppliers'));
@@ -54,6 +62,18 @@ function mapOrder(snapshot) {
   };
 }
 
+// An item needs a name and a whole-number quantity. A productId is optional: items typed in by hand
+// (not in Stock) have an empty one.
+const DEFAULT_REORDER_LEVEL = 10;
+
+// A whole number of 0 or more, otherwise the default
+function reorderLevelOf(value) {
+  const number = Number(value);
+  return value !== undefined && value !== null && value !== '' && Number.isInteger(number) && number >= 0
+    ? number
+    : DEFAULT_REORDER_LEVEL;
+}
+
 function cleanItems(items) {
   return (items || [])
     .map((item) => ({
@@ -61,8 +81,10 @@ function cleanItems(items) {
       name: String(item.name || '').trim(),
       qty: Number(item.qty),
       unitCost: Number(item.unitCost || 0),
+      sellingPrice: Number(item.sellingPrice || 0),
+      reorderLevel: reorderLevelOf(item.reorderLevel),
     }))
-    .filter((item) => item.productId && item.name && Number.isInteger(item.qty) && item.qty > 0);
+    .filter((item) => item.name && Number.isInteger(item.qty) && item.qty > 0);
 }
 
 export function subscribeSuppliers(storeId, onData, onError) {
@@ -103,10 +125,13 @@ export async function updateSupplierItems(storeId, supplierId, items) {
   const sid = assertStoreId(storeId);
   await updateDoc(doc(db, ...storeDocPath(sid, 'suppliers', supplierId)), {
     items: (items || []).map((item) => ({
-      productId: item.productId,
+      // '' (not undefined) for an item that is not in Stock, because Firestore rejects undefined
+      productId: item.productId || '',
       name: item.name,
       qty: Number(item.qty),
       unitCost: Number(item.unitCost || 0),
+      sellingPrice: Number(item.sellingPrice || 0),
+      reorderLevel: reorderLevelOf(item.reorderLevel),
       selected: item.selected !== false,
     })),
     updatedAt: serverTimestamp(),
@@ -142,6 +167,7 @@ export async function createOrder(storeId, supplier, items) {
 
 // Works out the new stock level for each product on an order.
 // `stock` maps productId -> current quantity, or null when the product no longer exists.
+// Items without a productId are skipped here: markOrderDelivered links or creates them first.
 export function planDelivery(items, stock) {
   const wanted = new Map();
   const skipped = [];
@@ -160,11 +186,35 @@ export function planDelivery(items, stock) {
   return { updates, skipped };
 }
 
+const nameKey = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
 // Marks an order delivered and adds its items to Stock. One transaction, so the order can't be
 // counted twice and stock never changes without the order changing. Needs an internet connection.
-export async function markOrderDelivered(storeId, orderId) {
+//   - An item linked to a Stock product that still exists adds to that product's quantity.
+//   - Otherwise it is matched to a Stock product with the same name, if there is one.
+//   - Otherwise a new Stock product is created from the item's name, quantity, cost price,
+//     selling price and low-stock threshold.
+export async function markOrderDelivered(storeId, orderId, deliveryExpiryDates = []) {
   const sid = assertStoreId(storeId);
   const orderReference = doc(db, ...storeDocPath(sid, 'orders', orderId));
+  const productsCollection = collection(db, ...storeCollectionPath(sid, 'products'));
+
+  // A transaction can't run a query, so look up the existing products first
+  const existingProducts = await getDocs(productsCollection);
+  const existingIds = new Set();
+  const idByName = new Map();
+  existingProducts.docs.forEach((snapshot) => {
+    existingIds.add(snapshot.id);
+    const key = nameKey(snapshot.data().name);
+    if (key && !idByName.has(key)) idByName.set(key, snapshot.id);
+  });
+  // The product an item belongs to: its linked product if that still exists (it may have been
+  // removed from Stock), else the product with the same name, else none yet.
+  const resolveProductId = (item) => (
+    item.productId && existingIds.has(item.productId)
+      ? item.productId
+      : idByName.get(nameKey(item.name)) || ''
+  );
 
   return runTransaction(db, async (transaction) => {
     const orderSnapshot = await transaction.get(orderReference);
@@ -172,8 +222,13 @@ export async function markOrderDelivered(storeId, orderId) {
     const order = orderSnapshot.data();
     if (order.status === 'delivered') throw new Error('This order is already marked as delivered.');
 
-    const items = Array.isArray(order.items) ? order.items : [];
-    const productIds = [...new Set(items.map((item) => item.productId).filter(Boolean))];
+    const items = (Array.isArray(order.items) ? order.items : []).map((item, index) => ({
+      ...item,
+      expiryDate: validateIsoDate(deliveryExpiryDates[index] || '', 'expiry date', { required: false }) || null,
+    }));
+    const linkedItems = items.map((item) => ({ ...item, productId: resolveProductId(item) }));
+
+    const productIds = [...new Set(linkedItems.map((item) => item.productId).filter(Boolean))];
     const productReferences = productIds.map((id) => doc(db, ...storeDocPath(sid, 'products', id)));
     const productSnapshots = await Promise.all(productReferences.map((reference) => transaction.get(reference)));
     const stock = new Map(productSnapshots.map((snapshot, index) => [
@@ -181,19 +236,80 @@ export async function markOrderDelivered(storeId, orderId) {
       snapshot.exists() ? Number(snapshot.data().quantity || 0) : null,
     ]));
 
-    const plan = planDelivery(items, stock);
+    // All reads are done. Writes start here.
+    const plan = planDelivery(linkedItems.filter((item) => item.productId), stock);
     plan.updates.forEach((update) => {
+      const productIndex = productIds.indexOf(update.productId);
+      const productData = productSnapshots[productIndex].data();
+      const stockBatches = linkedItems
+        .filter((item) => item.productId === update.productId)
+        .reduce(
+          (batches, item) => addStockBatch(batches, Number(item.qty || 0), item.expiryDate),
+          normalizeStockBatches(productData)
+        );
       transaction.update(doc(db, ...storeDocPath(sid, 'products', update.productId)), {
         quantity: update.newQuantity,
+        stockBatches,
+        expiryDate: getEarliestStockExpiry(stockBatches),
         updatedAt: serverTimestamp(),
       });
     });
+
+    // Items not in Stock: one new product per distinct name
+    const newGroups = new Map();
+    linkedItems.filter((item) => !item.productId && nameKey(item.name)).forEach((item) => {
+      const key = nameKey(item.name);
+      const group = newGroups.get(key) || {
+        name: String(item.name).trim(),
+        costPrice: 0,
+        sellingPrice: 0,
+        reorderLevel: DEFAULT_REORDER_LEVEL,
+        items: [],
+      };
+      group.items.push(item);
+      if (Number(item.unitCost) > 0) group.costPrice = Number(item.unitCost);
+      if (Number(item.sellingPrice) > 0) group.sellingPrice = Number(item.sellingPrice);
+      group.reorderLevel = reorderLevelOf(item.reorderLevel);
+      newGroups.set(key, group);
+    });
+    const createdIdByName = new Map();
+    const created = [];
+    newGroups.forEach((group, key) => {
+      const productReference = doc(productsCollection);
+      const stockBatches = group.items.reduce(
+        (batches, item) => addStockBatch(batches, Number(item.qty || 0), item.expiryDate),
+        []
+      );
+      transaction.set(productReference, {
+        storeId: sid,
+        name: group.name,
+        sku: '',
+        barcode: '',
+        unitPrice: group.sellingPrice,
+        costPrice: group.costPrice,
+        quantity: group.items.reduce((sum, item) => sum + Number(item.qty || 0), 0),
+        reorderLevel: group.reorderLevel,
+        category: 'General',
+        expiryDate: getEarliestStockExpiry(stockBatches),
+        stockBatches,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      createdIdByName.set(key, productReference.id);
+      created.push(group.name);
+    });
+
+    // Save the order with the product each item ended up linked to
+    const finalItems = linkedItems.map((item) => (
+      item.productId ? item : { ...item, productId: createdIdByName.get(nameKey(item.name)) || '' }
+    ));
     transaction.update(orderReference, {
+      items: finalItems,
       status: 'delivered',
       deliveredAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
 
-    return { updated: plan.updates.length, skipped: plan.skipped };
+    return { updated: plan.updates.length, created, skipped: plan.skipped };
   });
 }

@@ -1,11 +1,9 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchRepaymentTrackerData, makePayment } from '../services/creditService';
@@ -32,6 +31,10 @@ const STATUS_STYLES = {
 const formatR = (value) => `R ${Number(value || 0).toFixed(2)}`;
 const todayString = todayIsoDate;
 
+// The tracker rows use outstandingAmount; fall back to balance in case a row only has that
+const outstandingOf = (customer) => Number(customer?.outstandingAmount ?? customer?.balance ?? 0);
+const toCents = (value) => Math.round(Number(value || 0) * 100);
+
 function formatDate(value) {
   if (!value) return 'No payments yet';
   const date = new Date(value);
@@ -39,7 +42,7 @@ function formatDate(value) {
   return date.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-export default function RepaymentTrackerScreen({ route }) {
+export default function RepaymentTrackerScreen({ route, navigation }) {
   const storeId = route?.params?.storeId || getAuthenticatedStoreId();
   const [data, setData] = useState({ customers: [], schedules: [], ledgerEntries: [] });
   const [loading, setLoading] = useState(true);
@@ -48,7 +51,19 @@ export default function RepaymentTrackerScreen({ route }) {
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [paymentDate, setPaymentDate] = useState(todayString());
+  const [paymentError, setPaymentError] = useState('');
+  // Inline messages. Alert.alert shows nothing on web, so the screen shows its own.
+  const [notice, setNotice] = useState(null); // { ok, text }
   const [saving, setSaving] = useState(false);
+
+  // The stack header is hidden for this screen, so it has its own back button
+  const goBack = () => {
+    if (navigation?.canGoBack?.()) {
+      navigation.goBack();
+    } else {
+      navigation?.navigate('MainTabs', { screen: 'Credit' });
+    }
+  };
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -89,26 +104,32 @@ export default function RepaymentTrackerScreen({ route }) {
     setPaymentAmount('');
     setPaymentMethod('Cash');
     setPaymentDate(todayString());
+    setPaymentError('');
+    setNotice(null);
   };
 
   const savePayment = async () => {
     const amount = Number(paymentAmount);
+    const outstanding = outstandingOf(activeCustomer);
+
     if (!Number.isFinite(amount) || amount <= 0) {
-      Alert.alert('Invalid amount', 'Enter a payment amount greater than zero.');
+      setPaymentError('Enter a payment amount greater than zero.');
       return;
     }
-    if (amount > Number(activeCustomer?.balance || 0)) {
-      Alert.alert('Amount exceeds balance', 'The payment cannot be greater than the customer’s outstanding amount.');
+    // Compare in cents so R8.00 against a balance of R8 is never rejected by a rounding error
+    if (toCents(amount) > toCents(outstanding)) {
+      setPaymentError(`The payment cannot be more than the outstanding ${formatR(outstanding)}.`);
       return;
     }
     try {
       validateIsoDate(paymentDate, 'payment date', { max: todayIsoDate() });
     } catch (error) {
-      Alert.alert('Invalid date', error.message);
+      setPaymentError(error.message);
       return;
     }
 
     setSaving(true);
+    setPaymentError('');
     try {
       const result = await makePayment({
         storeId,
@@ -119,16 +140,17 @@ export default function RepaymentTrackerScreen({ route }) {
         note: `Repayment Tracker payment (${paymentMethod})`,
         idempotencyKey: `payment-${storeId}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       });
+      const customerName = activeCustomer.name || 'the customer';
       setActiveCustomer(null);
+      setNotice({
+        ok: true,
+        text: result?.pendingSync
+          ? `Payment of ${formatR(amount)} from ${customerName} is saved on this device and will sync when the connection returns.`
+          : `Payment of ${formatR(amount)} from ${customerName} was recorded.`,
+      });
       await refresh();
-      Alert.alert(
-        result?.pendingSync ? 'Payment saved offline' : 'Payment saved',
-        result?.pendingSync
-          ? 'The payment is stored on this device and will sync when the connection returns. The server will validate the balance then.'
-          : 'The repayment has been recorded.'
-      );
     } catch (error) {
-      Alert.alert('Could not record payment', error?.message || 'Please try again.');
+      setPaymentError(error?.message || 'Could not record the payment. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -136,7 +158,7 @@ export default function RepaymentTrackerScreen({ route }) {
 
   if (loading && data.customers.length === 0) {
     return (
-      <SafeAreaView style={[styles.safeArea, styles.centered]}>
+      <SafeAreaView style={[styles.safeArea, styles.centered]} edges={['top']}>
         <ActivityIndicator size="large" color={COLORS.emerald} />
       </SafeAreaView>
     );
@@ -144,7 +166,16 @@ export default function RepaymentTrackerScreen({ route }) {
 
   if (loadError && data.customers.length === 0) {
     return (
-      <SafeAreaView style={[styles.safeArea, styles.centered]}>
+      <SafeAreaView style={[styles.safeArea, styles.centered]} edges={['top']}>
+        <TouchableOpacity
+          style={styles.errorBack}
+          onPress={goBack}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
+          <Ionicons name="arrow-back" size={22} color={COLORS.emerald} />
+          <Text style={styles.errorBackText}>Back</Text>
+        </TouchableOpacity>
         <Ionicons name="alert-circle-outline" size={40} color={COLORS.danger} />
         <Text style={styles.errorTitle}>Could not load repayments</Text>
         <Text style={styles.errorMessage}>{loadError}</Text>
@@ -156,13 +187,19 @@ export default function RepaymentTrackerScreen({ route }) {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <OfflineSyncNotice storeId={storeId} />
         <View style={styles.headingRow}>
-          <View style={styles.headingIcon}>
-            <Ionicons name="calendar" size={20} color={COLORS.emerald} />
-          </View>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={goBack}
+            accessibilityRole="button"
+            accessibilityLabel="Go back to Credit Ledger"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="arrow-back" size={22} color={COLORS.emerald} />
+          </TouchableOpacity>
           <View style={styles.headingText}>
             <Text style={styles.title}>Repayment Tracker</Text>
             <Text style={styles.subtitle}>Monthly collections and customer plans</Text>
@@ -171,6 +208,23 @@ export default function RepaymentTrackerScreen({ route }) {
         </View>
 
         {loadError ? <Text style={styles.inlineError}>{loadError}</Text> : null}
+
+        {notice ? (
+          <TouchableOpacity
+            style={[styles.noticeCard, notice.ok ? styles.noticeOk : styles.noticeBad]}
+            onPress={() => setNotice(null)}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss message"
+          >
+            <Ionicons
+              name={notice.ok ? 'checkmark-circle' : 'alert-circle'}
+              size={18}
+              color={notice.ok ? COLORS.emerald : COLORS.danger}
+            />
+            <Text style={[styles.noticeText, { color: notice.ok ? COLORS.emerald : COLORS.danger }]}>{notice.text}</Text>
+            <Ionicons name="close" size={16} color={notice.ok ? COLORS.emerald : COLORS.danger} />
+          </TouchableOpacity>
+        ) : null}
 
         <View style={styles.summaryCard}>
           <Text style={styles.summaryEyebrow}>THIS MONTH</Text>
@@ -287,7 +341,7 @@ export default function RepaymentTrackerScreen({ route }) {
               </TouchableOpacity>
             </View>
             <Text style={styles.modalCustomer}>{activeCustomer?.name}</Text>
-            <Text style={styles.modalBalance}>Outstanding: {formatR(activeCustomer?.balance)}</Text>
+            <Text style={styles.modalBalance}>Outstanding: {formatR(outstandingOf(activeCustomer))}</Text>
 
             <Text style={styles.inputLabel}>PAYMENT AMOUNT</Text>
             <View style={styles.inputWrapper}>
@@ -296,7 +350,10 @@ export default function RepaymentTrackerScreen({ route }) {
                 style={styles.input}
                 value={paymentAmount}
                 onChangeText={(value) => {
-                  if (isValidDecimalInput(value)) setPaymentAmount(value);
+                  if (isValidDecimalInput(value)) {
+                    setPaymentAmount(value);
+                    if (paymentError) setPaymentError('');
+                  }
                 }}
                 placeholder="0.00"
                 placeholderTextColor={COLORS.textMuted}
@@ -325,13 +382,20 @@ export default function RepaymentTrackerScreen({ route }) {
               <TextInput
                 style={styles.input}
                 value={paymentDate}
-                onChangeText={setPaymentDate}
+                onChangeText={(value) => {
+                  setPaymentDate(value);
+                  if (paymentError) setPaymentError('');
+                }}
                 placeholder="YYYY-MM-DD"
                 placeholderTextColor={COLORS.textMuted}
                 keyboardType="numbers-and-punctuation"
                 editable={!saving}
               />
             </View>
+
+            {paymentError ? (
+              <Text style={styles.paymentError} accessibilityRole="alert">{paymentError}</Text>
+            ) : null}
 
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.cancelButton} onPress={() => setActiveCustomer(null)} disabled={saving}>
@@ -375,11 +439,15 @@ const styles = StyleSheet.create({
   centered: { justifyContent: 'center', alignItems: 'center', padding: 24 },
   container: { padding: 16, paddingBottom: 40 },
   headingRow: { flexDirection: 'row', alignItems: 'center', gap: 11, marginBottom: 18 },
-  headingIcon: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: COLORS.emeraldBg },
+  backButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: COLORS.emeraldBg },
   headingText: { flex: 1 },
   title: { color: COLORS.textDark, fontSize: 22, fontWeight: '800' },
   subtitle: { color: COLORS.textMuted, fontSize: 12, marginTop: 2 },
   inlineError: { color: COLORS.danger, fontSize: 12, marginBottom: 10 },
+  noticeCard: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 14 },
+  noticeOk: { backgroundColor: COLORS.emeraldBg, borderColor: COLORS.emerald },
+  noticeBad: { backgroundColor: 'rgba(220, 38, 38, 0.1)', borderColor: 'rgba(220, 38, 38, 0.4)' },
+  noticeText: { flex: 1, fontSize: 13, fontWeight: '600', lineHeight: 18 },
   summaryCard: { backgroundColor: COLORS.emeraldDark, borderRadius: 12, padding: 18, marginBottom: 24 },
   summaryEyebrow: { color: '#A7C9C7', fontSize: 10, fontWeight: '800', letterSpacing: 1, marginBottom: 12 },
   collectionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -421,6 +489,8 @@ const styles = StyleSheet.create({
   emptyState: { backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.border, borderRadius: 10, alignItems: 'center', padding: 26 },
   emptyTitle: { color: COLORS.textDark, fontSize: 14, fontWeight: '800', marginTop: 10 },
   emptyText: { color: COLORS.textMuted, fontSize: 12, marginTop: 4 },
+  errorBack: { position: 'absolute', top: 16, left: 16, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  errorBackText: { color: COLORS.emerald, fontSize: 14, fontWeight: '700' },
   errorTitle: { color: COLORS.textDark, fontSize: 16, fontWeight: '800', marginTop: 10 },
   errorMessage: { color: COLORS.textMuted, fontSize: 12, textAlign: 'center', marginTop: 5 },
   retryButton: { backgroundColor: COLORS.emerald, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 8, marginTop: 16 },
@@ -441,6 +511,7 @@ const styles = StyleSheet.create({
   methodOptionSelected: { backgroundColor: COLORS.emeraldBg, borderColor: COLORS.emerald },
   methodText: { color: COLORS.textMuted, fontSize: 12, fontWeight: '700' },
   methodTextSelected: { color: COLORS.emerald },
+  paymentError: { color: COLORS.danger, fontSize: 12, fontWeight: '600', lineHeight: 17, marginTop: 12 },
   modalActions: { flexDirection: 'row', gap: 10, marginTop: 20 },
   cancelButton: { flex: 1, height: 44, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: COLORS.border, borderRadius: 8 },
   cancelText: { color: COLORS.textMuted, fontSize: 13, fontWeight: '700' },

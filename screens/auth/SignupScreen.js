@@ -8,10 +8,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
 } from "react-native";
 import { sendEmailVerification } from "firebase/auth";
-import { getAuthErrorMessage, signUp, logOut } from "../../services/auth/firebaseAuth";
+import { getAuthErrorMessage, signUp } from "../../services/auth/firebaseAuth";
 import { getPasswordChecks, getPasswordError, isValidEmail, normalizeEmail, normalizePhoneNumber } from "../../services/validation";
 
 import { KEYBOARD_BEHAVIOR } from "../../components/keyboard";
@@ -70,22 +69,10 @@ export default function SignupScreen({ navigation }) {
         shopName: shopName.trim(),
       });
 
-      // Send the verification email, then sign out until they verify
-      let emailSent = true;
-      try {
-        await sendEmailVerification(user);
-      } catch (emailError) {
-        emailSent = false;
-      }
-      await logOut();
-
-      Alert.alert(
-        "Welcome to SpazaIQ!",
-        emailSent
-          ? `We've sent a verification link to ${normalizedEmail}. Verify your email, then log in. Check your spam folder if you don't see it.`
-          : "Your account was created, but we couldn't send the verification email. Log in and we'll send you a new link."
-      );
-      navigation.navigate("Login");
+      // Keep the new account signed in and let the auth flow open the dashboard.
+      sendEmailVerification(user).catch((emailError) => {
+        console.warn('Account created, but the verification email could not be sent.', emailError);
+      });
     } catch (error) {
       setError(getAuthErrorMessage(error));
     } finally {

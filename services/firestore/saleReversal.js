@@ -1,6 +1,7 @@
 import { collection, doc, getDocs, query, runTransaction, serverTimestamp, where } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath, storeDocPath } from './paths';
+import { addStockBatch, getEarliestStockExpiry, normalizeStockBatches } from './stockBatches';
 
 // Reverses a sale made TODAY, as if the customer handed the goods back.
 // In one transaction it:
@@ -100,8 +101,23 @@ export async function reverseSale(storeId, saleId, { reason = '' } = {}) {
         skipped.push(items.find((item) => item.id === productId)?.name || 'Unknown item');
         return;
       }
+      const product = snapshot.data();
+      let stockBatches = normalizeStockBatches(product);
+      const returnedItems = items.filter((item) => item.id === productId);
+      returnedItems.forEach((item) => {
+        const allocations = Array.isArray(item.stockBatchAllocations) ? item.stockBatchAllocations : null;
+        if (allocations?.length) {
+          allocations.forEach((allocation) => {
+            stockBatches = addStockBatch(stockBatches, Number(allocation.quantity || 0), allocation.expiryDate);
+          });
+        } else {
+          stockBatches = addStockBatch(stockBatches, Number(item.qty), product.expiryDate ?? product.expiry_date);
+        }
+      });
       transaction.update(productReferences[index], {
-        quantity: Number(snapshot.data().quantity ?? 0) + returned.get(productId),
+        quantity: Number(product.quantity ?? 0) + returned.get(productId),
+        stockBatches,
+        expiryDate: getEarliestStockExpiry(stockBatches),
         updatedAt: serverTimestamp(),
       });
     });

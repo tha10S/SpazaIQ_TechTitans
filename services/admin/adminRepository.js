@@ -1,6 +1,6 @@
 // Admin-side Firestore access. Everything here is allowed by the Firestore rules only for an admin
 // account (a signed-in user with a document at admins/{uid}). It reads two things about a shop:
-//   shopStats/{storeId}      anonymous totals published by the shop
+//   shopStats/{storeId}      shop name and aggregate totals published by the shop
 //   subscriptions/{storeId}  billing status, written only by the admin
 // There is deliberately no function here that reads a shop's sales, customers or credit records.
 import {
@@ -36,7 +36,12 @@ export async function isAdminUser(uid) {
 export function subscribeShopStats(onData, onError) {
   return onSnapshot(
     collection(db, 'shopStats'),
-    (snapshot) => onData(snapshot.docs.map((item) => ({ storeId: item.id, ...item.data() }))),
+    (snapshot) => onData(snapshot.docs.map((item) => {
+      const stats = { ...item.data() };
+      delete stats.contactEmail;
+      delete stats.contactPhone;
+      return { storeId: item.id, ...stats };
+    })),
     onError
   );
 }
@@ -151,6 +156,20 @@ export async function reactivateShop(storeId, existing, days = 7) {
     },
     { merge: true }
   );
+}
+
+// Writes each shop's FINISHED score to shopScores/{storeId}. The admin dashboard works the score out (it is the
+// only place that can see every shop's revenue), and a shop reads only its own document, so a shop gets its final
+// number without ever downloading another shop's figures.
+// rows: [{ storeId, score, tier }]
+export async function publishShopScores(rows) {
+  for (let start = 0; start < rows.length; start += 400) {
+    const batch = writeBatch(db);
+    rows.slice(start, start + 400).forEach(({ storeId, score, tier }) => {
+      batch.set(doc(db, 'shopScores', storeId), { storeId, score, tier, updatedAt: serverTimestamp() });
+    });
+    await batch.commit();
+  }
 }
 
 // rows: [{ storeId, sub }]. Marks each one deactivated in a single batch.

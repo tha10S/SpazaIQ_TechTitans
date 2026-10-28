@@ -9,7 +9,13 @@ import {
   updateProfile,
 } from 'firebase/auth';
 import { auth, db } from '../firebase/firebaseConfig';
-import { assertValidPassword, isValidEmail, normalizeEmail, normalizePhoneNumber } from '../validation';
+import {
+  assertValidPassword,
+  isValidEmail,
+  normalizeEmail,
+  normalizePhoneNumber,
+  normalizeProvince,
+} from '../validation';
 
 
 function assertCurrentUser(userId) {

@@ -15,6 +15,8 @@ import SubscriptionBanner from '../components/SubscriptionBanner';
 
 import { subscribeUserProfile } from '../services/firestore/usersRepository';
 import { auth } from '../services/firebase/firebaseConfig';
+import { buildShopStats } from '../services/admin/shopStats';
+import { publishShopStats } from '../services/admin/shopStatsPublisher';
 
 // Shop location isn't stored yet, so weather is for Johannesburg.
 const WEATHER_URL =
@@ -51,6 +53,7 @@ export default function HomeScreen({ navigation, route }) {
   const [sales, setSales] = useState([]);
   const [products, setProducts] = useState([]);
   const [customers, setCustomers] = useState([]);
+  const [activityPublishError, setActivityPublishError] = useState('');
   const [weather, setWeather] = useState(null);
   const storeId = route?.params?.storeId || getAuthenticatedStoreId();
 
@@ -81,12 +84,73 @@ export default function HomeScreen({ navigation, route }) {
   }, []);
 
   useEffect(() => {
-    const subscriptions = [
-      subscribeSales(storeId, setSales, (error) => console.warn('Sales subscription failed', error?.code)),
-      subscribeProducts(storeId, '', setProducts, (error) => console.warn('Products subscription failed', error?.code)),
-      subscribeCustomers(storeId, setCustomers, (error) => console.warn('Customers subscription failed', error?.code)),
-    ];
-    return () => subscriptions.forEach((unsubscribe) => unsubscribe());
+    setSales([]);
+    setProducts([]);
+    setCustomers([]);
+    setActivityPublishError('');
+    if (!storeId) return undefined;
+
+    let active = true;
+    let sourceFailed = false;
+    let sources = { sales: null, products: null, customers: null };
+    let publishQueue = Promise.resolve();
+    const reportSourceError = (name, error) => {
+      sourceFailed = true;
+      console.warn(`${name} subscription failed`, error);
+      setActivityPublishError(`Could not load ${name.toLowerCase()} data for the admin activity summary.`);
+    };
+    const queueStatsPublish = () => {
+      if (sourceFailed || !sources.sales || !sources.products || !sources.customers) return;
+      const stats = buildShopStats({
+        sales: sources.sales,
+        products: sources.products,
+        customers: sources.customers,
+      });
+      publishQueue = publishQueue.then(async () => {
+        if (!active) return;
+        try {
+          await publishShopStats(storeId, stats);
+          setActivityPublishError('');
+        } catch (error) {
+          console.warn('Home shop activity publish failed', error);
+          setActivityPublishError(error?.message || 'Shop activity could not be updated for the admin dashboard.');
+        }
+      });
+    };
+    const offSales = subscribeSales(
+      storeId,
+      (nextSales) => {
+        sources.sales = nextSales;
+        setSales(nextSales);
+        queueStatsPublish();
+      },
+      (error) => reportSourceError('Sales', error)
+    );
+    const offProducts = subscribeProducts(
+      storeId,
+      '',
+      (nextProducts) => {
+        sources.products = nextProducts;
+        setProducts(nextProducts);
+        queueStatsPublish();
+      },
+      (error) => reportSourceError('Products', error)
+    );
+    const offCustomers = subscribeCustomers(
+      storeId,
+      (nextCustomers) => {
+        sources.customers = nextCustomers;
+        setCustomers(nextCustomers);
+        queueStatsPublish();
+      },
+      (error) => reportSourceError('Customers', error)
+    );
+    return () => {
+      active = false;
+      offSales();
+      offProducts();
+      offCustomers();
+    };
   }, [storeId]);
 
   const formattedDateTime = now.toLocaleDateString('en-ZA', {
@@ -199,6 +263,9 @@ useEffect(() => {
               <Ionicons name="time-outline" size={14} color={colors.textMuted} />
               <Text style={styles.clockText}>{formattedDateTime}</Text>
             </View>
+            {activityPublishError ? (
+              <Text style={styles.activityError}>{`Admin activity update failed: ${activityPublishError}`}</Text>
+            ) : null}
           </View>
 
           <View style={styles.headerRightCol}>
@@ -420,6 +487,7 @@ function makeStyles(colors, typography, spacing, radius) {
     shopBadgeText: { fontSize: 12, color: colors.textPrimary, fontWeight: '700' },
     clockRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
     clockText: { fontSize: 12, fontWeight: '600', color: colors.textMuted },
+    activityError: { color: colors.danger, fontSize: 12, marginTop: 4 },
     weatherChip: {
       alignItems: 'center',
       backgroundColor: colors.card,

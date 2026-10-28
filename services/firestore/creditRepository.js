@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   onSnapshot,
   orderBy,
@@ -12,6 +13,7 @@ import {
 import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath } from './paths';
 import { mapCustomer, mapLedgerEntry } from './mappers';
+import { assertCustomerPhoneAvailable } from './customersRepository';
 import { normalizePhoneNumber, parseNonNegativeNumber, todayIsoDate, validateIsoDate } from '../validation';
 import {
   enqueueOfflineOperation,
@@ -35,6 +37,9 @@ function ledgerCollection(storeId) {
 function operationRef(storeId, key) {
   return doc(db, ...storeCollectionPath(storeId, 'operations'), key);
 }
+
+// Rands to whole cents, so a balance never ends up as 0.0000000001 after a payment
+const roundMoney = (value) => Math.round(Number(value) * 100) / 100;
 
 function pendingBalanceChange(operation, customerId) {
   if (operation.status === 'failed') return 0;
@@ -252,6 +257,19 @@ async function makePaymentOnline({ storeId, customerId, amount, idempotencyKey, 
   const authenticatedStoreId = assertStoreId(storeId);
   const numericAmount = validatePaymentInput({ customerId, amount, idempotencyKey, paymentDate, paymentMethod });
 
+  // A Firestore transaction can only read single documents, not queries.
+  // Passing a query to transaction.get() is what caused "Cannot read properties of undefined (reading 'path')".
+  // So find this customer's active repayment schedules first, oldest due date first,
+  // then read each one again by reference inside the transaction.
+  const schedulesSnapshot = await getDocs(query(
+    collection(db, ...storeCollectionPath(authenticatedStoreId, 'repaymentSchedules')),
+    where('customerId', '==', customerId)
+  ));
+  const scheduleReferences = schedulesSnapshot.docs
+    .filter((scheduleSnapshot) => scheduleSnapshot.data().status === 'active')
+    .sort((left, right) => String(left.data().dueDate || '').localeCompare(String(right.data().dueDate || '')))
+    .map((scheduleSnapshot) => scheduleSnapshot.ref);
+
   return runTransaction(db, async (transaction) => {
     const operation = await transaction.get(operationRef(authenticatedStoreId, idempotencyKey));
     if (operation.exists()) return operation.data().result;
@@ -260,30 +278,33 @@ async function makePaymentOnline({ storeId, customerId, amount, idempotencyKey, 
     const customerSnapshot = await transaction.get(customer);
     if (!customerSnapshot.exists()) throw new Error('Customer account not found.');
     const currentBalance = Number(customerSnapshot.data().balance ?? 0);
-    if (numericAmount > currentBalance) throw new Error('Payment cannot exceed the customer balance.');
-    const schedulesQuery = query(
-      collection(db, ...storeCollectionPath(authenticatedStoreId, 'repaymentSchedules')),
-      where('customerId', '==', customerId)
-    );
-    const schedulesSnapshot = await transaction.get(schedulesQuery);
+    if (roundMoney(numericAmount) > roundMoney(currentBalance)) throw new Error('Payment cannot exceed the customer balance.');
+
+    // All reads must happen before any write in a transaction
+    const scheduleSnapshots = [];
+    for (const reference of scheduleReferences) {
+      const scheduleSnapshot = await transaction.get(reference);
+      if (scheduleSnapshot.exists() && scheduleSnapshot.data().status === 'active') {
+        scheduleSnapshots.push(scheduleSnapshot);
+      }
+    }
+
     let unappliedPayment = numericAmount;
     const scheduleUpdates = [];
-    schedulesSnapshot.docs
-      .filter((scheduleSnapshot) => scheduleSnapshot.data().status === 'active')
-      .sort((left, right) => String(left.data().dueDate || '').localeCompare(String(right.data().dueDate || '')))
-      .forEach((scheduleSnapshot) => {
-        if (unappliedPayment <= 0) return;
-        const remainingAmount = Number(scheduleSnapshot.data().remainingAmount ?? 0);
-        if (remainingAmount <= 0) return;
-        const appliedAmount = Math.min(unappliedPayment, remainingAmount);
-        unappliedPayment -= appliedAmount;
-        scheduleUpdates.push({
-          reference: scheduleSnapshot.ref,
-          remainingAmount: remainingAmount - appliedAmount,
-          appliedAmount,
-        });
+    scheduleSnapshots.forEach((scheduleSnapshot) => {
+      if (unappliedPayment <= 0) return;
+      const remainingAmount = Number(scheduleSnapshot.data().remainingAmount ?? 0);
+      if (remainingAmount <= 0) return;
+      const appliedAmount = Math.min(unappliedPayment, remainingAmount);
+      unappliedPayment -= appliedAmount;
+      scheduleUpdates.push({
+        reference: scheduleSnapshot.ref,
+        remainingAmount: roundMoney(remainingAmount - appliedAmount),
+        appliedAmount,
       });
+    });
 
+    const newBalance = roundMoney(currentBalance - numericAmount);
     const ledger = doc(ledgerCollection(authenticatedStoreId));
     const result = { id: ledger.id, customerId, amount: -numericAmount };
     transaction.set(ledger, {
@@ -302,10 +323,10 @@ async function makePaymentOnline({ storeId, customerId, amount, idempotencyKey, 
       createdAt: serverTimestamp(),
     });
     transaction.update(customer, {
-      balance: currentBalance - numericAmount,
-        overdue: false,
-        overdueBalance: 0,
-        nextDueDate: currentBalance - numericAmount <= 0 ? null : customerSnapshot.data().nextDueDate ?? null,
+      balance: newBalance,
+      overdue: false,
+      overdueBalance: 0,
+      nextDueDate: newBalance <= 0 ? null : customerSnapshot.data().nextDueDate ?? null,
       updatedAt: serverTimestamp(),
     });
     scheduleUpdates.forEach(({ reference, remainingAmount }) => {
@@ -319,7 +340,7 @@ async function makePaymentOnline({ storeId, customerId, amount, idempotencyKey, 
       type: 'makePayment',
       result,
       createdAt: serverTimestamp(),
-        storeId: authenticatedStoreId,
+      storeId: authenticatedStoreId,
     });
     return result;
   });
@@ -361,6 +382,9 @@ function validateCreditInput({ customerId, customerName, newCustomer, amount, du
       }
     : null;
   if (newCustomerData && !newCustomerData.name) throw new Error('Enter a customer name.');
+  if (newCustomerData?.creditLimit > 0 && numericAmount > newCustomerData.creditLimit) {
+    throw new Error(`Credit limit exceeded. Available: R ${newCustomerData.creditLimit.toFixed(2)}.`);
+  }
   const frequency = schedule?.frequency ?? 'one_time';
   const periodCount = frequency === 'monthly'
     ? Number(schedule.durationMonths ?? schedule.totalPayments)
@@ -382,9 +406,15 @@ function validateCreditInput({ customerId, customerName, newCustomer, amount, du
 }
 
 async function addCreditTransactionOnline(input) {
-  const { storeId, customerId, customerName, newCustomer, amount, dueDate, idempotencyKey, schedule } = input;
+  const { storeId, customerId, amount, dueDate, idempotencyKey } = input;
   const authenticatedStoreId = assertStoreId(storeId);
   const { numericAmount, repaymentSchedule, newCustomerData } = validateCreditInput(input);
+  const operationReference = operationRef(authenticatedStoreId, idempotencyKey);
+  const existingOperation = await getDoc(operationReference);
+  if (existingOperation.exists()) return existingOperation.data().result;
+  if (customerId === 'new') {
+    await assertCustomerPhoneAvailable(authenticatedStoreId, newCustomerData.phone);
+  }
 
   return runTransaction(db, async (transaction) => {
     const operation = await transaction.get(operationRef(authenticatedStoreId, idempotencyKey));
@@ -395,17 +425,6 @@ async function addCreditTransactionOnline(input) {
       : doc(db, ...storeCollectionPath(authenticatedStoreId, 'customers'), customerId);
     const customerSnapshot = await transaction.get(customer);
     if (customerId !== 'new' && !customerSnapshot.exists()) throw new Error('Customer account not found.');
-    if (customerId === 'new') {
-      const matches = await transaction.get(query(
-        customersCollection(authenticatedStoreId),
-        where('phone', '==', newCustomerData.phone)
-      ));
-      const matchingCustomers = matches.docs.map((snapshot) => snapshot.data());
-      if (matchingCustomers.some((customer) => customer.blacklisted)) {
-        throw new Error('This customer has been blacklisted and cannot be added again.');
-      }
-      if (matchingCustomers.length > 0) throw new Error('A customer with this phone number already exists.');
-    }
     const customerData = customerSnapshot.exists()
       ? customerSnapshot.data()
       : { ...newCustomerData, balance: 0, creditLimit: newCustomerData?.creditLimit ?? 0 };

@@ -10,7 +10,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeProvider, useTheme } from '../config/ThemeContext';
 import { TechTitansAssistant } from '../components/TechTitansAssistant';
-import { watchAuth } from '../services/auth/firebaseAuth';
+import { consumeAccountCreationPending, watchAuth } from '../services/auth/firebaseAuth';
 import { ensureStoreSeed } from '../services/firestore/seedRepository';
 import { getUserProfile } from '../services/firestore/usersRepository';
 import { isAdminUser } from '../services/admin/adminRepository';
@@ -63,18 +63,18 @@ function MainTabs({ route }) {
   return (
     <Tab.Navigator
       screenOptions={({ route: screenRoute }) => ({
-  headerShown: false,
-  tabBarStyle: {
-    backgroundColor: colors.card,
-    borderTopColor: colors.border,
-  },
-  tabBarActiveTintColor: colors.primary,
-  tabBarInactiveTintColor: colors.textMuted,
-  tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
-  tabBarIcon: ({ color, size }) => (
-    <Ionicons name={icons[screenRoute.name]} size={size} color={color} />
-  ),
-})}
+        headerShown: false,
+        tabBarStyle: {
+          backgroundColor: colors.card,
+          borderTopColor: colors.border,
+        },
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textMuted,
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        tabBarIcon: ({ color, size }) => (
+          <Ionicons name={icons[screenRoute.name]} size={size} color={color} />
+        ),
+      })}
     >
       <Tab.Screen name="Home" component={HomeScreen} initialParams={account} />
       <Tab.Screen name="Stock" component={StockScreen} initialParams={account} />
@@ -100,7 +100,7 @@ function AppContent() {
   const [welcome, setWelcome] = useState({ uid: null, seen: false });
   const uid = user?.uid;
   useEffect(() => {
-    if (!uid) return undefined;
+    if (!uid || (welcome.uid === uid && welcome.seen)) return undefined;
     let active = true;
     AsyncStorage.getItem(`welcomeSeen:${uid}`)
       .then((value) => active && setWelcome({ uid, seen: value === '1' }))
@@ -108,7 +108,7 @@ function AppContent() {
     return () => {
       active = false;
     };
-  }, [uid]);
+  }, [uid, welcome.uid, welcome.seen]);
   const welcomeReady = Boolean(uid) && welcome.uid === uid;
   // An admin never sees the shop welcome screen
   const showWelcome = welcomeReady && !welcome.seen && !isAdmin;
@@ -123,6 +123,11 @@ function AppContent() {
     let active = true;
     const unsubscribe = watchAuth(async (authenticatedUser) => {
       if (!active) return;
+      if (authenticatedUser && consumeAccountCreationPending()) {
+        setWelcome({ uid: authenticatedUser.uid, seen: true });
+        AsyncStorage.setItem(`welcomeSeen:${authenticatedUser.uid}`, '1')
+          .catch((error) => console.warn('Could not save signup welcome state', error));
+      }
       setUser(authenticatedUser);
       setUserProfile(null);
       setIsAdmin(false);
@@ -237,11 +242,8 @@ function AppContent() {
               <Stack.Screen name="Notifications" component={NotificationsScreen} />
               <Stack.Screen name="Placeholder" component={PlaceholderScreen} />
               <Stack.Screen name="Profile" component={ProfileSettingsScreen} />
-              <Stack.Screen
-                name="RepaymentTracker"
-                component={RepaymentTrackerScreen}
-                options={{ headerShown: true, title: 'Repayment Tracker' }}
-              />
+              {/* No stack header here: the screen draws its own title and back button */}
+              <Stack.Screen name="RepaymentTracker" component={RepaymentTrackerScreen} />
             </>
           ) : (
             <>

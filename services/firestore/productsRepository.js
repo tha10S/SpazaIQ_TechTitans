@@ -1,20 +1,20 @@
 import {
   collection,
+  deleteDoc,
   doc,
   getDocs,
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
-  updateDoc,
   where,
 } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath } from './paths';
 import { mapProduct } from './mappers';
 import { parseNonNegativeNumber } from '../validation';
-import { filterProductsBySearch } from '../productSearch';
 import {
   getOfflineOperations,
   isNetworkError,
@@ -32,14 +32,39 @@ function applyPendingStock(products, operations) {
     const reserved = operations
       .filter((operation) => operation.type === 'recordSale' && operation.status !== 'failed')
       .reduce((quantity, operation) => {
-        const item = operation.payload.cart.find((cartItem) => cartItem.id === product.id);
-        return quantity + Number(item?.qty || 0);
+        const reserved = operation.payload.cart
+          .filter((cartItem) => cartItem.id === product.id)
+          .reduce((sum, cartItem) => sum + Number(cartItem.qty || 0), 0);
+        return quantity + reserved;
       }, 0);
-    return reserved ? { ...product, quantity: Math.max(0, product.quantity - reserved) } : product;
+    if (!reserved) return product;
+    const stockBatches = reconcileStockBatches(product, Math.max(0, product.quantity - reserved), product.expiry_date);
+    return {
+      ...product,
+      quantity: Math.max(0, product.quantity - reserved),
+      expiry_date: getEarliestStockExpiry(stockBatches) || '',
+      stock_batches: stockBatches.map((batch) => ({
+        quantity: batch.quantity,
+        expiry_date: batch.expiryDate || '',
+      })),
+    };
   });
 }
 
-export async function createProduct(storeId, input) {
+// Product names are compared ignoring capitals and extra spaces
+const nameKey = (value) => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+// The existing product with this name, if there is one
+async function findProductByName(storeId, name, excludeId = null) {
+  const snapshot = await getDocs(productsCollection(storeId));
+  const key = nameKey(name);
+  return snapshot.docs.find((item) => item.id !== excludeId && nameKey(item.data().name) === key) || null;
+}
+
+// Adds a product. If a product with the same name already exists, the quantity is added to that
+// product instead of creating a second entry, and its other details are left as they are.
+// Returns { id, name, merged, added, quantity }.
+export async function saveNewProduct(storeId, input) {
   const authenticatedStoreId = assertStoreId(storeId);
   const name = String(input.name || '').trim();
   const category = String(input.category || 'General').trim();
@@ -49,8 +74,29 @@ export async function createProduct(storeId, input) {
   const costPrice = parseNonNegativeNumber(input.costPrice || '0', 'cost price');
   const quantity = parseNonNegativeNumber(input.quantity, 'quantity', { integer: true });
   const reorderLevel = parseNonNegativeNumber(input.reorderLevel, 'low-stock threshold', { integer: true });
+  const expiryDate = validateIsoDate(input.expiryDate ?? input.expiry_date, 'expiry date', { required: false });
+
+  const existing = await findProductByName(authenticatedStoreId, name);
+  if (existing) {
+    let newQuantity = 0;
+    await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(existing.ref);
+      if (!snapshot.exists()) throw new Error('This product no longer exists. Try adding it again.');
+      const data = snapshot.data();
+      newQuantity = Number(data.quantity || 0) + quantity;
+      const stockBatches = addStockBatch(normalizeStockBatches(data), quantity, expiryDate);
+      transaction.update(existing.ref, {
+        quantity: newQuantity,
+        stockBatches,
+        expiryDate: getEarliestStockExpiry(stockBatches),
+        updatedAt: serverTimestamp(),
+      });
+    });
+    return { id: existing.id, name: String(existing.data().name || name), merged: true, added: quantity, quantity: newQuantity };
+  }
 
   const productReference = doc(productsCollection(authenticatedStoreId));
+  const stockBatches = addStockBatch([], quantity, expiryDate);
   await setDoc(productReference, {
     storeId: authenticatedStoreId,
     name,
@@ -61,10 +107,16 @@ export async function createProduct(storeId, input) {
     quantity,
     reorderLevel,
     category,
+    expiryDate: expiryDate || null,
+    stockBatches,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  return productReference.id;
+  return { id: productReference.id, name, merged: false, added: quantity, quantity };
+}
+
+export async function createProduct(storeId, input) {
+  return (await saveNewProduct(storeId, input)).id;
 }
 
 export async function updateProduct(storeId, productId, input) {
@@ -77,18 +129,40 @@ export async function updateProduct(storeId, productId, input) {
   const costPrice = parseNonNegativeNumber(input.costPrice || '0', 'cost price');
   const quantity = parseNonNegativeNumber(input.quantity, 'quantity', { integer: true });
   const reorderLevel = parseNonNegativeNumber(input.reorderLevel, 'low-stock threshold', { integer: true });
+  const expiryDate = validateIsoDate(input.expiryDate ?? input.expiry_date, 'expiry date', { required: false });
 
-  await updateDoc(doc(productsCollection(authenticatedStoreId), productId), {
-    name,
-    sku: String(input.sku || '').trim(),
-    barcode: String(input.barcode || '').trim(),
-    unitPrice,
-    costPrice,
-    quantity,
-    reorderLevel,
-    category,
-    updatedAt: serverTimestamp(),
+  const duplicate = await findProductByName(authenticatedStoreId, name, productId);
+  if (duplicate) {
+    throw new Error(`A product named "${name}" already exists. Edit that one instead, or choose a different name.`);
+  }
+
+  const productReference = doc(productsCollection(authenticatedStoreId), productId);
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(productReference);
+    if (!snapshot.exists()) throw new Error('This product no longer exists.');
+    const stockBatches = reconcileStockBatches(snapshot.data(), quantity, expiryDate);
+    transaction.update(productReference, {
+      name,
+      sku: String(input.sku || '').trim(),
+      barcode: String(input.barcode || '').trim(),
+      unitPrice,
+      costPrice,
+      quantity,
+      reorderLevel,
+      category,
+      expiryDate: getEarliestStockExpiry(stockBatches) || (quantity <= 0 ? expiryDate || null : null),
+      stockBatches,
+      updatedAt: serverTimestamp(),
+    });
   });
+}
+
+// Removes a product from Stock. Past sales keep their own copy of the item name and price,
+// so they are not affected.
+export async function deleteProduct(storeId, productId) {
+  const authenticatedStoreId = assertStoreId(storeId);
+  if (!productId) throw new Error('Choose a product to remove.');
+  await deleteDoc(doc(productsCollection(authenticatedStoreId), productId));
 }
 
 export async function fetchProducts(storeId, searchTerm = '') {

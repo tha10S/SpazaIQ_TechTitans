@@ -61,6 +61,12 @@ export function toDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+// The reference a shop uses when it pays, so the admin can match the payment to the shop.
+// The shop sees it on its payment banner and the admin sees the same text on the shop's panel.
+export function paymentReference(storeId) {
+  return `SPZ-${String(storeId || '').slice(0, 6).toUpperCase()}`;
+}
+
 export function formatDay(date) {
   const value = toDate(date);
   return value ? value.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' }) : '-';

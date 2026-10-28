@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Bar, Pill, SEVERITY_COLOR, TIER_META, TONE_META, confirmAction } from './adminUi';
@@ -10,7 +10,10 @@ import {
   defaultCoveredMonth,
   formatDay,
   monthLabel,
+
+  paymentReference,
   paymentReminderMessage,
+
   shiftMonth,
 } from '../../services/admin/billing';
 import {
@@ -20,9 +23,7 @@ import {
   startSubscription,
   subscribePayments,
 } from '../../services/admin/adminRepository';
-import { openWhatsApp } from '../../services/whatsapp';
 
-import { KEYBOARD_BEHAVIOR } from '../../components/keyboard';
 const BRAND_GREEN = '#004B49';
 
 // Everything shown here is a shop-level total. There are no individual sales and no customer names.
@@ -66,14 +67,6 @@ export default function AdminShopDetail({ shop, onClose, colors, adminUid, media
     } finally {
       setBusy(false);
     }
-  };
-
-  const sendReminder = async () => {
-    const result = await openWhatsApp(
-      shop.contactPhone,
-      paymentReminderMessage({ shopName: shop.shopName, fee: sub?.monthlyFee ?? DEFAULT_FEE, dueDate: state.dueDate, accessUntil: state.accessUntil })
-    );
-    if (!result.ok) setMessage({ ok: false, text: result.error });
   };
 
   const totals = [
@@ -138,17 +131,12 @@ export default function AdminShopDetail({ shop, onClose, colors, adminUid, media
           </Pressable>
         </View>
 
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={KEYBOARD_BEHAVIOR}>
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={styles.content}>
           <View style={styles.headerRow}>
             <Pill label={`${tier.label} performer`} color={tier.color} bg={tier.bg} />
             <Pill label={state.label} color={tone.color} bg={tone.bg} />
           </View>
           <Text style={styles.score}>{shop.score}<Text style={styles.scoreOf}> / 100</Text></Text>
-
-          {shop.contactPhone || shop.contactEmail ? (
-            <Text style={styles.contact}>{[shop.contactEmail, shop.contactPhone].filter(Boolean).join('  ·  ')}</Text>
-          ) : null}
 
           <Text style={styles.section}>SCORE BREAKDOWN</Text>
           <View style={styles.card}>
@@ -182,6 +170,7 @@ export default function AdminShopDetail({ shop, onClose, colors, adminUid, media
             <View style={styles.rowBetween}><Text style={styles.rowLabel}>Paid up to</Text><Text style={styles.rowValue}>{sub?.coveredMonth ? monthLabel(sub.coveredMonth) : '-'}</Text></View>
             <View style={styles.rowBetween}><Text style={styles.rowLabel}>Next payment due</Text><Text style={styles.rowValue}>{formatDay(state.dueDate)}</Text></View>
             <View style={styles.rowBetween}><Text style={styles.rowLabel}>Cut-off if unpaid</Text><Text style={styles.rowValue}>{formatDay(state.accessUntil)}</Text></View>
+            <View style={styles.rowBetween}><Text style={styles.rowLabel}>Payment reference</Text><Text style={styles.rowValue} selectable>{paymentReference(storeId)}</Text></View>
             {sub?.deactivatedReason ? <Text style={styles.findingDetail}>Reason: {sub.deactivatedReason}</Text> : null}
 
             <Text style={[styles.rowLabel, { marginTop: 14 }]}>Record a payment</Text>
@@ -243,11 +232,6 @@ export default function AdminShopDetail({ shop, onClose, colors, adminUid, media
                   <Text style={[styles.outlineBtnText, { color: colors.danger }]}>Deactivate</Text>
                 </Pressable>
               )}
-              {shop.contactPhone ? (
-                <Pressable style={styles.outlineBtn} onPress={sendReminder}>
-                  <Text style={styles.outlineBtnText}>WhatsApp reminder</Text>
-                </Pressable>
-              ) : null}
             </View>
             {message ? <Text style={[styles.msg, { color: message.ok ? '#10B981' : colors.danger }]}>{message.text}</Text> : null}
           </View>
@@ -271,7 +255,6 @@ export default function AdminShopDetail({ shop, onClose, colors, adminUid, media
             and the Firestore security rules enforce this, not just the screens.
           </Text>
         </ScrollView>
-        </KeyboardAvoidingView>
       </SafeAreaView>
     </Modal>
   );

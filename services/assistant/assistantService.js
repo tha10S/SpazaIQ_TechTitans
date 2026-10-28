@@ -11,6 +11,92 @@ function normalizeText(value = '') {
     .trim();
 }
 
+function salesSummaryPeriod(question) {
+  const text = normalizeText(question);
+  if (/\b(month|monthly)\b/.test(text)) return 'this month';
+  if (/\b(week|weekly)\b/.test(text)) return 'this week';
+  if (/\b(today|this day|so far today)\b/.test(text)) return 'today';
+  return 'all recorded time';
+}
+
+function parseExpiryDate(value) {
+  if (!value) return null;
+  const raw = typeof value.toDate === 'function' ? value.toDate() : value;
+  if (raw instanceof Date) {
+    return Number.isNaN(raw.getTime())
+      ? null
+      : new Date(raw.getFullYear(), raw.getMonth(), raw.getDate());
+  }
+  const text = String(raw);
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(text);
+  const date = match
+    ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+    : new Date(text);
+  if (Number.isNaN(date.getTime())) return null;
+  if (match && (date.getFullYear() !== Number(match[1])
+    || date.getMonth() !== Number(match[2]) - 1
+    || date.getDate() !== Number(match[3]))) return null;
+  return date;
+}
+
+function formatExpiryDate(date) {
+  return date.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function expiryTrackingResponse(data, question, now = new Date()) {
+  const records = Array.isArray(data.inventory) ? data.inventory : data.products ?? [];
+  const dated = records
+    .flatMap((product) => {
+      const batches = product.stock_batches ?? product.stockBatches;
+      if (!Array.isArray(batches)) {
+        return [{ ...product, expiry: parseExpiryDate(product.expiry_date ?? product.expiryDate) }];
+      }
+      return batches.map((batch) => ({
+        ...product,
+        quantity: Number(batch.quantity || 0),
+        expiry: parseExpiryDate(batch.expiry_date ?? batch.expiryDate),
+      }));
+    })
+    .filter((product) => product.expiry)
+    .sort((a, b) => a.expiry - b.expiry);
+
+  if (!dated.length) {
+    return 'No product expiry dates are recorded yet. Open Stock Management, edit a product, and add its expiry date so I can keep track.';
+  }
+  const tracked = dated.filter((product) => Number(product.quantity ?? product.stockQuantity ?? 1) > 0);
+  if (!tracked.length) return 'Expiry dates are recorded, but none of those products currently have stock on hand.';
+
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const asksThisWeek = /\bthis week\b/.test(normalizeText(question));
+  const soonDays = asksThisWeek ? 6 - ((today.getDay() + 6) % 7) : 7;
+  const expired = tracked.filter((product) => product.expiry < today);
+  const expiringSoon = tracked.filter((product) => {
+    const days = Math.round((Date.UTC(product.expiry.getFullYear(), product.expiry.getMonth(), product.expiry.getDate())
+      - Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())) / 86400000);
+    return days >= 0 && days <= soonDays;
+  });
+
+  const formatProducts = (products) => {
+    const listed = products.slice(0, 5)
+      .map((product) => `${product.name}${product.quantity ? ` × ${product.quantity}` : ''} (${formatExpiryDate(product.expiry)})`)
+      .join(', ');
+    return products.length > 5 ? `${listed}, and ${products.length - 5} more` : listed;
+  };
+  const sections = [];
+  if (expired.length) {
+    sections.push(`Expired: ${formatProducts(expired)}`);
+  }
+  if (expiringSoon.length) {
+    sections.push(`Expiring ${asksThisWeek ? 'this week' : 'within 7 days'}: ${formatProducts(expiringSoon)}`);
+  }
+  if (sections.length) return `${sections.join('. ')}. Check these items in Stock Management.`;
+
+  const nextExpiry = tracked.find((product) => product.expiry >= today);
+  return nextExpiry
+    ? `No products are expired or expiring soon. The next recorded expiry is ${nextExpiry.name} on ${formatExpiryDate(nextExpiry.expiry)}.`
+    : 'No products are expiring soon, but recorded expiry dates have already passed. Check Stock Management to review those items.';
+}
+
 function detectIntent(message) {
   const text = normalizeText(message);
 
@@ -20,6 +106,12 @@ function detectIntent(message) {
 
   if (/\b(best sales|best products|best selling|best-selling|top products|top sellers|most sales|sells the most|top 5)\b/.test(text)) {
     return { intent: 'TOP_SELLERS', confidence: 0.98, matches: 1 };
+  }
+
+  if (/\b(check|show|review|look at|see|summari[sz]e|give me|tell me about|scan|analy[sz]e|what are|how much|how many)\b/.test(text)
+    && /\b(sales?|revenue|turnover|takings|transactions|sold)\b/.test(text)
+    && !/\b(trend|increas(e|ing)|decreas(e|ing)|compare|profit|forecast|margin)\b/.test(text)) {
+    return { intent: 'SALES_SUMMARY', confidence: 0.94, matches: 1 };
   }
 
   if (/\b(owes me the most|owes the most|largest balance|highest balance|who owes me money|who owes me the most)\b/.test(text)) {
@@ -92,9 +184,19 @@ function salesTotal(sales) {
   return sales.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
 }
 
-function productSales(data) {
+function productSales(data, selectedSales = null) {
   const totals = new Map();
-  for (const item of data.saleItems ?? []) {
+  const saleItems = Array.isArray(data.saleItems) && data.saleItems.length
+    ? data.saleItems
+    : (data.sales ?? []).flatMap((sale) => (sale.items ?? []).map((item) => ({
+      ...item,
+      sale_id: sale.id,
+    })));
+  const selectedSaleIds = selectedSales
+    ? new Set(selectedSales.map((sale) => sale.id).filter(Boolean))
+    : null;
+  for (const item of saleItems) {
+    if (selectedSaleIds && !selectedSaleIds.has(item.sale_id ?? item.saleId)) continue;
     const productId = item.product_id || item.id;
     if (!productId) continue;
     const current = totals.get(productId) || {
@@ -155,7 +257,7 @@ function appHelpResponse(question) {
   if (!asksHowTo) return null;
 
   if (/\b(scan|barcode|qr code)\b/.test(text)) return 'To scan a product, open Stock and tap the scan icon beside the search bar. You can also add or edit products from Stock Management.';
-  if (/\b(add|create|new)\b/.test(text) && /\b(product|item|stock)\b/.test(text)) return 'Open Stock Management, then tap the + button to add a product. Enter its name, selling price, cost price, quantity, and reorder level, then save.';
+  if (/\b(add|create|new)\b/.test(text) && /\b(product|item|stock)\b/.test(text)) return 'Open Stock Management, then tap the + button to add a product. Enter its details and, if it is perishable, select an expiry date before saving.';
   if (/\b(add|create|new)\b/.test(text) && /\b(customer|client)\b/.test(text)) return 'Open Credit from the bottom navigation and tap Add Customer. Save the customer details, then select them to record credit or a payment.';
   if (/\b(sale|sell|checkout|pos|purchase)\b/.test(text)) return 'Open Sell from the bottom navigation to start a sale. Add products to the cart, review the total, choose the payment method, and complete the sale.';
   if (/\b(credit|payment|repay|repayment)\b/.test(text)) return 'Open Credit from the bottom navigation. Select a customer to record credit, or use Make Payment on an account to record a repayment.';
@@ -344,15 +446,24 @@ function generateAnswer(intent, data, question) {
   }
 
   if (intent === 'SALES_SUMMARY') {
-    const sales = salesForPeriod(data.sales, question);
-    const period = normalizeText(question).includes('month') ? 'this month' : normalizeText(question).includes('week') ? 'this week' : 'today';
-    if (sales.length) return `For ${period}, you recorded ${sales.length} sale${sales.length === 1 ? '' : 's'} totalling ${money(salesTotal(sales))}.`;
+    const period = salesSummaryPeriod(question);
+    const sales = period === 'all recorded time'
+      ? data.sales ?? []
+      : salesForPeriod(data.sales ?? [], question);
+    if (sales.length) {
+      const topProducts = productSales(data, period === 'all recorded time' ? null : sales).slice(0, 3);
+      const productSummary = topProducts.length
+        ? `Top products in this period: ${topProducts.map((product) => `${product.name} (${product.quantity} sold, ${money(product.revenue)})`).join('; ')}.`
+        : 'Product-level line items are not available for these sales.';
+      return `For ${period}, you recorded ${sales.length} sale${sales.length === 1 ? '' : 's'} totalling ${money(salesTotal(sales))}. ${productSummary}`;
+    }
     if (period === 'today') {
-      const monthSales = salesForPeriod(data.sales, 'this month');
+      const monthSales = salesForPeriod(data.sales ?? [], 'this month');
       return monthSales.length
         ? `No sales have been recorded today yet. Month-to-date, you have ${money(salesTotal(monthSales))} across ${monthSales.length} sales.`
         : 'No sales have been recorded today or so far this month.';
     }
+    if (period === 'all recorded time') return 'No sales have been recorded yet. Record sales in Sell and I can summarize the totals and products sold.';
     return `No sales have been recorded ${period} yet.`;
   }
 
@@ -437,7 +548,7 @@ function generateAnswer(intent, data, question) {
   }
 
   if (intent === 'OVERSTOCK') return 'Maximum stock targets are not recorded, so I can’t reliably label items overstocked. You can review quantities and reorder levels in Stock Management.';
-  if (intent === 'EXPIRY_TRACKING') return 'Expiry dates are not part of the connected product records yet, so I can’t identify items close to expiry.';
+  if (intent === 'EXPIRY_TRACKING') return expiryTrackingResponse(data, question);
   if (intent === 'CASH_FLOW') return 'I can summarize sales, but business expenses and supplier payments are not connected to the assistant. I can’t calculate net cash flow without those records.';
   if (intent === 'SUPPLIER_COMPARISON') return 'Supplier contacts are visible in Suppliers & Orders, but supplier price comparisons are not connected to the assistant’s store data yet.';
   if (intent === 'DEMAND_FORECAST') return 'I need a longer history of dated sales before making a reliable demand forecast. I won’t invent a forecast from too little data.';

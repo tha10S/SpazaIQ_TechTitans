@@ -8,14 +8,16 @@ import {
   TextInput,
   Modal,
   KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../config/ThemeContext';
 import { useProducts } from '../hooks/useProducts';
 import { getAuthenticatedStoreId } from '../services/firestore/paths';
-import { createProduct, updateProduct } from '../services/salesService';
-import { isValidDecimalInput } from '../services/validation';
+import { deleteProduct, saveNewProduct, updateProduct } from '../services/firestore/productsRepository';
+import { isValidDecimalInput, isValidIsoDate } from '../services/validation';
 
 import { KEYBOARD_BEHAVIOR } from '../components/keyboard';
 const EMPTY_PRODUCT = {
@@ -27,7 +29,21 @@ const EMPTY_PRODUCT = {
   quantity: '0',
   reorderLevel: '0',
   category: 'General',
+  expiryDate: '',
 };
+
+function parseIsoDate(value) {
+  if (!isValidIsoDate(value)) return new Date();
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function formatIsoDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 export default function StockScreen({ navigation, route }) {
   const { colors, spacing, radius, typography } = useTheme();
@@ -37,21 +53,34 @@ export default function StockScreen({ navigation, route }) {
   );
   const [searchQuery, setSearchQuery] = useState('');
   const [productFormVisible, setProductFormVisible] = useState(false);
+  const [expiryPickerVisible, setExpiryPickerVisible] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [productForm, setProductForm] = useState(EMPTY_PRODUCT);
   const [productError, setProductError] = useState('');
   const [savingProduct, setSavingProduct] = useState(false);
+  // Removing a product asks for a second tap, because Alert.alert shows nothing on web
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  // Inline message on the page, for example when a new product was merged into an existing one
+  const [notice, setNotice] = useState('');
   const storeId = route?.params?.storeId || getAuthenticatedStoreId();
   const { products, loading, error } = useProducts(storeId, searchQuery);
 
   const lowStockCount = products.filter((product) => product.quantity <= product.reorder_level).length;
   const totalQuantity = products.reduce((total, product) => total + product.quantity, 0);
   const expiringCount = products.filter((product) => {
-    const raw = product.expiry_date || product.expiryDate;
-    if (!raw) return false;
-    const date = raw?.toDate ? raw.toDate() : new Date(raw);
-    if (Number.isNaN(date.getTime())) return false;
-    return (date.getTime() - Date.now()) / 86400000 <= 7;
+    const batches = Array.isArray(product.stock_batches)
+      ? product.stock_batches
+      : [{ quantity: product.quantity, expiry_date: product.expiry_date || product.expiryDate }];
+    return batches.some((batch) => {
+      if (Number(batch.quantity) <= 0 || !batch.expiry_date || !isValidIsoDate(String(batch.expiry_date).slice(0, 10))) return false;
+      const date = parseIsoDate(String(batch.expiry_date).slice(0, 10));
+      const today = new Date();
+      const daysUntilExpiry = (
+        Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+        - Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
+      ) / 86400000;
+      return daysUntilExpiry >= 0 && daysUntilExpiry <= 7;
+    });
   }).length;
 
   const openProductForm = (product = null) => {
@@ -65,7 +94,11 @@ export default function StockScreen({ navigation, route }) {
       quantity: String(product.quantity),
       reorderLevel: String(product.reorder_level),
       category: product.category,
+      expiryDate: String(product.expiry_date || product.expiryDate || '').slice(0, 10),
     } : EMPTY_PRODUCT);
+    setExpiryPickerVisible(false);
+    setConfirmRemove(false);
+    setNotice('');
     setProductError('');
     setProductFormVisible(true);
   };
@@ -77,11 +110,29 @@ export default function StockScreen({ navigation, route }) {
       if (editingProduct) {
         await updateProduct(storeId, editingProduct.id, productForm);
       } else {
-        await createProduct(storeId, productForm);
+        const result = await saveNewProduct(storeId, productForm);
+        if (result.merged) {
+          setNotice(`${result.name} is already in Stock, so ${result.added} was added to it. It now has ${result.quantity}.`);
+        }
       }
       setProductFormVisible(false);
     } catch (error) {
       setProductError(error.message || 'Could not save this product.');
+    } finally {
+      setSavingProduct(false);
+    }
+  };
+
+  const removeProduct = async () => {
+    if (!editingProduct) return;
+    setSavingProduct(true);
+    setProductError('');
+    try {
+      await deleteProduct(storeId, editingProduct.id);
+      setConfirmRemove(false);
+      setProductFormVisible(false);
+    } catch (error) {
+      setProductError(error.message || 'Could not remove this product.');
     } finally {
       setSavingProduct(false);
     }
@@ -100,6 +151,19 @@ export default function StockScreen({ navigation, route }) {
           <View style={styles.headerRow}>
             <Text style={styles.pageTitle}>Stock Management</Text>
           </View>
+
+          {notice ? (
+            <TouchableOpacity
+              style={styles.noticeCard}
+              onPress={() => setNotice('')}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss message"
+            >
+              <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
+              <Text style={styles.noticeText}>{notice}</Text>
+              <Ionicons name="close" size={16} color={colors.primary} />
+            </TouchableOpacity>
+          ) : null}
 
           {/* Search & Scan Row */}
           <View style={styles.searchRow}>
@@ -150,7 +214,7 @@ export default function StockScreen({ navigation, route }) {
               <View style={[styles.statIconBadge, { backgroundColor: 'rgba(245,158,11,0.15)' }]}>
                 <Ionicons name="time" size={16} color="#F59E0B" />
               </View>
-              <Text style={styles.summaryLabel}>Expiring</Text>
+              <Text style={styles.summaryLabel}>Sell By Soon</Text>
               <Text style={[styles.summaryValue, { color: '#F59E0B' }]}>{expiringCount}</Text>
             </View>
           </View>
@@ -189,6 +253,10 @@ export default function StockScreen({ navigation, route }) {
             {loading ? <Text style={styles.emptyText}>Loading products...</Text> : error ? <Text style={styles.emptyText}>{error.message}</Text> : products.length === 0 ? <Text style={styles.emptyText}>{searchQuery ? 'No products match your search.' : 'No products yet. Tap + to add your first product.'}</Text> : products.map((product) => {
               const statusType = product.quantity === 0 ? 'out' : product.quantity <= product.reorder_level ? 'low' : 'stock';
               const status = statusType === 'out' ? 'Out of Stock' : statusType === 'low' ? 'Low Stock' : 'In Stock';
+              const batchExpirySummary = (product.stock_batches || [])
+                .filter((batch) => batch.quantity > 0 && batch.expiry_date)
+                .map((batch) => `${batch.quantity} × ${batch.expiry_date}`)
+                .join(' · ');
               return (
               <TouchableOpacity
                 key={product.id}
@@ -210,6 +278,9 @@ export default function StockScreen({ navigation, route }) {
                       Qty: <Text style={styles.qtyBold}>{product.quantity}</Text>
                     </Text>
                   </View>
+                  {batchExpirySummary ? (
+                    <Text style={styles.batchExpiryText} numberOfLines={2}>Sell-by batches: {batchExpirySummary}</Text>
+                  ) : null}
                 </View>
 
                 <View
@@ -293,7 +364,141 @@ export default function StockScreen({ navigation, route }) {
                     />
                   </View>
                 ))}
+                <View style={styles.formField}>
+                  <Text style={styles.formLabel}>Sell by date (optional)</Text>
+                  {Platform.OS === 'web' ? (
+                    <View style={styles.expiryInputRow}>
+                      {React.createElement('input', {
+                        type: 'date',
+                        'aria-label': 'Product sell by date',
+                        value: productForm.expiryDate,
+                        onChange: (event) => setProductForm((current) => ({
+                          ...current,
+                          expiryDate: event.target.value,
+                        })),
+                        disabled: savingProduct,
+                        style: {
+                          flex: 1,
+                          minWidth: 0,
+                          height: 40,
+                          border: `1px solid ${colors.border}`,
+                          borderRadius: 8,
+                          padding: '0 10px',
+                          backgroundColor: colors.background,
+                          color: colors.textPrimary,
+                          fontSize: 14,
+                        },
+                      })}
+                      {productForm.expiryDate ? (
+                        <TouchableOpacity
+                          style={styles.clearExpiryButton}
+                          onPress={() => setProductForm((current) => ({ ...current, expiryDate: '' }))}
+                          disabled={savingProduct}
+                          accessibilityRole="button"
+                          accessibilityLabel="Clear sell by date"
+                        >
+                          <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  ) : (
+                    <>
+                      <View style={styles.expiryInputRow}>
+                        <TouchableOpacity
+                          style={styles.expiryDateButton}
+                          onPress={() => setExpiryPickerVisible(true)}
+                          disabled={savingProduct}
+                          accessibilityRole="button"
+                          accessibilityLabel={productForm.expiryDate
+                            ? `Sell by date ${productForm.expiryDate}`
+                            : 'Select sell by date'}
+                        >
+                          <Ionicons name="calendar-outline" size={18} color={colors.textMuted} />
+                          <Text style={[
+                            styles.expiryDateText,
+                            !productForm.expiryDate && styles.expiryDatePlaceholder,
+                          ]}>
+                            {productForm.expiryDate || 'Select sell by date'}
+                          </Text>
+                        </TouchableOpacity>
+                        {productForm.expiryDate ? (
+                          <TouchableOpacity
+                            style={styles.clearExpiryButton}
+                            onPress={() => setProductForm((current) => ({ ...current, expiryDate: '' }))}
+                            disabled={savingProduct}
+                            accessibilityRole="button"
+                            accessibilityLabel="Clear sell by date"
+                          >
+                            <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                      {expiryPickerVisible ? (
+                        <DateTimePicker
+                          value={parseIsoDate(productForm.expiryDate)}
+                          mode="date"
+                          display={Platform.OS === 'ios' ? 'compact' : 'default'}
+                          onChange={(event, date) => {
+                            if (Platform.OS !== 'ios' || event.type === 'dismissed') {
+                              setExpiryPickerVisible(false);
+                            }
+                            if (date) {
+                              setProductForm((current) => ({
+                                ...current,
+                                expiryDate: formatIsoDate(date),
+                              }));
+                            }
+                          }}
+                        />
+                      ) : null}
+                    </>
+                  )}
+                </View>
+                {editingProduct?.stock_batches?.length > 1 ? (
+                  <Text style={styles.batchExpiryText}>
+                    Separate sell-by batches are tracked. With no quantity change, this date edits the earliest batch or batches; record supplier deliveries in Suppliers to add another dated batch.
+                  </Text>
+                ) : null}
                 {productError ? <Text style={styles.formError}>{productError}</Text> : null}
+
+                {editingProduct ? (
+                  confirmRemove ? (
+                    <View style={styles.removeConfirmBox}>
+                      <Text style={styles.removeConfirmText}>
+                        Remove {editingProduct.name} from Stock? This cannot be undone.
+                      </Text>
+                      <View style={styles.removeConfirmActions}>
+                        <TouchableOpacity
+                          style={styles.formSecondaryButton}
+                          onPress={() => setConfirmRemove(false)}
+                          disabled={savingProduct}
+                        >
+                          <Text style={styles.formSecondaryText}>Keep</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.removeConfirmButton}
+                          onPress={removeProduct}
+                          disabled={savingProduct}
+                          accessibilityRole="button"
+                        >
+                          <Text style={styles.removeConfirmButtonText}>{savingProduct ? 'Removing...' : 'Yes, remove'}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.removeButton}
+                      onPress={() => setConfirmRemove(true)}
+                      disabled={savingProduct}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${editingProduct.name} from Stock`}
+                    >
+                      <Ionicons name="trash-outline" size={16} color={colors.danger} />
+                      <Text style={styles.removeButtonText}>Remove Product</Text>
+                    </TouchableOpacity>
+                  )
+                ) : null}
+
                 <View style={styles.formActions}>
                   <TouchableOpacity style={styles.formSecondaryButton} onPress={() => setProductFormVisible(false)} disabled={savingProduct}>
                     <Text style={styles.formSecondaryText}>Cancel</Text>
@@ -322,6 +527,21 @@ function makeStyles(colors, typography, spacing, radius) {
     /* Header */
     headerRow: { marginBottom: spacing.md },
     pageTitle: { fontSize: 24, fontWeight: '800', color: colors.textPrimary },
+
+    /* Inline message */
+    noticeCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: colors.primaryLight,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      marginBottom: spacing.md,
+    },
+    noticeText: { flex: 1, color: colors.primary, fontSize: 13, fontWeight: '600', lineHeight: 18 },
 
     /* Search Bar */
     searchRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.md },
@@ -424,6 +644,7 @@ function makeStyles(colors, typography, spacing, radius) {
     productNameRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
     productName: { flexShrink: 1, fontSize: 14, fontWeight: '700', color: colors.textPrimary },
     detailsRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
+    batchExpiryText: { color: colors.textMuted, fontSize: 11, marginTop: 4 },
     productPrice: { fontSize: 13, fontWeight: '700', color: colors.primary },
     dotSeparator: { marginHorizontal: 6, color: colors.textMuted },
     productQty: { fontSize: 12, color: colors.textMuted },
@@ -480,6 +701,22 @@ function makeStyles(colors, typography, spacing, radius) {
       paddingHorizontal: 10,
       color: colors.textPrimary,
     },
+    expiryInputRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    expiryDateButton: {
+      flex: 1,
+      minHeight: 40,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+      borderRadius: 8,
+      paddingHorizontal: 10,
+    },
+    expiryDateText: { color: colors.textPrimary, fontSize: 14 },
+    expiryDatePlaceholder: { color: colors.textMuted },
+    clearExpiryButton: { padding: 8 },
     formError: { color: colors.danger, fontSize: 12, marginTop: 4 },
     formActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 12 },
     formSecondaryButton: {
@@ -493,5 +730,37 @@ function makeStyles(colors, typography, spacing, radius) {
     formSecondaryText: { color: colors.textPrimary, fontWeight: '700' },
     formPrimaryButton: { minWidth: 120, paddingVertical: 11, backgroundColor: brandGreen, borderRadius: 8, alignItems: 'center' },
     formPrimaryText: { color: '#FFFFFF', fontWeight: '700' },
+
+    /* Remove product */
+    removeButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      marginTop: 14,
+      paddingVertical: 10,
+      borderWidth: 1,
+      borderColor: colors.danger,
+      borderRadius: 8,
+    },
+    removeButtonText: { color: colors.danger, fontWeight: '700', fontSize: 13 },
+    removeConfirmBox: {
+      marginTop: 14,
+      padding: 12,
+      borderWidth: 1,
+      borderColor: 'rgba(220, 38, 38, 0.4)',
+      backgroundColor: 'rgba(220, 38, 38, 0.1)',
+      borderRadius: 8,
+    },
+    removeConfirmText: { color: colors.danger, fontSize: 13, fontWeight: '600', lineHeight: 18 },
+    removeConfirmActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 10 },
+    removeConfirmButton: {
+      minWidth: 120,
+      paddingVertical: 11,
+      backgroundColor: colors.danger,
+      borderRadius: 8,
+      alignItems: 'center',
+    },
+    removeConfirmButtonText: { color: '#FFFFFF', fontWeight: '700' },
   });
 }

@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
-import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../config/ThemeContext";
 import { getAuthenticatedStoreId } from "../../services/firestore/paths";
@@ -42,6 +43,11 @@ function getStatusColors(colors) {
 
 const formatR = (value) => `R${Number(value || 0).toFixed(2)}`;
 
+// An item from Stock is identified by its productId. An item typed in by hand has no productId,
+// so it is identified by its name instead.
+const nameKey = (value) => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+const itemKey = (item) => item.productId || `name:${nameKey(item.name)}`;
+
 // Small helper so every component below gets theme colors + styles
 function useThemedStyles() {
   const { colors } = useTheme();
@@ -51,6 +57,19 @@ function useThemedStyles() {
 
 function isOfflineError(error) {
   return String(error?.code).includes("unavailable") || /offline|network/i.test(error?.message || "");
+}
+
+function parseExpiryInput(value) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date();
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function formatExpiryInput(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export default function SuppliersAndReorders({ route }) {
@@ -174,10 +193,14 @@ function SuppliersTab({ query, setQuery, suppliers, products, loaded, storeId, s
   const [newPhone, setNewPhone] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // Add-item form: the item name is typed in. Stock items that match are offered as shortcuts.
   const [addItemFor, setAddItemFor] = useState(null);
-  const [productSearch, setProductSearch] = useState("");
+  const [itemName, setItemName] = useState("");
   const [pickedProduct, setPickedProduct] = useState(null);
   const [newItemQty, setNewItemQty] = useState("");
+  const [newItemSelling, setNewItemSelling] = useState("");
+  const [newItemCost, setNewItemCost] = useState("");
+  const [newItemReorder, setNewItemReorder] = useState("10");
 
   const [busySupplierId, setBusySupplierId] = useState(null);
 
@@ -185,9 +208,12 @@ function SuppliersTab({ query, setQuery, suppliers, products, loaded, storeId, s
     s.name.toLowerCase().includes(query.toLowerCase()),
   );
 
-  const productMatches = products
-    .filter((product) => product.name.toLowerCase().includes(productSearch.trim().toLowerCase()))
-    .slice(0, 5);
+  const nameTerm = itemName.trim().toLowerCase();
+  const productMatches = !pickedProduct && nameTerm
+    ? products
+      .filter((product) => String(product.name || "").toLowerCase().includes(nameTerm))
+      .slice(0, 5)
+    : [];
 
   const selectedItems = (supplier) => supplier.items.filter((item) => item.selected !== false);
 
@@ -222,16 +248,35 @@ function SuppliersTab({ query, setQuery, suppliers, products, loaded, storeId, s
     }
   }
 
-  function openAddItem(supplier) {
-    setAddItemFor((current) => (current === supplier.id ? null : supplier.id));
-    setProductSearch("");
+  function resetItemForm() {
+    setItemName("");
     setPickedProduct(null);
     setNewItemQty("");
+    setNewItemSelling("");
+    setNewItemCost("");
+    setNewItemReorder("10");
+  }
+
+  function openAddItem(supplier) {
+    setAddItemFor((current) => (current === supplier.id ? null : supplier.id));
+    resetItemForm();
+  }
+
+  // Typing after picking a Stock item turns it back into a typed-in item
+  function changeItemName(value) {
+    setItemName(value);
+    if (pickedProduct && value.trim() !== pickedProduct.name) setPickedProduct(null);
+  }
+
+  function pickProduct(product) {
+    setPickedProduct(product);
+    setItemName(product.name);
   }
 
   async function submitItem(supplier) {
-    if (!pickedProduct) {
-      setNotice({ type: "error", text: "Pick a product from your stock first." });
+    const name = itemName.trim();
+    if (!name) {
+      setNotice({ type: "error", text: "Enter the item name." });
       return;
     }
     let qty;
@@ -245,20 +290,48 @@ function SuppliersTab({ query, setQuery, suppliers, products, loaded, storeId, s
       setNotice({ type: "error", text: "Enter a whole number quantity of 1 or more." });
       return;
     }
+
+    // Link to Stock when the item was picked from Stock, or the typed name matches a Stock product exactly
+    const stockProduct = pickedProduct
+      || products.find((product) => nameKey(product.name) === nameKey(name))
+      || null;
+
+    let unitCost = 0;
+    let sellingPrice = 0;
+    let reorderLevel = 10;
+    if (stockProduct) {
+      unitCost = Number(stockProduct.cost_price || 0);
+      sellingPrice = Number(stockProduct.unit_price || 0);
+      reorderLevel = Number(stockProduct.reorder_level ?? 10);
+    } else {
+      if (!newItemSelling.trim()) {
+        setNotice({ type: "error", text: "Enter the selling price." });
+        return;
+      }
+      try {
+        sellingPrice = parseNonNegativeNumber(newItemSelling, "selling price");
+        unitCost = parseNonNegativeNumber(newItemCost || "0", "cost price");
+        reorderLevel = parseNonNegativeNumber(newItemReorder || "0", "low-stock threshold", { integer: true });
+      } catch (error) {
+        setNotice({ type: "error", text: error.message });
+        return;
+      }
+    }
+
     const item = {
-      productId: pickedProduct.id,
-      name: pickedProduct.name,
+      productId: stockProduct?.id || "",
+      name: stockProduct?.name || name,
       qty,
-      unitCost: pickedProduct.cost_price || 0,
+      unitCost,
+      sellingPrice,
+      reorderLevel,
       selected: true,
     };
-    const others = supplier.items.filter((existing) => existing.productId !== item.productId);
+    const others = supplier.items.filter((existing) => itemKey(existing) !== itemKey(item));
     try {
       await updateSupplierItems(storeId, supplier.id, [...others, item]);
       setAddItemFor(null);
-      setPickedProduct(null);
-      setProductSearch("");
-      setNewItemQty("");
+      resetItemForm();
     } catch (error) {
       setNotice({ type: "error", text: error.message || "Could not add the item." });
     }
@@ -415,7 +488,7 @@ function SuppliersTab({ query, setQuery, suppliers, products, loaded, storeId, s
               <View style={styles.tagRow}>
                 {s.items.map((item, j) => (
                   <Pressable
-                    key={item.productId || j}
+                    key={itemKey(item) || j}
                     onPress={() => toggleItem(s, j)}
                     style={[styles.tag, item.selected === false && styles.tagUnselected]}
                   >
@@ -437,56 +510,98 @@ function SuppliersTab({ query, setQuery, suppliers, products, loaded, storeId, s
 
             {addItemFor === s.id && (
               <View style={[styles.formCard, styles.addItemForm]}>
-                {products.length === 0 ? (
-                  <Text style={styles.emptyText}>
-                    Your Stock is empty. Add the product in Stock first (quantity 0 is fine), then add it here.
+                <Text style={styles.formLabel}>PRODUCT NAME</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="e.g. Sunflower Oil 2L"
+                  placeholderTextColor={colors.textMuted}
+                  value={itemName}
+                  onChangeText={changeItemName}
+                />
+
+                {pickedProduct ? (
+                  <Text style={[styles.itemSub, styles.formHint]}>
+                    In your Stock: {pickedProduct.quantity} on hand · cost {formatR(pickedProduct.cost_price)}. Delivering this order adds to that stock.
                   </Text>
-                ) : (
+                ) : productMatches.length > 0 ? (
                   <>
-                    {pickedProduct ? (
-                      <Pressable style={styles.pickedChip} onPress={() => setPickedProduct(null)}>
-                        <Text style={styles.pickedChipText}>{pickedProduct.name}</Text>
-                        <Ionicons name="close-circle" size={16} color={colors.primary} />
+                    <Text style={[styles.itemSub, styles.formHint]}>In your Stock (tap to use it):</Text>
+                    {productMatches.map((product) => (
+                      <Pressable
+                        key={product.id}
+                        style={styles.productResult}
+                        onPress={() => pickProduct(product)}
+                      >
+                        <Text style={styles.productResultName}>{product.name}</Text>
+                        <Text style={styles.itemSub}>
+                          Cost {formatR(product.cost_price)} · {product.quantity} in stock
+                        </Text>
                       </Pressable>
-                    ) : (
-                      <>
-                        <TextInput
-                          style={styles.formInput}
-                          placeholder="Search your stock..."
-                          placeholderTextColor={colors.textMuted}
-                          value={productSearch}
-                          onChangeText={setProductSearch}
-                        />
-                        {productMatches.map((product) => (
-                          <Pressable
-                            key={product.id}
-                            style={styles.productResult}
-                            onPress={() => setPickedProduct(product)}
-                          >
-                            <Text style={styles.productResultName}>{product.name}</Text>
-                            <Text style={styles.itemSub}>
-                              Cost {formatR(product.cost_price)} · {product.quantity} in stock
-                            </Text>
-                          </Pressable>
-                        ))}
-                        {productMatches.length === 0 && (
-                          <Text style={styles.emptyText}>No product in your Stock matches that.</Text>
-                        )}
-                      </>
-                    )}
+                    ))}
+                  </>
+                ) : null}
+
+                {!pickedProduct && (
+                  <>
+                    <Text style={styles.formLabel}>SELLING PRICE (R)</Text>
                     <TextInput
-                      style={[styles.formInput, styles.qtyInput]}
-                      placeholder="Quantity to order"
+                      style={styles.formInput}
+                      placeholder="0.00"
                       placeholderTextColor={colors.textMuted}
-                      value={newItemQty}
-                      onChangeText={setNewItemQty}
-                      keyboardType="number-pad"
+                      value={newItemSelling}
+                      onChangeText={(value) => {
+                        if (/^\d*\.?\d{0,2}$/.test(value)) setNewItemSelling(value);
+                      }}
+                      keyboardType="decimal-pad"
                     />
-                    <Pressable style={styles.formSubmit} onPress={() => submitItem(s)}>
-                      <Text style={styles.formSubmitText}>Add Item</Text>
-                    </Pressable>
+                    <Text style={styles.formLabel}>COST PRICE (R)</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      placeholder="0.00"
+                      placeholderTextColor={colors.textMuted}
+                      value={newItemCost}
+                      onChangeText={(value) => {
+                        if (/^\d*\.?\d{0,2}$/.test(value)) setNewItemCost(value);
+                      }}
+                      keyboardType="decimal-pad"
+                    />
                   </>
                 )}
+
+                <Text style={styles.formLabel}>QUANTITY</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="Quantity to order"
+                  placeholderTextColor={colors.textMuted}
+                  value={newItemQty}
+                  onChangeText={(value) => {
+                    if (/^\d*$/.test(value)) setNewItemQty(value);
+                  }}
+                  keyboardType="number-pad"
+                />
+
+                {!pickedProduct && (
+                  <>
+                    <Text style={styles.formLabel}>LOW-STOCK THRESHOLD</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      placeholder="10"
+                      placeholderTextColor={colors.textMuted}
+                      value={newItemReorder}
+                      onChangeText={(value) => {
+                        if (/^\d*$/.test(value)) setNewItemReorder(value);
+                      }}
+                      keyboardType="number-pad"
+                    />
+                    <Text style={[styles.itemSub, styles.formHint]}>
+                      Not in your Stock yet? It is added to Stock with these details when the order is delivered.
+                    </Text>
+                  </>
+                )}
+
+                <Pressable style={styles.formSubmit} onPress={() => submitItem(s)}>
+                  <Text style={styles.formSubmitText}>Add Item</Text>
+                </Pressable>
               </View>
             )}
 
@@ -532,18 +647,29 @@ function OrdersTab({ orders, suppliers, loaded, storeId, shopName, setNotice }) 
   const { colors, styles } = useThemedStyles();
   const statusColors = useMemo(() => getStatusColors(colors), [colors]);
   const [busyId, setBusyId] = useState(null);
+  const [deliveryExpiryDates, setDeliveryExpiryDates] = useState({});
+  const [activeExpiryPicker, setActiveExpiryPicker] = useState(null);
 
   async function markDelivered(order) {
     setBusyId(order.id);
     try {
-      const { updated, skipped } = await markOrderDelivered(storeId, order.id);
+      const expiryDates = order.items.map((item, index) => deliveryExpiryDates[`${order.id}:${index}`] || "");
+      const { updated, created, skipped } = await markOrderDelivered(storeId, order.id, expiryDates);
       const stockText = updated
         ? `Stock updated for ${updated} ${updated === 1 ? "item" : "items"}.`
-        : "No stock was changed.";
-      const skippedText = skipped.length
-        ? ` Not in Stock any more, so skipped: ${skipped.join(", ")}.`
+        : created.length ? "" : "No stock was changed.";
+      const createdText = created.length
+        ? ` Added to Stock as new: ${created.join(", ")}.`
         : "";
-      setNotice({ type: "success", text: `Order ${order.orderNumber} delivered. ${stockText}${skippedText}` });
+      const skippedText = skipped.length
+        ? ` No longer in Stock, so stock was not changed for: ${skipped.join(", ")}.`
+        : "";
+      setNotice({ type: "success", text: `Order ${order.orderNumber} delivered. ${stockText}${createdText}${skippedText}`.replace("delivered.  ", "delivered. ") });
+      setDeliveryExpiryDates((current) => {
+        const next = { ...current };
+        order.items.forEach((item, index) => delete next[`${order.id}:${index}`]);
+        return next;
+      });
     } catch (error) {
       setNotice({
         type: "error",
@@ -600,6 +726,7 @@ function OrdersTab({ orders, suppliers, loaded, storeId, shopName, setNotice }) 
           text: colors.textMuted,
         };
         const busy = busyId === o.id;
+        const allInStock = o.items.every((item) => item.productId);
         return (
           <View key={o.id} style={styles.card}>
             <View style={styles.cardTopRow}>
@@ -616,11 +743,73 @@ function OrdersTab({ orders, suppliers, loaded, storeId, shopName, setNotice }) 
               </View>
             </View>
 
-            {o.items.map((it, j) => (
-              <Text key={j} style={styles.receiptLine}>
-                • {it.name} × {it.qty}
-              </Text>
-            ))}
+            {o.items.map((it, j) => {
+              const inputKey = `${o.id}:${j}`;
+              const expiryDate = deliveryExpiryDates[inputKey] || "";
+              return (
+                <View key={inputKey}>
+                  <Text style={styles.receiptLine}>• {it.name} × {it.qty}</Text>
+                  {o.status === "Delivered" && it.expiryDate ? (
+                    <Text style={[styles.presetLabel, { marginLeft: 18, marginBottom: 6 }]}>
+                      SELL BY: {it.expiryDate}
+                    </Text>
+                  ) : null}
+                  {o.status === "Pending" && (
+                    <View style={{ marginLeft: 18, marginBottom: 8 }}>
+                      <Text style={[styles.presetLabel, { marginBottom: 4 }]}>SELL BY DATE (OPTIONAL)</Text>
+                      {Platform.OS === "web" ? React.createElement("input", {
+                        type: "date",
+                        "aria-label": `${it.name} delivery sell-by date`,
+                        value: expiryDate,
+                        disabled: busy,
+                        onChange: (event) => setDeliveryExpiryDates((current) => ({
+                          ...current,
+                          [inputKey]: event.target.value,
+                        })),
+                        style: {
+                          boxSizing: "border-box",
+                          width: "100%",
+                          maxWidth: 280,
+                          height: 40,
+                          border: `1px solid ${colors.border}`,
+                          borderRadius: 8,
+                          padding: "0 10px",
+                          backgroundColor: colors.card,
+                          color: colors.textPrimary,
+                          fontSize: 14,
+                        },
+                      }) : (
+                        <>
+                          <Pressable
+                            style={[styles.searchInput, { maxWidth: 280 }]}
+                            onPress={() => setActiveExpiryPicker(inputKey)}
+                            disabled={busy}
+                          >
+                            <Text style={{ color: expiryDate ? colors.textPrimary : colors.textMuted }}>
+                              {expiryDate || "Select sell-by date"}
+                            </Text>
+                          </Pressable>
+                          {activeExpiryPicker === inputKey && (
+                            <DateTimePicker
+                              value={parseExpiryInput(expiryDate)}
+                              mode="date"
+                              display={Platform.OS === "ios" ? "compact" : "default"}
+                              onChange={(event, date) => {
+                                setActiveExpiryPicker(null);
+                                if (date) setDeliveryExpiryDates((current) => ({
+                                  ...current,
+                                  [inputKey]: formatExpiryInput(date),
+                                }));
+                              }}
+                            />
+                          )}
+                        </>
+                      )}
+                    </View>
+                  )}
+                </View>
+              );
+            })}
 
             <View style={styles.orderBottomRow}>
               <View>
@@ -628,7 +817,9 @@ function OrdersTab({ orders, suppliers, loaded, storeId, shopName, setNotice }) 
                 <Text style={styles.itemCost}>{formatR(o.total)}</Text>
               </View>
               {o.status === "Delivered" && (
-                <Text style={styles.deliveredNote}>Added to Stock</Text>
+                <Text style={styles.deliveredNote}>
+                  {allInStock ? "Added to Stock" : "Delivered (some items were not added to Stock)"}
+                </Text>
               )}
             </View>
 
@@ -722,6 +913,13 @@ const makeStyles = (colors) =>
       borderColor: colors.border,
     },
     addItemForm: { marginTop: 10 },
+    formLabel: {
+      fontSize: 10,
+      color: colors.textMuted,
+      fontWeight: "700",
+      marginBottom: 6,
+    },
+    formHint: { marginTop: 0, marginBottom: 10, lineHeight: 17 },
     formInput: {
       backgroundColor: colors.card,
       color: colors.textPrimary,
@@ -733,7 +931,6 @@ const makeStyles = (colors) =>
       borderWidth: 1,
       borderColor: colors.border,
     },
-    qtyInput: { marginTop: 4 },
     formSubmit: {
       backgroundColor: BRAND_GREEN,
       borderRadius: 10,
@@ -752,18 +949,6 @@ const makeStyles = (colors) =>
       borderColor: colors.border,
     },
     productResultName: { fontSize: 14, fontWeight: "600", color: colors.textPrimary },
-    pickedChip: {
-      flexDirection: "row",
-      alignItems: "center",
-      alignSelf: "flex-start",
-      gap: 6,
-      backgroundColor: colors.primaryLight,
-      borderRadius: 14,
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      marginBottom: 10,
-    },
-    pickedChipText: { color: colors.primary, fontSize: 13, fontWeight: "700" },
     categoryPickOption: {
       borderWidth: 1,
       borderColor: colors.border,
@@ -870,7 +1055,7 @@ const makeStyles = (colors) =>
       borderTopWidth: 1,
       borderTopColor: colors.border,
     },
-    deliveredNote: { color: colors.primary, fontSize: 12, fontWeight: "700" },
+    deliveredNote: { color: colors.primary, fontSize: 12, fontWeight: "700", flexShrink: 1, textAlign: "right", marginLeft: 12 },
     orderActions: {
       flexDirection: "row",
       flexWrap: "wrap",

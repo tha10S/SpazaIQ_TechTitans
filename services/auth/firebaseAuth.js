@@ -4,7 +4,6 @@ import {
   signOut,
   onAuthStateChanged,
   updateProfile,
-  deleteUser,
 } from "firebase/auth";
 
 
@@ -12,10 +11,21 @@ import {
 import { auth } from "../firebase/firebaseConfig";
 import { ensureStoreSeed } from '../firestore/seedRepository';
 
-import { assertValidPassword, isValidEmail, normalizeEmail, normalizePhoneNumber } from '../validation';
+import {
+  assertValidPassword,
+  isValidEmail,
+  normalizeEmail,
+  normalizePhoneNumber,
+  normalizeProvince,
+} from '../validation';
 
-//import { normalizeProvince } from '../provinces';
+let accountCreationPending = false;
 
+export function consumeAccountCreationPending() {
+  if (!accountCreationPending) return false;
+  accountCreationPending = false;
+  return true;
+}
 
 export async function signUp(email, password, profile = {}) {
   const normalizedEmail = normalizeEmail(email);
@@ -28,27 +38,32 @@ export async function signUp(email, password, profile = {}) {
     ...profile,
     fullName,
     shopName,
-    province: normalizeProvince(profile.province, { required: true }),
+    province: normalizeProvince(profile.province),
     mobile: normalizePhoneNumber(profile.mobile, { required: true }),
   };
-  const cred = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
-  const displayName = fullName;
+  accountCreationPending = true;
+  let accountCreated = false;
   try {
-    await updateProfile(cred.user, { displayName });
-    await ensureStoreSeed(cred.user.uid, {
-      ...normalizedProfile,
-      email: cred.user.email,
-      displayName: cred.user.displayName || displayName,
-    });
-  } catch (error) {
+    const cred = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
+    accountCreated = true;
+    const displayName = fullName;
     try {
-      await deleteUser(cred.user);
-    } catch (cleanupError) {
-      throw new Error(`Account setup failed (${error.message || 'unknown error'}) and the new account could not be rolled back (${cleanupError.message || 'unknown error'}).`);
+      await updateProfile(cred.user, { displayName });
+      await ensureStoreSeed(cred.user.uid, {
+        ...normalizedProfile,
+        email: cred.user.email,
+        displayName: cred.user.displayName || displayName,
+      });
+    } catch (error) {
+      console.warn(
+        'The account was created, but shop profile setup failed. The user will remain signed in.',
+        error
+      );
     }
-    throw error;
+    return cred.user;
+  } finally {
+    if (!accountCreated) accountCreationPending = false;
   }
-  return cred.user;
 }
 
 export const logIn = (email, password) =>

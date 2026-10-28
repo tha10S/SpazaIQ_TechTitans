@@ -8,6 +8,8 @@
 
 // ---- Things you may want to tune ----
 export const PAYDAYS = [15, 25, 28];
+// Payday advice shows from 2 days before payday until this many days after it.
+export const PAYDAY_MESSAGE_DAYS = 5;
 // Assumption: grant money is spent in the first week of the month. SASSA's exact pay dates
 // change from month to month, so adjust this window if you want it tighter.
 export const GRANT_WEEK = { from: 1, to: 7 };
@@ -86,6 +88,7 @@ export function summariseWeather(weather, now = new Date()) {
 function calendarContext(now) {
   const day = now.getDate();
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const daysInPreviousMonth = new Date(now.getFullYear(), now.getMonth(), 0).getDate();
 
   const inGrantWeek = day >= GRANT_WEEK.from && day <= GRANT_WEEK.to;
   const daysToGrantWeek = day < GRANT_WEEK.from
@@ -100,9 +103,15 @@ function calendarContext(now) {
     if (!nextPayday || inDays < nextPayday.inDays) nextPayday = { day: payday, inDays };
   });
 
+  // The most recent payday that was 1 to PAYDAY_MESSAGE_DAYS days ago. A payday in the previous month
+  // counts too, so "payday was 3 days ago" still works on the 1st, 2nd and 3rd.
   const paidRecently = PAYDAYS
-    .map((payday) => ({ day: payday, daysAgo: day - payday }))
-    .find((payday) => payday.daysAgo >= 1 && payday.daysAgo <= 2) || null;
+    .map((payday) => ({
+      day: payday,
+      daysAgo: day >= payday ? day - payday : day + daysInPreviousMonth - payday,
+    }))
+    .filter((payday) => payday.daysAgo >= 1 && payday.daysAgo <= PAYDAY_MESSAGE_DAYS)
+    .sort((a, b) => a.daysAgo - b.daysAgo)[0] || null;
 
   return { inGrantWeek, daysToGrantWeek, nextPayday, paidRecently };
 }
@@ -209,6 +218,7 @@ export function buildShopAdvice({ now = new Date(), weather = null, products = [
     });
   }
 
+  // Before payday: from 2 days ahead until payday itself
   if (calendar.nextPayday && calendar.nextPayday.inDays <= 2) {
     const { day, inDays } = calendar.nextPayday;
     items.push({
@@ -218,6 +228,24 @@ export function buildShopAdvice({ now = new Date(), weather = null, products = [
       icon: 'cash',
       title: inDays === 0 ? `Payday today (the ${day}th)` : `Payday is ${inDaysLabel(inDays)} (the ${day}th)`,
       detail: `People spend more right after payday. Stock staples, airtime and cold drinks.${owing.length ? ' It is also a good time to ask for credit payments.' : ''}`,
+      target: owing.length ? 'Credit' : 'Suppliers',
+      targetLabel: owing.length ? 'Send reminders' : 'Order stock',
+    });
+  }
+
+  // After payday: this stays for PAYDAY_MESSAGE_DAYS days, because customers keep spending for a few days
+  if (calendar.paidRecently) {
+    const { day, daysAgo } = calendar.paidRecently;
+    const when = daysAgo === 1 ? 'yesterday' : `${daysAgo} days ago`;
+    items.push({
+      id: 'payday-after',
+      priority: owing.length ? 80 : 72,
+      severity: 'info',
+      icon: 'cash',
+      title: `Payday was ${when} (the ${day}th)`,
+      detail: owing.length
+        ? `Customers still have cash to spend, and ${owing.length} ${plural(owing.length, 'customer still owes', 'customers still owe')} you. Keep staples, airtime and cold drinks stocked, and send credit reminders now.`
+        : 'Customers still have cash to spend. Keep staples, airtime and cold drinks stocked.',
       target: owing.length ? 'Credit' : 'Suppliers',
       targetLabel: owing.length ? 'Send reminders' : 'Order stock',
     });
@@ -233,17 +261,6 @@ export function buildShopAdvice({ now = new Date(), weather = null, products = [
       icon: 'alert-circle',
       title: `${formatRand(total)} overdue from ${overdue.length} ${plural(overdue.length, 'customer', 'customers')}`,
       detail: `${nameList(overdue.map((customer) => customer.name))}. Remind them on WhatsApp before giving more credit.`,
-      target: 'Credit',
-      targetLabel: 'Send reminders',
-    });
-  } else if (calendar.paidRecently && owing.length) {
-    items.push({
-      id: 'payday-collect',
-      priority: 80,
-      severity: 'info',
-      icon: 'cash',
-      title: 'Payday just passed',
-      detail: `Customers have cash now, and ${owing.length} ${plural(owing.length, 'customer still owes', 'customers still owe')} you. Send a reminder today.`,
       target: 'Credit',
       targetLabel: 'Send reminders',
     });

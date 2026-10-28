@@ -1,3 +1,5 @@
+import { getEarliestStockExpiry, normalizeStockBatches } from './stockBatches';
+
 function timestampToIso(value) {
   if (!value) return null;
   if (typeof value.toDate === 'function') return value.toDate().toISOString();
@@ -7,6 +9,11 @@ function timestampToIso(value) {
 
 export function mapProduct(snapshot) {
   const data = snapshot.data ? snapshot.data() : snapshot;
+  const stockBatches = normalizeStockBatches(data);
+  const quantity = Number(data.quantity ?? data.stockQuantity ?? 0);
+  const expiryDate = Array.isArray(data.stockBatches)
+    ? getEarliestStockExpiry(stockBatches) || (quantity <= 0 ? data.expiryDate ?? data.expiry_date : null)
+    : data.expiryDate ?? data.expiry_date;
   return {
     id: snapshot.id ?? data.id,
     name: data.name ?? '',
@@ -17,6 +24,11 @@ export function mapProduct(snapshot) {
     quantity: Number(data.quantity ?? data.stockQuantity ?? 0),
     reorder_level: Number(data.reorderLevel ?? data.reorder_level ?? 0),
     category: data.category ?? 'General',
+    expiry_date: timestampToIso(expiryDate)?.slice(0, 10) ?? '',
+    stock_batches: stockBatches.map((batch) => ({
+      quantity: batch.quantity,
+      expiry_date: batch.expiryDate || '',
+    })),
     updated_at: timestampToIso(data.updatedAt ?? data.updated_at),
   };
 }

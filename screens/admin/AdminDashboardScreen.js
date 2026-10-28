@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,7 +7,7 @@ import { auth } from '../../services/firebase/firebaseConfig';
 import { useTheme } from '../../config/ThemeContext';
 import { Pill, SEVERITY_COLOR, StatCard, TIER_META, TONE_META, confirmAction } from './adminUi';
 import AdminShopDetail from './AdminShopDetail';
-import { deactivateMany, subscribeShopStats, subscribeSubscriptions } from '../../services/admin/adminRepository';
+import { deactivateMany, publishShopScores, subscribeShopStats, subscribeSubscriptions } from '../../services/admin/adminRepository';
 import { DEFAULT_FEE, formatDay, paymentReminderMessage, subscriptionState, toDate } from '../../services/admin/billing';
 import {
   formatRand,
@@ -18,7 +18,6 @@ import {
   scoreAll,
   tierComparison,
 } from '../../services/admin/performance';
-import { openWhatsApp } from '../../services/whatsapp';
 
 const BRAND_GREEN = '#004B49';
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -72,6 +71,23 @@ export default function AdminDashboardScreen() {
     () => scoreAll(shops, now).map((shop) => ({ ...shop, sub: subs[shop.storeId] || null, state: subscriptionState(subs[shop.storeId], now) })),
     [shops, subs, now]
   );
+  // Each shop's finished score is published for that shop to read, so the shop owner sees the same number as here.
+  // Only scores that changed are written.
+  const publishedScores = useRef({});
+  useEffect(() => {
+    const changed = scored.filter((shop) => publishedScores.current[shop.storeId] !== `${shop.score}-${shop.tier}`);
+    if (!changed.length) return;
+    changed.forEach((shop) => {
+      publishedScores.current[shop.storeId] = `${shop.score}-${shop.tier}`;
+    });
+    publishShopScores(changed.map(({ storeId, score, tier }) => ({ storeId, score, tier }))).catch((err) => {
+      changed.forEach((shop) => {
+        delete publishedScores.current[shop.storeId]; // try again on the next change
+      });
+      console.warn('Could not publish shop scores', err?.code || err?.message);
+    });
+  }, [scored]);
+
   const totals = useMemo(() => platformTotals(scored), [scored]);
   const insights = useMemo(() => platformInsights(scored), [scored]);
   const comparison = useMemo(() => tierComparison(scored), [scored]);
@@ -131,14 +147,6 @@ export default function AdminDashboardScreen() {
         }
       }
     );
-  };
-
-  const remind = async (shop) => {
-    const result = await openWhatsApp(
-      shop.contactPhone,
-      paymentReminderMessage({ shopName: shop.shopName, fee: shop.sub?.monthlyFee ?? DEFAULT_FEE, dueDate: shop.state.dueDate, accessUntil: shop.state.accessUntil })
-    );
-    if (!result.ok) setNotice(result.error);
   };
 
   const selected = scored.find((shop) => shop.storeId === selectedId) || null;
@@ -287,7 +295,6 @@ export default function AdminDashboardScreen() {
       ) : (
         billingRows.map((shop) => {
           const tone = TONE_META[shop.state.tone];
-          const chase = shop.state.key === 'overdue' || shop.state.key === 'due-soon' || shop.state.key === 'deactivated';
           return (
             <Pressable key={shop.storeId} style={styles.billRow} onPress={() => setSelectedId(shop.storeId)}>
               <View style={{ flex: 1 }}>
@@ -298,11 +305,6 @@ export default function AdminDashboardScreen() {
               </View>
               <View style={{ alignItems: 'flex-end', gap: 6 }}>
                 <Pill label={shop.state.label} color={tone.color} bg={tone.bg} />
-                {chase && shop.contactPhone ? (
-                  <Pressable onPress={() => remind(shop)} hitSlop={8}>
-                    <Text style={styles.link}>WhatsApp</Text>
-                  </Pressable>
-                ) : null}
               </View>
             </Pressable>
           );

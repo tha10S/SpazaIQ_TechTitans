@@ -114,16 +114,20 @@ export function buildHomeFeed({ products = [], customers = [], sales = [], now =
   }
 
   // ---- Stock: expiry ----
-  // Reads product.expiry_date. Products have no expiry field yet, so this stays empty until
-  // Stock saves one and mapProduct passes it through.
   const expired = [];
   const expiringSoon = [];
   products.forEach((product) => {
-    const expiry = parseDay(product.expiry_date);
-    if (!expiry || product.quantity <= 0) return;
-    const daysLeft = daysBetween(today, expiry);
-    if (daysLeft < 0) expired.push(product);
-    else if (daysLeft <= 7) expiringSoon.push({ ...product, daysLeft });
+    const batches = Array.isArray(product.stock_batches)
+      ? product.stock_batches
+      : [{ quantity: product.quantity, expiry_date: product.expiry_date }];
+    batches.forEach((batch) => {
+      const expiry = parseDay(batch.expiry_date);
+      if (!expiry || Number(batch.quantity) <= 0) return;
+      const daysLeft = daysBetween(today, expiry);
+      const trackedBatch = { ...product, quantity: Number(batch.quantity), daysLeft };
+      if (daysLeft < 0) expired.push(trackedBatch);
+      else if (daysLeft <= 7) expiringSoon.push(trackedBatch);
+    });
   });
 
   if (expired.length) {
@@ -131,8 +135,8 @@ export function buildHomeFeed({ products = [], customers = [], sales = [], now =
       id: 'expired',
       severity: 'danger',
       icon: 'time',
-      title: `${expired.length} ${plural(expired.length, 'item is', 'items are')} past the expiry date`,
-      detail: summarise(expired.map((product) => product.name)),
+      title: `${expired.length} ${plural(expired.length, 'stock batch is', 'stock batches are')} past the expiry date`,
+      detail: summarise(expired.map((product) => `${product.name} (${product.quantity} units)`)),
       target: 'Stock',
     });
   }
@@ -142,11 +146,11 @@ export function buildHomeFeed({ products = [], customers = [], sales = [], now =
       id: 'expiring-soon',
       severity: 'warning',
       icon: 'time-outline',
-      title: `${expiringSoon.length} ${plural(expiringSoon.length, 'item expires', 'items expire')} within 7 days`,
+      title: `${expiringSoon.length} ${plural(expiringSoon.length, 'stock batch expires', 'stock batches expire')} within 7 days`,
       detail: summarise(
         expiringSoon
           .sort((a, b) => a.daysLeft - b.daysLeft)
-          .map((product) => `${product.name} (${product.daysLeft === 0 ? 'today' : `${product.daysLeft}d`})`)
+          .map((product) => `${product.name} (${product.quantity} units, ${product.daysLeft === 0 ? 'today' : `${product.daysLeft}d`})`)
       ),
       target: 'Stock',
     });
