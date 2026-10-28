@@ -10,7 +10,12 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeProvider, useTheme } from '../config/ThemeContext';
 import { TechTitansAssistant } from '../components/TechTitansAssistant';
-import { consumeAccountCreationPending, watchAuth } from '../services/auth/firebaseAuth';
+import DeactivatedScreen from '../components/DeactivatedScreen';
+import ShopStatsSync from '../components/ShopStatsSync';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../services/firebase/firebaseConfig';
+import { subscriptionState } from '../services/admin/billing';
+import { consumeAccountCreationPending, logOut, watchAuth } from '../services/auth/firebaseAuth';
 import { ensureStoreSeed } from '../services/firestore/seedRepository';
 import { getUserProfile } from '../services/firestore/usersRepository';
 import { isAdminUser } from '../services/admin/adminRepository';
@@ -196,6 +201,28 @@ function AppContent() {
   const userName = offlineDemo ? 'Demo Shopkeeper' : userProfile?.fullName || user?.displayName || user?.email;
   const shopName = offlineDemo ? 'SpazaIQ Offline Demo' : userProfile?.shopName || user?.displayName || 'My Shop';
 
+  // The shop's own subscription. A deactivated shop can log in but is locked out of the app.
+  const [subscription, setSubscription] = useState(null);
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!user || isAdmin || offlineDemo || !storeId) {
+      setSubscription(null);
+      return undefined;
+    }
+    return onSnapshot(
+      doc(db, 'subscriptions', storeId),
+      (snapshot) => setSubscription(snapshot.exists() ? snapshot.data() : null),
+      () => setSubscription(null)
+    );
+  }, [user, isAdmin, offlineDemo, storeId]);
+  // Check again every minute, so a shop is locked as soon as its access date passes
+  useEffect(() => {
+    const timer = setInterval(() => setTick((value) => value + 1), 60000);
+    return () => clearInterval(timer);
+  }, []);
+  const subscriptionInfo = subscriptionState(subscription, new Date());
+  const locked = Boolean(user) && !isAdmin && !offlineDemo && subscriptionInfo.key === 'deactivated';
+
   if (loading || (user && !welcomeReady)) {
     return (
       <View
@@ -227,6 +254,18 @@ function AppContent() {
             <Stack.Screen name="OfflineDemo" component={OfflineDemoScreen} />
           ) : user && isAdmin ? (
             <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
+          ) : user && locked ? (
+            <Stack.Screen name="Deactivated">
+              {() => (
+                <DeactivatedScreen
+                  storeId={storeId}
+                  sub={subscription}
+                  state={subscriptionInfo}
+                  shopName={shopName}
+                  onSignOut={() => logOut()}
+                />
+              )}
+            </Stack.Screen>
           ) : user && showWelcome ? (
             <Stack.Screen name="Welcome">
               {() => <WelcomeScreen userName={userName} shopName={shopName} onStart={finishWelcome} />}
@@ -264,7 +303,11 @@ function AppContent() {
           />
         </Stack.Navigator>
       </NavigationContainer>
-      {((user && !isAdmin && welcomeReady && !showWelcome) || offlineDemo) && (
+      {/* Keeps this shop's totals up to date for the admin dashboard, whichever tab is open */}
+      {user && !isAdmin && !offlineDemo && welcomeReady ? (
+        <ShopStatsSync storeId={storeId} shopName={shopName} />
+      ) : null}
+      {((user && !isAdmin && !locked && welcomeReady && !showWelcome) || offlineDemo) && (
         <TechTitansAssistant storeId={storeId} userName={userName} shopName={shopName} />
       )}
     </View>

@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../config/ThemeContext";
 import { getAuthenticatedStoreId } from "../../services/firestore/paths";
@@ -57,19 +56,6 @@ function useThemedStyles() {
 
 function isOfflineError(error) {
   return String(error?.code).includes("unavailable") || /offline|network/i.test(error?.message || "");
-}
-
-function parseExpiryInput(value) {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date();
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(year, month - 1, day);
-}
-
-function formatExpiryInput(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
 }
 
 export default function SuppliersAndReorders({ route }) {
@@ -647,14 +633,11 @@ function OrdersTab({ orders, suppliers, loaded, storeId, shopName, setNotice }) 
   const { colors, styles } = useThemedStyles();
   const statusColors = useMemo(() => getStatusColors(colors), [colors]);
   const [busyId, setBusyId] = useState(null);
-  const [deliveryExpiryDates, setDeliveryExpiryDates] = useState({});
-  const [activeExpiryPicker, setActiveExpiryPicker] = useState(null);
 
   async function markDelivered(order) {
     setBusyId(order.id);
     try {
-      const expiryDates = order.items.map((item, index) => deliveryExpiryDates[`${order.id}:${index}`] || "");
-      const { updated, created, skipped } = await markOrderDelivered(storeId, order.id, expiryDates);
+      const { updated, created, skipped } = await markOrderDelivered(storeId, order.id);
       const stockText = updated
         ? `Stock updated for ${updated} ${updated === 1 ? "item" : "items"}.`
         : created.length ? "" : "No stock was changed.";
@@ -665,11 +648,6 @@ function OrdersTab({ orders, suppliers, loaded, storeId, shopName, setNotice }) 
         ? ` No longer in Stock, so stock was not changed for: ${skipped.join(", ")}.`
         : "";
       setNotice({ type: "success", text: `Order ${order.orderNumber} delivered. ${stockText}${createdText}${skippedText}`.replace("delivered.  ", "delivered. ") });
-      setDeliveryExpiryDates((current) => {
-        const next = { ...current };
-        order.items.forEach((item, index) => delete next[`${order.id}:${index}`]);
-        return next;
-      });
     } catch (error) {
       setNotice({
         type: "error",
@@ -743,73 +721,9 @@ function OrdersTab({ orders, suppliers, loaded, storeId, shopName, setNotice }) 
               </View>
             </View>
 
-            {o.items.map((it, j) => {
-              const inputKey = `${o.id}:${j}`;
-              const expiryDate = deliveryExpiryDates[inputKey] || "";
-              return (
-                <View key={inputKey}>
-                  <Text style={styles.receiptLine}>• {it.name} × {it.qty}</Text>
-                  {o.status === "Delivered" && it.expiryDate ? (
-                    <Text style={[styles.presetLabel, { marginLeft: 18, marginBottom: 6 }]}>
-                      SELL BY: {it.expiryDate}
-                    </Text>
-                  ) : null}
-                  {o.status === "Pending" && (
-                    <View style={{ marginLeft: 18, marginBottom: 8 }}>
-                      <Text style={[styles.presetLabel, { marginBottom: 4 }]}>SELL BY DATE (OPTIONAL)</Text>
-                      {Platform.OS === "web" ? React.createElement("input", {
-                        type: "date",
-                        "aria-label": `${it.name} delivery sell-by date`,
-                        value: expiryDate,
-                        disabled: busy,
-                        onChange: (event) => setDeliveryExpiryDates((current) => ({
-                          ...current,
-                          [inputKey]: event.target.value,
-                        })),
-                        style: {
-                          boxSizing: "border-box",
-                          width: "100%",
-                          maxWidth: 280,
-                          height: 40,
-                          border: `1px solid ${colors.border}`,
-                          borderRadius: 8,
-                          padding: "0 10px",
-                          backgroundColor: colors.card,
-                          color: colors.textPrimary,
-                          fontSize: 14,
-                        },
-                      }) : (
-                        <>
-                          <Pressable
-                            style={[styles.searchInput, { maxWidth: 280 }]}
-                            onPress={() => setActiveExpiryPicker(inputKey)}
-                            disabled={busy}
-                          >
-                            <Text style={{ color: expiryDate ? colors.textPrimary : colors.textMuted }}>
-                              {expiryDate || "Select sell-by date"}
-                            </Text>
-                          </Pressable>
-                          {activeExpiryPicker === inputKey && (
-                            <DateTimePicker
-                              value={parseExpiryInput(expiryDate)}
-                              mode="date"
-                              display={Platform.OS === "ios" ? "compact" : "default"}
-                              onChange={(event, date) => {
-                                setActiveExpiryPicker(null);
-                                if (date) setDeliveryExpiryDates((current) => ({
-                                  ...current,
-                                  [inputKey]: formatExpiryInput(date),
-                                }));
-                              }}
-                            />
-                          )}
-                        </>
-                      )}
-                    </View>
-                  )}
-                </View>
-              );
-            })}
+            {o.items.map((it, j) => (
+              <Text key={`${o.id}:${j}`} style={styles.receiptLine}>• {it.name} × {it.qty}</Text>
+            ))}
 
             <View style={styles.orderBottomRow}>
               <View>

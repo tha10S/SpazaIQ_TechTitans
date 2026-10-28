@@ -9,9 +9,9 @@ import { openWhatsApp } from '../services/whatsapp';
 
 // Where shop owners pay. Fill these in with your real details. Anything left empty is simply not shown.
 // Support WhatsApp number, for example '082 123 4567': the shop sends its proof of payment here.
-const SUPPORT_WHATSAPP = '';
+export const SUPPORT_WHATSAPP = '';
 // Bank details for EFT payments.
-const PAYMENT_DETAILS = { bank: '', accountName: '', accountNumber: '', branchCode: '' };
+export const PAYMENT_DETAILS = { bank: '', accountName: '', accountNumber: '', branchCode: '' };
 
 // Tells a shop owner about their own subscription. It shows nothing while the shop is paid up or has no
 // subscription yet. A shop can read only its own subscription document (see firestore.rules).
