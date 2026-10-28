@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { recordSale, subscribeProducts } from '../services/salesService';
+import { filterProductsBySearch } from '../services/productSearch';
 
 export function useCart(storeId) {
   const [search, setSearch] = useState('');
@@ -18,7 +19,7 @@ export function useCart(storeId) {
     try {
       unsubscribe = subscribeProducts(
         storeId,
-        search,
+        '',
         (data) => {
           if (active) {
             setProducts(data);
@@ -41,7 +42,12 @@ export function useCart(storeId) {
       active = false;
       unsubscribe?.();
     };
-  }, [storeId, search]);
+  }, [storeId]);
+
+  const matchingProducts = useMemo(
+    () => filterProductsBySearch(products, search),
+    [products, search]
+  );
 
   const addToCart = useCallback((product) => {
     setCart((prev) => {
@@ -109,7 +115,7 @@ export function useCart(storeId) {
   return {
     search,
     setSearch,
-    products,
+    products: matchingProducts,
     cart,
     addToCart,
     updateQty,
