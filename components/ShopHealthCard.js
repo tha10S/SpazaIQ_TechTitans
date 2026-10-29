@@ -4,6 +4,7 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../services/firebase/firebaseConfig';
 import { useTheme } from '../config/ThemeContext';
 import { diagnose, scoreShop } from '../services/admin/performance';
+import { getCreditBehaviour } from '../services/admin/shopStatsPublisher';
 
 const TIERS = {
   high: { label: 'High performer', color: '#10B981', bg: 'rgba(16, 185, 129, 0.15)' },
@@ -13,14 +14,23 @@ const TIERS = {
 
 // Shows a shop owner how their own shop is doing and what to fix first. `stats` comes from
 // buildShopStats(), which is built from the shop's own data, so nothing here is shared with anyone.
-// The score itself comes from the SpazaIQ team's dashboard, which can compare this shop with the others. The shop
-// only ever receives its own finished number (shopScores/{storeId}), never another shop's figures. Until that
-// number has been published, the card shows an estimate worked out on the phone. What to fix first always comes
-// from the shop's own live numbers.
+// The score is measured against fixed benchmarks for a strong spaza, never against other shops, so the number worked
+// out here is the same one the SpazaIQ team sees. The team's dashboard publishes the finished number
+// (shopScores/{storeId}) and the shop only ever receives its own. Until that number has been published, the card
+// shows the same score worked out on the phone. What to fix first always comes from the shop's own live numbers.
 export default function ShopHealthCard({ stats, storeId }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [published, setPublished] = useState(null);
+  // Credit paid on time needs the repayment history, which is not part of the live totals
+  const [behaviour, setBehaviour] = useState(null);
+
+  useEffect(() => {
+    if (!storeId) return undefined;
+    let active = true;
+    getCreditBehaviour(storeId).then((data) => active && setBehaviour(data));
+    return () => { active = false; };
+  }, [storeId, stats?.creditOutstanding]);
 
   useEffect(() => {
     if (!storeId) return undefined;
@@ -36,11 +46,11 @@ export default function ShopHealthCard({ stats, storeId }) {
 
   const result = useMemo(() => {
     if (!stats) return null;
-    const scored = scoreShop(stats);
+    const scored = scoreShop(behaviour ? { ...stats, ...behaviour } : stats);
     const base = { ...scored, ...diagnose(scored) };
     const usable = published && Number.isFinite(published.score) && TIERS[published.tier];
     return usable ? { ...base, score: published.score, tier: published.tier } : base;
-  }, [stats, published]);
+  }, [stats, published, behaviour]);
 
   if (!result) return null;
   const tier = TIERS[result.tier];
@@ -56,9 +66,18 @@ export default function ShopHealthCard({ stats, storeId }) {
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Shop health: {tier.label}</Text>
           <Text style={styles.muted}>
-            {published ? 'Out of 100, compared with other shops on SpazaIQ.' : 'Estimate out of 100, based on your last 30 days.'}
+            {published ? 'Out of 100, measured against a strong spaza.' : 'Out of 100, based on your last 30 days.'}
           </Text>
         </View>
+      </View>
+
+      <View style={styles.pillars}>
+        {result.pillars.filter((pillar) => pillar.score !== null).map((pillar) => (
+          <View key={pillar.key} style={styles.pillar}>
+            <Text style={styles.pillarScore}>{pillar.score}</Text>
+            <Text style={styles.pillarLabel}>{pillar.label}</Text>
+          </View>
+        ))}
       </View>
 
       {todo.length > 0 ? <Text style={styles.label}>FIX FIRST</Text> : null}
@@ -86,6 +105,10 @@ const makeStyles = (colors) =>
     badgeText: { fontSize: 20, fontWeight: '800' },
     title: { fontSize: 15, fontWeight: '800', color: colors.textPrimary },
     muted: { fontSize: 12, color: colors.textMuted, marginTop: 2, lineHeight: 17 },
+    pillars: { flexDirection: 'row', gap: 8, marginTop: 14 },
+    pillar: { flex: 1, backgroundColor: colors.background, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 6, alignItems: 'center' },
+    pillarScore: { fontSize: 16, fontWeight: '800', color: colors.textPrimary },
+    pillarLabel: { fontSize: 10, color: colors.textMuted, marginTop: 2, textAlign: 'center' },
     label: { fontSize: 10, fontWeight: '800', color: colors.textMuted, letterSpacing: 0.8, marginTop: 14, marginBottom: 6 },
     item: { marginBottom: 10 },
     itemTitle: { fontSize: 14, fontWeight: '700', color: colors.textPrimary },

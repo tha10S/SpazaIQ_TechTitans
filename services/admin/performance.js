@@ -1,14 +1,21 @@
 // Shop performance scoring and root-cause analysis. Pure functions with no Firebase imports.
 // It only ever sees shop-level totals (the shopStats document), never sales or customer records.
 //
-// Score = 0-100, made of six parts (see WEIGHTS), each measured against a FIXED benchmark, not against
-// other shops. So a shop's score never changes because another shop joined or left, and being the best of
-// two small shops earns nothing by itself.
-//   Revenue 35 + Profit 20 + Days trading 15 + Steady week to week 10 + Growth 10 + Stock and credit health 10
-// More than half the score is what the shop actually earns (revenue and profit), the rest is how it trades.
+// SCORE = 0-100, made of twelve parts in three groups. Every part is measured against a FIXED benchmark,
+// never against other shops, so a shop's score does not change because another shop joined or left, and
+// the shop's own screen and the admin screen always show the same number.
+//
+//   SALES AND TRADING (62)   Revenue 17 . Profit 14 . Items sold 6 . Days trading 9 . Steady week to week 8 . Growth 8
+//   STOCK (20)               Products in stock 9 . Stock level vs sales 5 . Expiry risk 6
+//   CREDIT (18)              Paid on time 8 . Overdue credit 6 . Reliance on credit 4
+//
+// A part that does not apply to a shop (for example credit parts for a shop that never gives credit, or growth
+// for a shop that is only two weeks old) is LEFT OUT and the remaining weights are scaled back up to 100.
+// It is never counted as zero and never as full marks.
+//
 // Tiers: high >= 70, mid >= 40, low below that. A shop can only be HIGH if it also trades on enough days,
 // in enough weeks, has enough revenue and enough history. A shop with no sales is always LOW.
-import { toDate } from './billing';
+import { toDate } from './billing.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -22,23 +29,59 @@ export const BENCHMARK = {
   revenue30d: 80000,
   // Profit that earns full marks is this share of the revenue benchmark (a typical gross margin for a spaza)
   margin: 0.2,
+  // Items sold in 30 days that earn full marks (R80,000 at roughly R25 an item is about 3,200)
+  itemsSold30d: 3500,
   // Days with a recorded sale, out of 30, that earn full marks (a spaza trading about 6 days a week)
   fullTradingDays: 24,
   // A shop with fewer tracked days than this is judged cautiously and can't be High yet
   minHistoryDays: 14,
   // To be High, 30-day revenue must be at least this share of the revenue benchmark
   highMinRevenueShare: 0.6,
+  // Month-on-month growth is only trusted once the shop is old enough for the earlier month to be complete
+  growthMinAgeDays: 50,
+  // Days of sales the stock on the shelf covers. Spazas restock often, so about 1 to 4 weeks is healthy.
+  cover: { tooLow: 3, healthyFrom: 7, healthyTo: 30, tooMuch: 60, dead: 120 },
+  // Expiry: stock value that is expired (full weight) or expiring soon (half weight), as a share of the stock
+  // that has an expiry date, that scores zero. Needs at least this share of stock to have an expiry date.
+  expiry: { fullRiskShare: 0.15, minTrackedShare: 0.1 },
+  // Credit
+  credit: {
+    dependenceFree: 0.15, // credit up to this share of sales is normal for a spaza
+    dependenceFull: 0.6, // at this share the reliance score is zero
+    overdueShareFull: 0.5, // half of the money owed being overdue scores zero
+    overdueRevenueFull: 0.2, // overdue money equal to a fifth of a month's sales scores zero
+    priorMean: 0.7, // with only a few credits, nudge the paid-on-time rate towards this so one customer
+    priorWeight: 2, // can't swing the part from 0 to 100
+  },
 };
 export const TIER_LIMITS = { high: 70, mid: 40 };
-export const WEIGHTS = { revenue: 0.35, profit: 0.2, activity: 0.15, steadiness: 0.1, growth: 0.1, health: 0.1 };
+
+// Weights as whole points. They add up to 100.
+const POINTS = {
+  revenue: 17, profit: 14, volume: 6, activity: 9, steadiness: 8, growth: 8,
+  availability: 9, cover: 5, expiry: 6,
+  collection: 8, overdue: 6, dependence: 4,
+};
+export const WEIGHTS = Object.fromEntries(Object.entries(POINTS).map(([key, points]) => [key, points / 100]));
 export const PART_LABELS = {
   revenue: 'Revenue vs benchmark',
   profit: 'Profit vs benchmark',
+  volume: 'Items sold',
   activity: 'Days trading',
   steadiness: 'Steady week to week',
   growth: 'Growth',
-  health: 'Stock and credit health',
+  availability: 'Products in stock',
+  cover: 'Stock level vs sales',
+  expiry: 'Expiry risk',
+  collection: 'Credit paid on time',
+  overdue: 'Overdue credit',
+  dependence: 'Reliance on credit',
 };
+export const PART_GROUPS = [
+  { key: 'trading', label: 'Sales and trading', parts: ['revenue', 'profit', 'volume', 'activity', 'steadiness', 'growth'] },
+  { key: 'stock', label: 'Stock', parts: ['availability', 'cover', 'expiry'] },
+  { key: 'credit', label: 'Credit', parts: ['collection', 'overdue', 'dependence'] },
+];
 const SMALL_RANGE = 15; // fewer products than this looks like an unfinished catalogue
 
 const clamp = (value, low = 0, high = 1) => Math.min(high, Math.max(low, value));
@@ -46,6 +89,7 @@ const num = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
+const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
 export const formatRand = (value) => `R${Math.round(num(value)).toLocaleString('en-ZA')}`;
 const pct = (value) => `${Math.round(num(value) * 100)}%`;
@@ -68,34 +112,67 @@ export function derive(stats = {}, now = new Date()) {
   const firstSale = toDate(stats.firstSaleAt);
   const seen = toDate(stats.updatedAt);
 
-  // How many days of history this shop has (up to 30). Older records without a first-sale date count as 30.
-  const trackedDays = firstSale
-    ? clamp(Math.floor((now - firstSale) / DAY_MS) + 1, 1, 30)
-    : sales > 0 ? 30 : 0;
+  // How old the shop's sales history is. Records without a first-sale date count as old if they had sales.
+  const ageDays = firstSale
+    ? Math.max(1, Math.round((startOfDay(now) - startOfDay(firstSale)) / DAY_MS) + 1)
+    : sales > 0 ? (previous > 0 ? 60 : 30) : 0;
+  // Days of history inside the 30-day window
+  const trackedDays = clamp(ageDays, 0, 30);
   const effectiveDays = Math.max(trackedDays, BENCHMARK.minHistoryDays);
   const scale = effectiveDays / 30; // a young shop is judged against a proportionally smaller target
 
   // Weekly revenue, most recent first. Missing on records published by an older version of the app.
+  // Only COMPLETE weeks since the shop started are used, so a shop that began mid-week isn't marked uneven.
   const weeklyRaw = [1, 2, 3, 4].map((week) => stats[`weekRevenue${week}`]);
   const hasWeekly = weeklyRaw.every((value) => value !== undefined && value !== null && Number.isFinite(Number(value)));
-  const weeksTracked = hasWeekly ? Math.min(4, Math.max(1, Math.ceil(trackedDays / 7))) : 0;
+  const weeksTracked = hasWeekly ? Math.min(4, Math.floor(trackedDays / 7)) : 0;
   const weeks = hasWeekly ? weeklyRaw.map(Number).slice(0, weeksTracked) : null;
-  const weekMean = weeks ? weeks.reduce((sum, value) => sum + value, 0) / weeks.length : 0;
-  const weekSpread = weeks
+  const weekMean = weeks && weeks.length ? weeks.reduce((sum, value) => sum + value, 0) / weeks.length : 0;
+  const weekSpread = weeks && weeks.length
     ? Math.sqrt(weeks.reduce((sum, value) => sum + (value - weekMean) ** 2, 0) / weeks.length)
     : 0;
-  let trend = null; // last 2 weeks against the 2 weeks before, needs 4 weeks of history
+  let trend = null; // last 2 weeks against the 2 weeks before, needs 4 full weeks of history
   if (weeks && weeksTracked === 4) {
     const recent = weeks[0] + weeks[1];
     const earlier = weeks[2] + weeks[3];
     trend = earlier > 0 ? (recent - earlier) / earlier : null;
   }
 
+  // Stock level against sales: how many days the stock on the shelf would last at the current rate of sales
+  const stockValue = num(stats.stockCostValue);
+  const cogs = Math.max(0, revenue - num(stats.profit30d)); // cost of the goods sold
+  const cogsPerDay = cogs / Math.max(1, Math.min(30, trackedDays || 30));
+  const coverDays = cogsPerDay > 0 ? stockValue / cogsPerDay : null;
+
+  // Expiry: how much of the stock that HAS an expiry date is expired or about to be
+  const trackedShare = clamp(num(stats.expiryTrackedShare));
+  const trackedValue = trackedShare * stockValue;
+  const expiredValue = num(stats.expiredValue);
+  const expiringSoonValue = num(stats.expiringSoonValue);
+  const expiryRiskShare = stockValue > 0 && trackedShare >= BENCHMARK.expiry.minTrackedShare && trackedValue > 0
+    ? (expiredValue + 0.5 * expiringSoonValue) / trackedValue
+    : null;
+
+  // Credit paid on time (credit that fell due in the last 90 days)
+  const dueCount = num(stats.creditDueCount90d);
+  const onTimeCount = num(stats.creditOnTimeCount90d);
+  const dueAmount = num(stats.creditDueAmount90d);
+  const onTimeAmount = num(stats.creditOnTimeAmount90d);
+  const byCount = dueCount > 0 ? clamp(onTimeCount / dueCount) : null;
+  const byAmount = dueAmount > 0 ? clamp(onTimeAmount / dueAmount) : byCount;
+  const onTimeRate = byCount === null ? null : 0.5 * byCount + 0.5 * byAmount;
+
+  const gapSalesShare = stats.stockGapSalesShare === undefined || stats.stockGapSalesShare === null
+    ? null
+    : clamp(num(stats.stockGapSalesShare));
+
   return {
     revenue,
     previous,
     sales,
+    items: num(stats.itemsSold30d),
     products,
+    ageDays,
     trackedDays,
     effectiveDays,
     scale,
@@ -109,54 +186,149 @@ export function derive(stats = {}, now = new Date()) {
     low: num(stats.lowStockCount),
     basket: sales > 0 ? revenue / sales : 0,
     margin: revenue > 0 ? num(stats.profit30d) / revenue : 0,
-    growth: previous > 0 ? (revenue - previous) / previous : null,
+    growth: previous > 0 && ageDays >= BENCHMARK.growthMinAgeDays ? (revenue - previous) / previous : null,
     creditShare: revenue > 0 ? num(stats.creditSales30d) / revenue : 0,
     overdueShare: outstanding > 0 ? num(stats.creditOverdue) / outstanding : 0,
+    overdueOfRevenue: revenue > 0 ? num(stats.creditOverdue) / revenue : 0,
     outstanding,
     overdue: num(stats.creditOverdue),
+    creditSales: num(stats.creditSales30d),
     stockGap: products > 0 ? (num(stats.outOfStockCount) + num(stats.lowStockCount)) / products : 0,
+    gapSalesShare,
+    stockValue,
+    coverDays,
+    expiredCount: num(stats.expiredCount),
+    expiringSoonCount: num(stats.expiringSoonCount),
+    expiredValue,
+    expiringSoonValue,
+    expiryTrackedShare: trackedShare,
+    expiryRiskShare,
+    dueCount,
+    onTimeCount,
+    dueAmount,
+    onTimeAmount,
+    onTimeRate,
     daysSinceLastSale: lastSale ? Math.max(0, Math.floor((now - lastSale) / DAY_MS)) : null,
     daysSinceSeen: seen ? Math.max(0, Math.floor((now - seen) / DAY_MS)) : null,
   };
+}
+
+// 0..1 for "days of sales on the shelf": too little stock means lost sales, too much means cash sitting on shelves
+export function coverScore(days) {
+  const c = BENCHMARK.cover;
+  if (days <= 0) return 0;
+  if (days < c.tooLow) return 0.5 * (days / c.tooLow);
+  if (days < c.healthyFrom) return 0.5 + 0.5 * ((days - c.tooLow) / (c.healthyFrom - c.tooLow));
+  if (days <= c.healthyTo) return 1;
+  if (days <= c.tooMuch) return 1 - 0.6 * ((days - c.healthyTo) / (c.tooMuch - c.healthyTo));
+  if (days <= c.dead) return 0.4 * (1 - (days - c.tooMuch) / (c.dead - c.tooMuch));
+  return 0;
 }
 
 export function scoreShop(stats, { now = new Date() } = {}) {
   const d = derive(stats, now);
   const targetRevenue = BENCHMARK.revenue30d * d.scale;
   const targetProfit = targetRevenue * BENCHMARK.margin;
+  const targetItems = BENCHMARK.itemsSold30d * d.scale;
   const fullDays = BENCHMARK.fullTradingDays * d.scale;
+  const credit = BENCHMARK.credit;
 
-  // Steady: how many of the weeks had sales, reduced when sales jump around a lot between weeks
-  let steadiness;
-  if (d.weeks) {
-    const share = d.weeksTracked > 0 ? d.activeWeeks / d.weeksTracked : 0;
-    const evenness = d.weeksTracked > 1 ? 1 - 0.5 * clamp(d.cv) : 1;
-    steadiness = share * evenness;
-  } else {
-    steadiness = clamp(d.activeDays / fullDays);
-  }
-
-  // Growth: month on month when there is a previous month, otherwise the last 2 weeks against the 2 before,
-  // otherwise neutral (no history is not a reward and not a penalty)
-  let growth;
-  if (d.growth !== null) growth = clamp(0.5 + d.growth);
-  else if (d.trend !== null) growth = clamp(0.5 + d.trend);
-  else growth = d.revenue > 0 ? 0.5 : 0;
-
-  // Stock and credit only count for a shop that is actually trading: full shelves with no sales earn nothing
-  const stock = d.products > 0 ? 1 - clamp((d.out + 0.5 * d.low) / d.products) : 0;
-  const credit = (1 - clamp(d.overdueShare)) * (1 - 0.5 * clamp(d.creditShare / 0.7));
+  // Stock parts only count for a shop that is actually trading: full shelves with no sales earn nothing
   const trading = clamp(d.activeDays / 10);
 
-  const parts = {
-    revenue: targetRevenue > 0 ? clamp(d.revenue / targetRevenue) : 0,
-    profit: targetProfit > 0 ? clamp(num(stats.profit30d) / targetProfit) : 0,
-    activity: clamp(d.activeDays / fullDays),
-    steadiness,
-    growth,
-    health: (0.6 * stock + 0.4 * credit) * trading,
-  };
-  let score = Math.round(100 * Object.keys(WEIGHTS).reduce((sum, key) => sum + WEIGHTS[key] * parts[key], 0));
+  // null means "does not apply to this shop"
+  const parts = {};
+  parts.revenue = targetRevenue > 0 ? clamp(d.revenue / targetRevenue) : 0;
+  parts.profit = targetProfit > 0 ? clamp(num(stats.profit30d) / targetProfit) : 0;
+  parts.volume = targetItems > 0 ? clamp(d.items / targetItems) : 0;
+  parts.activity = fullDays > 0 ? clamp(d.activeDays / fullDays) : 0;
+
+  // Steady: how many of the complete weeks had sales, reduced when sales jump around a lot between weeks.
+  // Swings of up to 15% are normal and cost nothing. 80% or more swing scores zero.
+  if (d.weeks && d.weeksTracked >= 2) {
+    const share = d.activeWeeks / d.weeksTracked;
+    const evenness = 1 - clamp((d.cv - 0.15) / 0.65);
+    parts.steadiness = share * evenness;
+  } else {
+    parts.steadiness = null;
+  }
+
+  // Growth: month on month when the earlier month is complete, otherwise the last 2 weeks against the 2 before,
+  // otherwise it does not apply. Flat sales score 0.6, +50% scores full marks, -75% scores zero.
+  const change = d.growth !== null ? d.growth : d.trend;
+  parts.growth = change === null ? null : clamp(0.6 + 0.8 * clamp(change, -1, 1));
+
+  // Products in stock: out-of-stock counts fully and running low counts half. Gaps on products that really sell
+  // count more than gaps on slow ones. A quarter of the shelf out is already a poor score, 40% scores zero.
+  if (d.products === 0) {
+    parts.availability = 0;
+  } else {
+    const countGap = (d.out + 0.5 * d.low) / d.products;
+    const gap = d.gapSalesShare !== null && d.sales > 0 ? 0.6 * d.gapSalesShare + 0.4 * countGap : countGap;
+    parts.availability = (1 - clamp(gap / 0.4)) * trading;
+  }
+
+  // Stock level vs sales: needs about a week of history to judge
+  if (d.products === 0) {
+    parts.cover = 0;
+  } else if (d.trackedDays < 7) {
+    parts.cover = null;
+  } else if (d.coverDays === null) {
+    parts.cover = (d.stockValue > 0 ? 0.2 : 0) * trading; // stock but nothing selling
+  } else {
+    parts.cover = coverScore(d.coverDays) * trading;
+  }
+
+  // Expiry risk: only judged when enough of the stock has an expiry date
+  parts.expiry = d.expiryRiskShare === null
+    ? null
+    : (1 - clamp(d.expiryRiskShare / BENCHMARK.expiry.fullRiskShare)) * trading;
+
+  // Credit paid on time, nudged towards a prior when there are only a few credits
+  if (d.dueCount > 0 && d.onTimeRate !== null) {
+    const adjusted = (d.onTimeRate * d.dueCount + credit.priorMean * credit.priorWeight) / (d.dueCount + credit.priorWeight);
+    parts.collection = clamp(adjusted);
+  } else {
+    parts.collection = null;
+  }
+
+  // Overdue credit: the share of what is owed that is overdue, and how big that is next to a month of sales
+  if (d.outstanding > 0) {
+    const shareScore = 1 - clamp(d.overdueShare / credit.overdueShareFull);
+    const sizeScore = d.revenue > 0 ? 1 - clamp(d.overdueOfRevenue / credit.overdueRevenueFull) : shareScore;
+    parts.overdue = 0.6 * shareScore + 0.4 * sizeScore;
+  } else {
+    parts.overdue = null;
+  }
+
+  // Reliance on credit: some credit is normal for a spaza, a shop that lives on credit is exposed
+  parts.dependence = d.revenue > 0 && (d.creditSales > 0 || d.outstanding > 0 || d.dueCount > 0)
+    ? 1 - clamp((d.creditShare - credit.dependenceFree) / (credit.dependenceFull - credit.dependenceFree))
+    : null;
+
+  // Add up only the parts that apply, then scale the weights back up to 100
+  let usedWeight = 0;
+  let earned = 0;
+  Object.keys(WEIGHTS).forEach((key) => {
+    if (parts[key] === null) return;
+    usedWeight += WEIGHTS[key];
+    earned += WEIGHTS[key] * parts[key];
+  });
+  const weights = {};
+  Object.keys(WEIGHTS).forEach((key) => {
+    weights[key] = parts[key] === null || usedWeight === 0 ? 0 : WEIGHTS[key] / usedWeight;
+  });
+  let score = usedWeight > 0 ? Math.round((100 * earned) / usedWeight) : 0;
+
+  // Score of each group out of 100, and how much of the total it carries
+  const pillars = PART_GROUPS.map((group) => {
+    const keys = group.parts.filter((key) => parts[key] !== null);
+    const weight = keys.reduce((sum, key) => sum + weights[key], 0);
+    const pillarScore = keys.length
+      ? (100 * keys.reduce((sum, key) => sum + weights[key] * parts[key], 0)) / weight
+      : null;
+    return { key: group.key, label: group.label, score: pillarScore === null ? null : Math.round(pillarScore), weight };
+  });
 
   let tier = score >= TIER_LIMITS.high ? 'high' : score >= TIER_LIMITS.mid ? 'mid' : 'low';
   if (d.sales === 0) {
@@ -176,13 +348,22 @@ export function scoreShop(stats, { now = new Date() } = {}) {
     }
   }
 
-  return { score, parts, tier, d, benchmark: { revenue: targetRevenue, profit: targetProfit } };
+  return {
+    score,
+    parts,
+    weights,
+    applicable: Object.fromEntries(Object.keys(parts).map((key) => [key, parts[key] !== null])),
+    pillars,
+    tier,
+    confidence: d.trackedDays < BENCHMARK.minHistoryDays ? 'building' : 'established',
+    d,
+    benchmark: { revenue: targetRevenue, profit: targetProfit, items: targetItems },
+  };
 }
 
 export function scoreAll(shops, now = new Date()) {
   return shops.map((shop) => ({ ...shop, ...scoreShop(shop, { now }) }));
 }
-
 export function medianOf(values) {
   const sorted = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
   if (!sorted.length) return 0;
@@ -260,12 +441,48 @@ export function diagnose(shop, { medianBasket = 0 } = {}) {
       adminAction: 'Low engagement. Send a WhatsApp check-in.',
     });
   }
-  if (d.products > 0 && (d.stockGap >= 0.25 || d.out >= 3)) {
+  if (d.products > 0 && (d.stockGap >= 0.25 || d.out >= 3 || (d.gapSalesShare !== null && d.gapSalesShare >= 0.25))) {
+    const weighted = d.gapSalesShare !== null && d.gapSalesShare >= 0.15
+      ? ` About ${pct(d.gapSalesShare)} of your sales come from products that are out or low.`
+      : '';
     causes.push({
-      id: 'stock-gaps', severity: d.out >= 3 ? 'danger' : 'warning', title: 'Stock gaps are costing sales',
-      detail: `${d.out} out of stock and ${d.low} running low, which is ${pct(d.stockGap)} of ${d.products} products.`,
+      id: 'stock-gaps', severity: d.out >= 3 || (d.gapSalesShare !== null && d.gapSalesShare >= 0.25) ? 'danger' : 'warning',
+      title: 'Stock gaps are costing sales',
+      detail: `${d.out} out of stock and ${d.low} running low, which is ${pct(d.stockGap)} of ${d.products} products.${weighted}`,
       tip: 'Reorder from the Suppliers tab before items run out. An empty shelf is a lost sale.',
       adminAction: 'Check reorder levels are realistic and that the owner uses Suppliers > Reorder.',
+    });
+  }
+  if (d.expiredValue > 0) {
+    causes.push({
+      id: 'expired-stock', severity: 'danger', title: 'Expired stock is still on the shelf',
+      detail: `${d.expiredCount} ${d.expiredCount === 1 ? 'item' : 'items'} worth ${formatRand(d.expiredValue)} (at cost) ${d.expiredCount === 1 ? 'is' : 'are'} past the expiry date.`,
+      tip: 'Take expired items off the shelf and update Stock. Selling them is a health risk and a lost sale you cannot get back.',
+      adminAction: 'A food-safety and loss risk. Remind the owner to check dates every week.',
+    });
+  }
+  if (d.expiryRiskShare !== null && d.expiringSoonValue > 0 && d.expiringSoonValue / (d.expiryTrackedShare * d.stockValue) >= 0.05) {
+    causes.push({
+      id: 'expiring-soon', severity: 'warning', title: 'Stock is close to expiring',
+      detail: `${d.expiringSoonCount} ${d.expiringSoonCount === 1 ? 'item' : 'items'} worth ${formatRand(d.expiringSoonValue)} (at cost) expire within a week.`,
+      tip: 'Move them to the front, put them on special, or use the Shop News to see what to sell first.',
+      adminAction: 'Suggest first-expiry-first-out and smaller, more frequent orders for short-life items.',
+    });
+  }
+  if (d.coverDays !== null && d.trackedDays >= BENCHMARK.minHistoryDays && d.coverDays > BENCHMARK.cover.tooMuch) {
+    causes.push({
+      id: 'overstocked', severity: 'warning', title: 'More stock than the shop sells',
+      detail: `The stock on the shelf (${formatRand(d.stockValue)} at cost) would last about ${Math.round(d.coverDays)} days at the current rate of sales.`,
+      tip: 'Hold off reordering slow items so your cash is not tied up on shelves.',
+      adminAction: 'Cash is stuck in stock. Suggest ordering smaller quantities and clearing slow items.',
+    });
+  }
+  if (d.sales > 0 && d.coverDays !== null && d.trackedDays >= BENCHMARK.minHistoryDays && d.coverDays < BENCHMARK.cover.tooLow) {
+    causes.push({
+      id: 'understocked', severity: 'warning', title: 'Stock runs out within days',
+      detail: `The stock on the shelf would last only about ${Math.max(0, Math.round(d.coverDays))} days at the current rate of sales.`,
+      tip: 'Restock your best sellers before the shelf empties, especially before payday and grant week.',
+      adminAction: 'The shop is selling faster than it restocks. Suggest higher reorder levels.',
     });
   }
   if (d.products > 0 && d.products < SMALL_RANGE) {
@@ -282,6 +499,14 @@ export function diagnose(shop, { medianBasket = 0 } = {}) {
       detail: `${formatRand(d.overdue)} of ${formatRand(d.outstanding)} owed to the shop is overdue (${pct(d.overdueShare)}).`,
       tip: 'Send WhatsApp reminders from the Credit tab, especially just after payday.',
       adminAction: 'Cash-flow risk. Point the owner to the WhatsApp reminder feature.',
+    });
+  }
+  if (d.dueCount >= 3 && d.onTimeRate !== null && d.onTimeRate < 0.6) {
+    causes.push({
+      id: 'late-payers', severity: 'warning', title: 'Customers often pay late',
+      detail: `Only ${d.onTimeCount} of ${d.dueCount} credits that fell due in the last 90 days were paid by their due date.`,
+      tip: 'Send a WhatsApp reminder a few days before the due date, and ask for part-payment up front.',
+      adminAction: 'Weak collection habits. Suggest reminders before the due date and shorter repayment plans.',
     });
   }
   if (d.creditShare >= 0.4) {
@@ -325,7 +550,7 @@ export function diagnose(shop, { medianBasket = 0 } = {}) {
     });
   }
 
-  if (d.activeDays >= fullDays) {
+  if (d.activeDays >= fullDays && d.activeDays > 0) {
     strengths.push({ id: 'consistent', title: 'Trades almost every day', detail: `A sale was recorded on ${d.activeDays} of the last ${d.trackedDays} days.` });
   }
   if (d.weeks && d.weeksTracked >= 3 && d.activeWeeks === d.weeksTracked && d.cv <= 0.4) {
@@ -334,14 +559,30 @@ export function diagnose(shop, { medianBasket = 0 } = {}) {
   if (change !== null && change >= 0.2) {
     strengths.push({ id: 'growing', title: 'Revenue is growing', detail: `Up ${pct(change)} on ${d.growth !== null ? 'the previous 30 days' : 'the 2 weeks before'}.` });
   }
+  if (d.items >= BENCHMARK.itemsSold30d * d.scale) {
+    strengths.push({ id: 'busy', title: 'A busy shop', detail: `${Math.round(d.items).toLocaleString('en-ZA')} items were sold in the last ${d.trackedDays} days.` });
+  }
   if (d.products >= SMALL_RANGE && d.stockGap < 0.1) {
     strengths.push({ id: 'stocked', title: 'Shelves are well stocked', detail: `Only ${d.out + d.low} of ${d.products} products are out or low.` });
+  }
+  if (d.sales > 0 && d.gapSalesShare !== null && d.gapSalesShare < 0.05 && d.products >= SMALL_RANGE) {
+    strengths.push({ id: 'best-sellers-in-stock', title: 'Best sellers are in stock', detail: 'Almost nothing that sells well is out or running low.' });
+  }
+  if (d.coverDays !== null && d.trackedDays >= BENCHMARK.minHistoryDays
+    && d.coverDays >= BENCHMARK.cover.healthyFrom && d.coverDays <= BENCHMARK.cover.healthyTo) {
+    strengths.push({ id: 'right-stock', title: 'The right amount of stock', detail: `The shelf holds about ${Math.round(d.coverDays)} days of sales.` });
+  }
+  if (d.expiryRiskShare !== null && d.expiredValue === 0 && d.expiryRiskShare < 0.02) {
+    strengths.push({ id: 'fresh-stock', title: 'Stock is fresh', detail: 'Nothing on the shelf is expired or about to expire.' });
   }
   if (d.products >= 40) {
     strengths.push({ id: 'range', title: 'Wide product range', detail: `${d.products} products are loaded, so most items can be scanned.` });
   }
   if (d.revenue > 0 && d.margin >= 0.2) {
     strengths.push({ id: 'margin', title: 'Healthy margins', detail: `Profit is ${pct(d.margin)} of revenue.` });
+  }
+  if (d.dueCount >= 3 && d.onTimeRate !== null && d.onTimeRate >= 0.85) {
+    strengths.push({ id: 'pays-on-time', title: 'Customers pay on time', detail: `${d.onTimeCount} of ${d.dueCount} credits that fell due in the last 90 days were paid by their due date.` });
   }
   if (d.outstanding > 0 && d.overdueShare < 0.15) {
     strengths.push({ id: 'collects', title: 'Collects credit well', detail: `Only ${pct(d.overdueShare)} of credit owed is overdue.` });
@@ -358,9 +599,14 @@ export function diagnose(shop, { medianBasket = 0 } = {}) {
 // group (or the mid group when no shop is low), biggest differences first.
 const COMPARE = [
   { key: 'revenue', label: 'Revenue (30 days)', kind: 'rand' },
+  { key: 'items', label: 'Items sold (30 days)', kind: 'count' },
   { key: 'activeDays', label: 'Days with a sale (of 30)', kind: 'days' },
   { key: 'growth', label: 'Revenue growth', kind: 'pct' },
   { key: 'stockGap', label: 'Products out or low', kind: 'pct' },
+  { key: 'gapSalesShare', label: 'Sales at risk from stock gaps', kind: 'pct' },
+  { key: 'coverDays', label: 'Days of stock on the shelf', kind: 'days' },
+  { key: 'expiryRiskShare', label: 'Stock expired or expiring', kind: 'pct' },
+  { key: 'onTimeRate', label: 'Credit paid on time', kind: 'pct' },
   { key: 'overdueShare', label: 'Credit that is overdue', kind: 'pct' },
   { key: 'creditShare', label: 'Sales made on credit', kind: 'pct' },
   { key: 'margin', label: 'Profit margin', kind: 'pct' },
@@ -425,11 +671,18 @@ export function platformInsights(scored) {
       detail: 'Shops that do not use the app are the most likely to cancel.',
     });
   }
-  const stockTrouble = scored.filter((shop) => shop.d.products > 0 && shop.d.stockGap >= 0.25);
+  const expired = scored.filter((shop) => shop.d.expiredValue > 0);
+  if (expired.length) {
+    items.push({
+      id: 'expired', severity: 'warning', title: `${expired.length} ${expired.length === 1 ? 'shop has' : 'shops have'} expired stock on the shelf`,
+      detail: 'A reminder to check dates weekly would help these shops.',
+    });
+  }
+  const stockTrouble = scored.filter((shop) => shop.d.products > 0 && (shop.d.stockGap >= 0.25 || (shop.d.gapSalesShare !== null && shop.d.gapSalesShare >= 0.25)));
   if (stockTrouble.length) {
     items.push({
       id: 'stock', severity: 'warning', title: `${stockTrouble.length} ${stockTrouble.length === 1 ? 'shop has' : 'shops have'} serious stock gaps`,
-      detail: 'A quarter or more of their products are out or low. A reorder prompt could help them.',
+      detail: 'A quarter or more of their products, or of what they sell, is out or low. A reorder prompt could help them.',
     });
   }
   const creditRisk = scored.filter((shop) => shop.d.overdue > 0 && shop.d.overdueShare >= 0.4);
@@ -437,6 +690,13 @@ export function platformInsights(scored) {
     items.push({
       id: 'credit', severity: 'info', title: `${creditRisk.length} ${creditRisk.length === 1 ? 'shop has' : 'shops have'} mostly overdue credit`,
       detail: 'Promote the WhatsApp reminder feature to these shops.',
+    });
+  }
+  const latePayers = scored.filter((shop) => shop.d.dueCount >= 3 && shop.d.onTimeRate !== null && shop.d.onTimeRate < 0.6);
+  if (latePayers.length) {
+    items.push({
+      id: 'late-payers', severity: 'info', title: `${latePayers.length} ${latePayers.length === 1 ? 'shop has' : 'shops have'} customers who often pay late`,
+      detail: 'Reminders sent a few days before the due date work better than reminders after it.',
     });
   }
 
