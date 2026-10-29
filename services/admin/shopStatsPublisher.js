@@ -31,17 +31,24 @@ export async function getCreditBehaviour(storeId, { force = false, now = new Dat
 
 // Firestore rejects undefined, and the rules only accept numbers for these fields
 const number = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
+// The rules only accept totals of 0 or more, so a negative figure (for example after a reversed sale)
+// is sent as 0 instead of making the whole write fail.
+const nonNegative = (value) => Math.max(0, number(value));
 
-export async function publishShopStats(storeId, stats) {
+// fallbackName is used when neither the shop's profile nor its store record has a name, so every shop
+// can still be listed on the admin side.
+export async function publishShopStats(storeId, stats, fallbackName = '') {
   if (!storeId || !stats) {
     throw new Error('A shop and its activity totals are required.');
   }
 
   try {
-    const snapshot = await getDoc(doc(db, 'stores', storeId));
-    const shopName = snapshot.exists() ? clip(snapshot.data().name, 80) : '';
-    if (!shopName) {
-      throw new Error('The shop name is not available for its activity summary.');
+    let storeName = '';
+    try {
+      const snapshot = await getDoc(doc(db, 'stores', storeId));
+      if (snapshot.exists()) storeName = clip(snapshot.data().name, 80);
+    } catch (storeError) {
+      // Carry on with the other name sources.
     }
 
     let profile = {};
@@ -59,44 +66,44 @@ export async function publishShopStats(storeId, stats) {
 
     await setDoc(doc(db, 'shopStats', storeId), {
       storeId,
-      shopName: clip(profile.shopName, 80) || shopName,
+      shopName: clip(profile.shopName, 80) || storeName || clip(fallbackName, 80) || 'Unnamed shop',
       contactEmail: clip(profile.email, 120),
       contactPhone: clip(profile.mobile, 30),
-      revenue30d: stats.revenue30d,
-      revenuePrev30d: stats.revenuePrev30d,
-      profit30d: stats.profit30d,
-      salesCount30d: stats.salesCount30d,
-      itemsSold30d: stats.itemsSold30d,
-      activeDays30d: stats.activeDays30d,
-      creditSales30d: stats.creditSales30d,
+      revenue30d: nonNegative(stats.revenue30d),
+      revenuePrev30d: nonNegative(stats.revenuePrev30d),
+      profit30d: number(stats.profit30d),
+      salesCount30d: nonNegative(stats.salesCount30d),
+      itemsSold30d: nonNegative(stats.itemsSold30d),
+      activeDays30d: Math.min(31, nonNegative(stats.activeDays30d)),
+      creditSales30d: nonNegative(stats.creditSales30d),
       lastSaleAt: stats.lastSaleAt ? Timestamp.fromDate(stats.lastSaleAt) : null,
       firstSaleAt: stats.firstSaleAt ? Timestamp.fromDate(stats.firstSaleAt) : null,
-      weekRevenue1: stats.weekRevenue1,
-      weekRevenue2: stats.weekRevenue2,
-      weekRevenue3: stats.weekRevenue3,
-      weekRevenue4: stats.weekRevenue4,
-      productCount: stats.productCount,
-      lowStockCount: stats.lowStockCount,
-      outOfStockCount: stats.outOfStockCount,
-      stockCostValue: stats.stockCostValue,
+      weekRevenue1: nonNegative(stats.weekRevenue1),
+      weekRevenue2: nonNegative(stats.weekRevenue2),
+      weekRevenue3: nonNegative(stats.weekRevenue3),
+      weekRevenue4: nonNegative(stats.weekRevenue4),
+      productCount: nonNegative(stats.productCount),
+      lowStockCount: nonNegative(stats.lowStockCount),
+      outOfStockCount: nonNegative(stats.outOfStockCount),
+      stockCostValue: nonNegative(stats.stockCostValue),
       // Stock quality
-      stockGapSalesShare: number(stats.stockGapSalesShare),
-      expiredCount: number(stats.expiredCount),
-      expiringSoonCount: number(stats.expiringSoonCount),
-      expiredValue: number(stats.expiredValue),
-      expiringSoonValue: number(stats.expiringSoonValue),
-      expiryTrackedShare: number(stats.expiryTrackedShare),
+      stockGapSalesShare: Math.min(1, nonNegative(stats.stockGapSalesShare)),
+      expiredCount: nonNegative(stats.expiredCount),
+      expiringSoonCount: nonNegative(stats.expiringSoonCount),
+      expiredValue: nonNegative(stats.expiredValue),
+      expiringSoonValue: nonNegative(stats.expiringSoonValue),
+      expiryTrackedShare: Math.min(1, nonNegative(stats.expiryTrackedShare)),
       // Credit
-      creditCustomers: stats.creditCustomers,
-      creditOutstanding: stats.creditOutstanding,
-      creditOverdue: stats.creditOverdue,
+      creditCustomers: nonNegative(stats.creditCustomers),
+      creditOutstanding: nonNegative(stats.creditOutstanding),
+      creditOverdue: nonNegative(stats.creditOverdue),
       // Credit paid on time. Left out when the repayment history could not be read, so the last good
       // numbers stay on the document instead of being wiped to zero.
       ...(behaviour ? {
-        creditDueCount90d: number(behaviour.creditDueCount90d),
-        creditOnTimeCount90d: number(behaviour.creditOnTimeCount90d),
-        creditDueAmount90d: number(behaviour.creditDueAmount90d),
-        creditOnTimeAmount90d: number(behaviour.creditOnTimeAmount90d),
+        creditDueCount90d: nonNegative(behaviour.creditDueCount90d),
+        creditOnTimeCount90d: nonNegative(behaviour.creditOnTimeCount90d),
+        creditDueAmount90d: nonNegative(behaviour.creditDueAmount90d),
+        creditOnTimeAmount90d: nonNegative(behaviour.creditOnTimeAmount90d),
       } : {}),
       updatedAt: serverTimestamp(),
     }, { merge: true });

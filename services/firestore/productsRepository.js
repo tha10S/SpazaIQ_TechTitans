@@ -14,7 +14,8 @@ import {
 import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath } from './paths';
 import { mapProduct } from './mappers';
-import { parseNonNegativeNumber } from '../validation';
+import { parseNonNegativeNumber, validateIsoDate } from '../validation';
+import { addStockBatch, getEarliestStockExpiry, normalizeStockBatches, reconcileStockBatches } from './stockBatches';
 import {
   getOfflineOperations,
   isNetworkError,
@@ -25,6 +26,15 @@ import {
 
 function productsCollection(storeId) {
   return collection(db, ...storeCollectionPath(storeId, 'products'));
+}
+
+// Keeps the products whose name, SKU or barcode contains the search text (ignoring capitals)
+function filterProductsBySearch(products, searchTerm = '') {
+  const term = String(searchTerm ?? '').trim().toLowerCase();
+  if (!term) return products;
+  return products.filter((product) => [product.name, product.sku, product.barcode]
+    .map((value) => String(value ?? '').toLowerCase())
+    .some((value) => value.includes(term)));
 }
 
 function applyPendingStock(products, operations) {
