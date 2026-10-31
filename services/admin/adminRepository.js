@@ -1,8 +1,8 @@
-// Admin-side Firestore access. Everything here is allowed by the Firestore rules only for an admin
-// account (a signed-in user with a document at admins/{uid}). It reads two things about a shop:
-//   shopStats/{storeId}      shop name and aggregate totals published by the shop
-//   subscriptions/{storeId}  billing status, written only by the admin
-// There is deliberately no function here that reads a shop's sales, customers or credit records.
+
+// Admin-side Firestore access.
+// Only authenticated users with a document in admins/{uid}
+// can perform admin operations.
+
 import {
   collection,
   doc,
@@ -16,73 +16,135 @@ import {
   Timestamp,
   writeBatch,
 } from 'firebase/firestore';
+
 import { db } from '../firebase/firebaseConfig';
-import { DEFAULT_FEE, DEFAULT_PLAN, cycleDates } from './billing';
+
+import {
+  DEFAULT_FEE,
+  DEFAULT_PLAN,
+  cycleDates,
+} from './billing';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // True when this user has a document in the admins collection.
-// Only the Firebase console can create that document. The rules refuse every app write to it.
 export async function isAdminUser(uid) {
   if (!uid) return false;
+
   try {
     const snapshot = await getDoc(doc(db, 'admins', uid));
     return snapshot.exists();
   } catch (error) {
+    console.error('Admin verification failed:', error);
     return false;
   }
 }
 
+// Subscribe to shop statistics.
 export function subscribeShopStats(onData, onError) {
   return onSnapshot(
     collection(db, 'shopStats'),
-    (snapshot) => onData(snapshot.docs.map((item) => {
-      const stats = { ...item.data() };
-      delete stats.contactEmail;
-      delete stats.contactPhone;
-      return { storeId: item.id, ...stats };
-    })),
+    (snapshot) =>
+      onData(
+        snapshot.docs.map((item) => {
+          const stats = { ...item.data() };
+
+          delete stats.contactEmail;
+          delete stats.contactPhone;
+
+          return {
+            storeId: item.id,
+            ...stats,
+          };
+        })
+      ),
     onError
   );
 }
 
-// Calls onData with an object keyed by storeId.
+// Subscribe to all shop subscriptions.
 export function subscribeSubscriptions(onData, onError) {
   return onSnapshot(
     collection(db, 'subscriptions'),
     (snapshot) => {
       const byStore = {};
+
       snapshot.docs.forEach((item) => {
-        byStore[item.id] = { id: item.id, ...item.data() };
+        byStore[item.id] = {
+          id: item.id,
+          ...item.data(),
+        };
       });
+
       onData(byStore);
     },
     onError
   );
 }
 
+// Subscribe to a shop's payment history.
 export function subscribePayments(storeId, onData, onError) {
   return onSnapshot(
-    query(collection(db, 'subscriptions', storeId, 'payments'), orderBy('paidAt', 'desc'), limit(12)),
-    (snapshot) => onData(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))),
+    query(
+      collection(db, 'subscriptions', storeId, 'payments'),
+      orderBy('paidAt', 'desc'),
+      limit(12)
+    ),
+    (snapshot) =>
+      onData(
+        snapshot.docs.map((item) => ({
+          id: item.id,
+          ...item.data(),
+        }))
+      ),
     onError
   );
 }
 
+// Subscription plan fields.
 function planFields(existing, plan, monthlyFee) {
   return {
-    plan: String(plan || existing?.plan || DEFAULT_PLAN).slice(0, 40),
-    monthlyFee: Number(monthlyFee ?? existing?.monthlyFee ?? DEFAULT_FEE),
+    plan: String(
+      plan || existing?.plan || DEFAULT_PLAN
+    ).slice(0, 40),
+
+    monthlyFee: Number(
+      monthlyFee ?? existing?.monthlyFee ?? DEFAULT_FEE
+    ),
   };
 }
 
-// Records a payment and moves the shop's dates on. One batch, so the payment and the new dates
-// are saved together or not at all.
-export async function recordPayment(storeId, { amount, coveredMonth, plan, monthlyFee, note }, adminUid, existing) {
+// Record a payment and update subscription dates.
+export async function recordPayment(
+  storeId,
+  { amount, coveredMonth, plan, monthlyFee, note },
+  adminUid,
+  existing
+) {
+  if (!storeId) {
+    throw new Error('A valid shop ID is required.');
+  }
+
+  if (!adminUid) {
+    throw new Error('Admin authentication is required.');
+  }
+
+  const authorized = await isAdminUser(adminUid);
+
+  if (!authorized) {
+    throw new Error('Unauthorized. Admin access required.');
+  }
+
   const paid = Number(amount);
-  if (!Number.isFinite(paid) || paid < 0) throw new Error('Enter the amount that was paid.');
+
+  if (!Number.isFinite(paid) || paid < 0) {
+    throw new Error('Enter the amount that was paid.');
+  }
+
   const { dueDate, accessUntil } = cycleDates(coveredMonth);
+
   const batch = writeBatch(db);
+
   batch.set(
     doc(db, 'subscriptions', storeId),
     {
@@ -99,19 +161,32 @@ export async function recordPayment(storeId, { amount, coveredMonth, plan, month
     },
     { merge: true }
   );
-  batch.set(doc(collection(db, 'subscriptions', storeId, 'payments')), {
-    amount: paid,
-    coveredMonth,
-    paidAt: serverTimestamp(),
-    note: String(note || '').trim().slice(0, 200),
-    recordedBy: adminUid,
-  });
+
+  batch.set(
+    doc(collection(db, 'subscriptions', storeId, 'payments')),
+    {
+      amount: paid,
+      coveredMonth,
+      paidAt: serverTimestamp(),
+      note: String(note || '').trim().slice(0, 200),
+      recordedBy: adminUid,
+    }
+  );
+
   await batch.commit();
 }
 
-// Starts a subscription without a payment (a trial or a free month).
-export async function startSubscription(storeId, { plan, monthlyFee, coveredMonth }) {
+// Start a subscription without payment.
+export async function startSubscription(
+  storeId,
+  { plan, monthlyFee, coveredMonth }
+) {
+  if (!storeId) {
+    throw new Error('A valid shop ID is required.');
+  }
+
   const { dueDate, accessUntil } = cycleDates(coveredMonth);
+
   await setDoc(
     doc(db, 'subscriptions', storeId),
     {
@@ -128,7 +203,16 @@ export async function startSubscription(storeId, { plan, monthlyFee, coveredMont
   );
 }
 
-export async function deactivateShop(storeId, reason, existing) {
+// Deactivate a shop.
+export async function deactivateShop(
+  storeId,
+  reason,
+  existing
+) {
+  if (!storeId) {
+    throw new Error('A valid shop ID is required.');
+  }
+
   await setDoc(
     doc(db, 'subscriptions', storeId),
     {
@@ -142,15 +226,25 @@ export async function deactivateShop(storeId, reason, existing) {
   );
 }
 
-// Switches a shop back on and gives it `days` more days to pay.
-export async function reactivateShop(storeId, existing, days = 7) {
+// Reactivate a shop.
+export async function reactivateShop(
+  storeId,
+  existing,
+  days = 7
+) {
+  if (!storeId) {
+    throw new Error('A valid shop ID is required.');
+  }
+
   await setDoc(
     doc(db, 'subscriptions', storeId),
     {
       storeId,
       ...planFields(existing),
       status: 'active',
-      accessUntil: Timestamp.fromDate(new Date(Date.now() + days * DAY_MS)),
+      accessUntil: Timestamp.fromDate(
+        new Date(Date.now() + days * DAY_MS)
+      ),
       deactivatedReason: '',
       updatedAt: serverTimestamp(),
     },
@@ -158,37 +252,101 @@ export async function reactivateShop(storeId, existing, days = 7) {
   );
 }
 
-// Writes each shop's FINISHED score to shopScores/{storeId}. The admin dashboard works the score out (it is the
-// only place that can see every shop's revenue), and a shop reads only its own document, so a shop gets its final
-// number without ever downloading another shop's figures.
-// rows: [{ storeId, score, tier }]
+// Publish shop performance scores.
 export async function publishShopScores(rows) {
   for (let start = 0; start < rows.length; start += 400) {
     const batch = writeBatch(db);
-    rows.slice(start, start + 400).forEach(({ storeId, score, tier }) => {
-      batch.set(doc(db, 'shopScores', storeId), { storeId, score, tier, updatedAt: serverTimestamp() });
-    });
+
+    rows.slice(start, start + 400).forEach(
+      ({ storeId, score, tier }) => {
+        batch.set(
+          doc(db, 'shopScores', storeId),
+          {
+            storeId,
+            score,
+            tier,
+            updatedAt: serverTimestamp(),
+          }
+        );
+      }
+    );
+
     await batch.commit();
   }
 }
 
-// rows: [{ storeId, sub }]. Marks each one deactivated in a single batch.
-export async function deactivateMany(rows, reason = 'Unpaid') {
+// Deactivate multiple shops.
+export async function deactivateMany(
+  rows,
+  reason = 'Unpaid'
+) {
   for (let start = 0; start < rows.length; start += 400) {
     const batch = writeBatch(db);
-    rows.slice(start, start + 400).forEach(({ storeId, sub }) => {
-      batch.set(
-        doc(db, 'subscriptions', storeId),
-        {
-          storeId,
-          ...planFields(sub),
-          status: 'deactivated',
-          deactivatedReason: reason,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-    });
+
+    rows.slice(start, start + 400).forEach(
+      ({ storeId, sub }) => {
+        batch.set(
+          doc(db, 'subscriptions', storeId),
+          {
+            storeId,
+            ...planFields(sub),
+            status: 'deactivated',
+            deactivatedReason: reason,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+    );
+
     await batch.commit();
   }
+}
+
+// REMOVE A SHOP FROM THE ADMIN DASHBOARD.
+//
+// Deletes:
+// shopStats/{storeId}
+// shopScores/{storeId}
+//
+// Preserves:
+// subscriptions/{storeId}
+// subscriptions/{storeId}/payments/{paymentId}
+//
+// Does NOT delete:
+// Firebase Authentication accounts
+// Shop products
+// Sales
+// Customer records
+// Credit records
+// Shop documents or other shop-owned data.
+
+export async function deleteShop(storeId, adminUid) {
+  if (!storeId) {
+    throw new Error('Invalid shop ID.');
+  }
+
+  if (!adminUid) {
+    throw new Error('Admin authentication is required.');
+  }
+
+  // Verify admin privileges.
+  const authorized = await isAdminUser(adminUid);
+
+  if (!authorized) {
+    throw new Error(
+      'Unauthorized. Admin access required.'
+    );
+  }
+
+  // Delete only the admin dashboard records.
+  // Payment history and subscription records are preserved.
+  const batch = writeBatch(db);
+
+  batch.delete(doc(db, 'shopStats', storeId));
+  batch.delete(doc(db, 'shopScores', storeId));
+
+  await batch.commit();
+
+  return true;
 }

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Dimensions, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../config/ThemeContext";
@@ -190,6 +190,11 @@ function SuppliersTab({ query, setQuery, suppliers, products, loaded, storeId, s
 
   const [busySupplierId, setBusySupplierId] = useState(null);
 
+  // The small "Remove item" popover opened by right-click (web) or long-press (mobile).
+  // { supplierId, supplierName, item, x, y } | null
+  const [itemMenu, setItemMenu] = useState(null);
+  const [removingKey, setRemovingKey] = useState(null); // `${supplierId}:${itemKey}` while a removal is saving
+
   const filtered = suppliers.filter((s) =>
     s.name.toLowerCase().includes(query.toLowerCase()),
   );
@@ -331,6 +336,40 @@ function SuppliersTab({ query, setQuery, suppliers, products, loaded, storeId, s
       await updateSupplierItems(storeId, supplier.id, items);
     } catch (error) {
       setNotice({ type: "error", text: error.message || "Could not update the item." });
+    }
+  }
+
+  // Opens the "Remove item" popover at the given screen position, clamped so it never runs off
+  // the edge. `x`/`y` come from the right-click event on web, or the long-press touch on mobile.
+  function openItemMenu(supplier, item, x, y) {
+    const { width, height } = Dimensions.get("window");
+    const menuWidth = 180;
+    const menuHeight = 92;
+    setItemMenu({
+      supplierId: supplier.id,
+      supplierName: supplier.name,
+      item,
+      x: Math.min(Math.max(x, 8), width - menuWidth - 8),
+      y: Math.min(Math.max(y, 8), height - menuHeight - 8),
+    });
+  }
+
+  function closeItemMenu() {
+    setItemMenu(null);
+  }
+
+  async function removeItem(supplier, item) {
+    const key = `${supplier.id}:${itemKey(item)}`;
+    setRemovingKey(key);
+    closeItemMenu();
+    try {
+      const remaining = supplier.items.filter((existing) => itemKey(existing) !== itemKey(item));
+      await updateSupplierItems(storeId, supplier.id, remaining);
+      setNotice({ type: "success", text: `${item.name} removed from ${supplier.name}.` });
+    } catch (error) {
+      setNotice({ type: "error", text: error.message || "Could not remove the item." });
+    } finally {
+      setRemovingKey(null);
     }
   }
 
@@ -476,7 +515,15 @@ function SuppliersTab({ query, setQuery, suppliers, products, loaded, storeId, s
                   <Pressable
                     key={itemKey(item) || j}
                     onPress={() => toggleItem(s, j)}
+                    onLongPress={(event) => openItemMenu(s, item, event.nativeEvent.pageX, event.nativeEvent.pageY)}
+                    delayLongPress={450}
+                    // Web only: right-click opens the same "Remove item" menu instead of the browser's own menu.
+                    {...(Platform.OS === "web"
+                      ? { onContextMenu: (event) => { event.preventDefault(); openItemMenu(s, item, event.clientX, event.clientY); } }
+                      : {})}
                     style={[styles.tag, item.selected === false && styles.tagUnselected]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${item.name}, ${item.qty}. Tap to ${item.selected === false ? "select" : "deselect"} for ordering. ${Platform.OS === "web" ? "Right-click" : "Long-press"} to remove.`}
                   >
                     <Text
                       style={[
@@ -625,6 +672,35 @@ function SuppliersTab({ query, setQuery, suppliers, products, loaded, storeId, s
           </View>
         );
       })}
+
+      {/* "Remove item" popover: opened by right-click on web, long-press on mobile (see openItemMenu) */}
+      <Modal visible={!!itemMenu} transparent animationType="fade" onRequestClose={closeItemMenu}>
+        <Pressable style={styles.itemMenuBackdrop} onPress={closeItemMenu} accessibilityLabel="Close menu">
+          {itemMenu && (
+            <View
+              style={[styles.itemMenuCard, { top: itemMenu.y, left: itemMenu.x }]}
+              // Stop a tap on the card itself from reaching the backdrop and closing the menu
+              onStartShouldSetResponder={() => true}
+            >
+              <Text style={styles.itemMenuTitle} numberOfLines={1}>{itemMenu.item.name}</Text>
+              <Pressable
+                style={styles.itemMenuRemove}
+                onPress={() => {
+                  const supplier = suppliers.find((candidate) => candidate.id === itemMenu.supplierId);
+                  if (supplier) removeItem(supplier, itemMenu.item);
+                }}
+                disabled={removingKey === `${itemMenu.supplierId}:${itemKey(itemMenu.item)}`}
+                accessibilityRole="button"
+              >
+                <Ionicons name="trash-outline" size={16} color={colors.danger} />
+                <Text style={styles.itemMenuRemoveText}>
+                  {removingKey === `${itemMenu.supplierId}:${itemKey(itemMenu.item)}` ? "Removing..." : "Remove item"}
+                </Text>
+              </Pressable>
+            </View>
+          )}
+        </Pressable>
+      </Modal>
     </>
   );
 }
@@ -926,6 +1002,39 @@ const makeStyles = (colors) =>
     tagUnselected: { backgroundColor: colors.border },
     tagText: { color: colors.primary, fontSize: 12, fontWeight: "600" },
     tagTextUnselected: { color: colors.textMuted },
+
+    itemMenuBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.15)" },
+    itemMenuCard: {
+      position: "absolute",
+      width: 180,
+      backgroundColor: colors.card,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingVertical: 6,
+      shadowColor: "#000",
+      shadowOpacity: 0.15,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 6,
+    },
+    itemMenuTitle: {
+      fontSize: 11,
+      fontWeight: "700",
+      color: colors.textMuted,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    itemMenuRemove: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    itemMenuRemoveText: { color: colors.danger, fontSize: 13, fontWeight: "700" },
     cardBottomRow: {
       flexDirection: "row",
       justifyContent: "space-between",

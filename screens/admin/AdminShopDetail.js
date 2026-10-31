@@ -1,34 +1,69 @@
+
 import React, { useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
 import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { Ionicons } from '@expo/vector-icons';
-import { Bar, Pill, SEVERITY_COLOR, TIER_META, TONE_META, confirmAction } from './adminUi';
-import { PART_LABELS, WEIGHTS, diagnose, formatRand } from '../../services/admin/performance';
+
+import {
+  Bar,
+  Pill,
+  SEVERITY_COLOR,
+  TIER_META,
+  TONE_META,
+  confirmAction,
+} from './adminUi';
+
+import {
+  PART_LABELS,
+  WEIGHTS,
+  diagnose,
+  formatRand,
+} from '../../services/admin/performance';
+
 import {
   DEFAULT_FEE,
   DEFAULT_PLAN,
   defaultCoveredMonth,
   formatDay,
   monthLabel,
-
   paymentReference,
-  paymentReminderMessage,
-
   shiftMonth,
 } from '../../services/admin/billing';
+
 import {
   deactivateShop,
   reactivateShop,
   recordPayment,
   startSubscription,
   subscribePayments,
+  deleteShop,
 } from '../../services/admin/adminRepository';
 
 const BRAND_GREEN = '#004B49';
 
-// Everything shown here is a shop-level total. There are no individual sales and no customer names.
-export default function AdminShopDetail({ shop, onClose, colors, adminUid, medianBasket }) {
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+export default function AdminShopDetail({
+  shop,
+  onClose,
+  colors,
+  adminUid,
+  medianBasket,
+}) {
+  const styles = useMemo(
+    () => makeStyles(colors),
+    [colors]
+  );
+
   const [payments, setPayments] = useState([]);
   const [amount, setAmount] = useState('');
   const [month, setMonth] = useState(defaultCoveredMonth());
@@ -37,14 +72,24 @@ export default function AdminShopDetail({ shop, onClose, colors, adminUid, media
   const [message, setMessage] = useState(null);
 
   const storeId = shop?.storeId;
+
   useEffect(() => {
     if (!storeId) return undefined;
+
     setPayments([]);
     setMessage(null);
     setNote('');
     setMonth(defaultCoveredMonth());
-    setAmount(String(shop?.sub?.monthlyFee ?? DEFAULT_FEE));
-    return subscribePayments(storeId, setPayments, () => {});
+
+    setAmount(
+      String(shop?.sub?.monthlyFee ?? DEFAULT_FEE)
+    );
+
+    return subscribePayments(
+      storeId,
+      setPayments,
+      () => {}
+    );
   }, [storeId]);
 
   if (!shop) return null;
@@ -52,21 +97,64 @@ export default function AdminShopDetail({ shop, onClose, colors, adminUid, media
   const tier = TIER_META[shop.tier];
   const state = shop.state;
   const tone = TONE_META[state.tone];
-  const { causes, strengths } = diagnose(shop, { medianBasket });
+
+  const { causes, strengths } = diagnose(
+    shop,
+    { medianBasket }
+  );
+
   const sub = shop.sub;
   const highPerformer = shop.tier === 'high';
 
+  // Shared action handler.
   const run = async (action, success) => {
     setBusy(true);
     setMessage(null);
+
     try {
       await action();
-      setMessage({ ok: true, text: success });
+
+      setMessage({
+        ok: true,
+        text: success,
+      });
+
+      return true;
     } catch (error) {
-      setMessage({ ok: false, text: error?.code === 'permission-denied' ? 'Permission denied by the Firestore rules.' : error?.message || 'Could not save.' });
+      setMessage({
+        ok: false,
+        text:
+          error?.code === 'permission-denied'
+            ? 'Permission denied by the Firestore rules.'
+            : error?.message || 'Could not save.',
+      });
+
+      return false;
     } finally {
       setBusy(false);
     }
+  };
+
+  // Delete shop handler.
+  const handleDeleteShop = () => {
+    if (busy) return;
+
+    confirmAction(
+      'Permanently delete this shop?',
+      `Are you sure you want to permanently delete ${
+        shop.shopName || 'this shop'
+      }? This action cannot be undone.`,
+      async () => {
+        const success = await run(
+          () => deleteShop(storeId, adminUid),
+          'Shop deleted successfully.'
+        );
+
+        if (success) {
+          onClose();
+        }
+      }
+    );
   };
 
   const totals = [
@@ -74,10 +162,21 @@ export default function AdminShopDetail({ shop, onClose, colors, adminUid, media
     ['Profit (30 days)', formatRand(shop.profit30d)],
     ['Sales (30 days)', String(shop.salesCount30d ?? 0)],
     ['Items sold', String(shop.itemsSold30d ?? 0)],
-    ['Days with a sale', `${shop.activeDays30d ?? 0} of 30`],
-    ['Last sale', shop.lastSaleAt ? formatDay(shop.lastSaleAt) : 'Never'],
+    [
+      'Days with a sale',
+      `${shop.activeDays30d ?? 0} of 30`,
+    ],
+    [
+      'Last sale',
+      shop.lastSaleAt
+        ? formatDay(shop.lastSaleAt)
+        : 'Never',
+    ],
     ['Average sale', formatRand(shop.d.basket)],
-    ['Profit margin', `${Math.round(shop.d.margin * 100)}%`],
+    [
+      'Profit margin',
+      `${Math.round(shop.d.margin * 100)}%`,
+    ],
     ['Products', String(shop.productCount ?? 0)],
     ['Out of stock', String(shop.outOfStockCount ?? 0)],
     ['Running low', String(shop.lowStockCount ?? 0)],
@@ -87,108 +186,355 @@ export default function AdminShopDetail({ shop, onClose, colors, adminUid, media
   ];
 
   const renderCause = (item, index) => (
-    <View key={item.id} style={[styles.finding, index > 0 && styles.findingDivider]}>
-      <View style={[styles.dot, { backgroundColor: SEVERITY_COLOR[item.severity] }]} />
+    <View
+      key={item.id}
+      style={[
+        styles.finding,
+        index > 0 && styles.findingDivider,
+      ]}
+    >
+      <View
+        style={[
+          styles.dot,
+          {
+            backgroundColor:
+              SEVERITY_COLOR[item.severity],
+          },
+        ]}
+      />
+
       <View style={{ flex: 1 }}>
-        <Text style={styles.findingTitle}>{item.title}</Text>
-        <Text style={styles.findingDetail}>{item.detail}</Text>
-        <Text style={styles.findingAction}>What we can do: {item.adminAction}</Text>
-        <Text style={styles.findingTip}>Tip for the shop: {item.tip}</Text>
+        <Text style={styles.findingTitle}>
+          {item.title}
+        </Text>
+
+        <Text style={styles.findingDetail}>
+          {item.detail}
+        </Text>
+
+        <Text style={styles.findingAction}>
+          What we can do: {item.adminAction}
+        </Text>
+
+        <Text style={styles.findingTip}>
+          Tip for the shop: {item.tip}
+        </Text>
       </View>
     </View>
   );
 
   const renderStrength = (item, index) => (
-    <View key={item.id} style={[styles.finding, index > 0 && styles.findingDivider]}>
-      <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+    <View
+      key={item.id}
+      style={[
+        styles.finding,
+        index > 0 && styles.findingDivider,
+      ]}
+    >
+      <Ionicons
+        name="checkmark-circle"
+        size={18}
+        color="#10B981"
+      />
+
       <View style={{ flex: 1 }}>
-        <Text style={styles.findingTitle}>{item.title}</Text>
-        <Text style={styles.findingDetail}>{item.detail}</Text>
+        <Text style={styles.findingTitle}>
+          {item.title}
+        </Text>
+
+        <Text style={styles.findingDetail}>
+          {item.detail}
+        </Text>
       </View>
     </View>
   );
 
   const causeBlock = causes.length ? (
     <>
-      <Text style={styles.section}>{highPerformer ? 'WATCH-OUTS' : 'ROOT CAUSES AND HOW TO IMPROVE'}</Text>
-      <View style={styles.card}>{causes.map(renderCause)}</View>
+      <Text style={styles.section}>
+        {highPerformer
+          ? 'WATCH-OUTS'
+          : 'ROOT CAUSES AND HOW TO IMPROVE'}
+      </Text>
+
+      <View style={styles.card}>
+        {causes.map(renderCause)}
+      </View>
     </>
   ) : null;
+
   const strengthBlock = strengths.length ? (
     <>
-      <Text style={styles.section}>{highPerformer ? 'WHY THIS SHOP PERFORMS WELL' : 'WHAT IS WORKING'}</Text>
-      <View style={styles.card}>{strengths.map(renderStrength)}</View>
+      <Text style={styles.section}>
+        {highPerformer
+          ? 'WHY THIS SHOP PERFORMS WELL'
+          : 'WHAT IS WORKING'}
+      </Text>
+
+      <View style={styles.card}>
+        {strengths.map(renderStrength)}
+      </View>
     </>
   ) : null;
 
   return (
-    <Modal visible animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible
+      animationType="slide"
+      onRequestClose={onClose}
+    >
       <SafeAreaView style={styles.screen}>
+
+        {/* HEADER */}
         <View style={styles.topBar}>
-          <Text style={styles.topTitle} numberOfLines={1}>{shop.shopName || 'Shop'}</Text>
-          <Pressable onPress={onClose} accessibilityLabel="Close">
-            <Ionicons name="close" size={26} color={colors.textPrimary} />
+          <Text
+            style={styles.topTitle}
+            numberOfLines={1}
+          >
+            {shop.shopName || 'Shop'}
+          </Text>
+
+          <Pressable
+            onPress={onClose}
+            accessibilityLabel="Close"
+          >
+            <Ionicons
+              name="close"
+              size={26}
+              color={colors.textPrimary}
+            />
           </Pressable>
         </View>
 
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView
+          contentContainerStyle={styles.content}
+        >
+
+          {/* PERFORMANCE HEADER */}
           <View style={styles.headerRow}>
-            <Pill label={`${tier.label} performer`} color={tier.color} bg={tier.bg} />
-            <Pill label={state.label} color={tone.color} bg={tone.bg} />
-          </View>
-          <Text style={styles.score}>{shop.score}<Text style={styles.scoreOf}> / 100</Text></Text>
+            <Pill
+              label={`${tier.label} performer`}
+              color={tier.color}
+              bg={tier.bg}
+            />
 
-          <Text style={styles.section}>SCORE BREAKDOWN</Text>
+            <Pill
+              label={state.label}
+              color={tone.color}
+              bg={tone.bg}
+            />
+          </View>
+
+          <Text style={styles.score}>
+            {shop.score}
+            <Text style={styles.scoreOf}>
+              {' '} / 100
+            </Text>
+          </Text>
+
+          {/* SCORE BREAKDOWN */}
+          <Text style={styles.section}>
+            SCORE BREAKDOWN
+          </Text>
+
           <View style={styles.card}>
-            {Object.keys(WEIGHTS).map((key) => (
-              <View key={key} style={{ marginBottom: 10 }}>
-                <View style={styles.rowBetween}>
-                  <Text style={styles.rowLabel}>{PART_LABELS[key]}</Text>
-                  <Text style={styles.rowValue}>{Math.round(shop.parts[key] * 100)}%  ·  weight {Math.round(WEIGHTS[key] * 100)}%</Text>
+            {Object.keys(WEIGHTS).map((key) => {
+              const applies =
+                shop.parts[key] !== null &&
+                shop.parts[key] !== undefined;
+
+              const effectiveWeight =
+                shop.weights?.[key] ?? WEIGHTS[key];
+
+              return (
+                <View
+                  key={key}
+                  style={{ marginBottom: 10 }}
+                >
+                  <View style={styles.rowBetween}>
+                    <Text style={styles.rowLabel}>
+                      {PART_LABELS[key]}
+                    </Text>
+
+                    <Text style={styles.rowValue}>
+                      {applies
+                        ? `${Math.round(
+                            shop.parts[key] * 100
+                          )} / 100  ·  weight ${Math.round(
+                            effectiveWeight * 100
+                          )}%`
+                        : 'Not enough data'}
+                    </Text>
+                  </View>
+
+                  <Bar
+                    colors={colors}
+                    value={applies ? shop.parts[key] : 0}
+                    color={tier.color}
+                  />
                 </View>
-                <Bar colors={colors} value={shop.parts[key]} color={tier.color} />
-              </View>
-            ))}
+              );
+            })}
           </View>
 
-          <Text style={styles.section}>SHOP TOTALS</Text>
+          {/* SHOP TOTALS */}
+          <Text style={styles.section}>
+            SHOP TOTALS
+          </Text>
+
           <View style={styles.grid}>
             {totals.map(([label, value]) => (
-              <View key={label} style={styles.gridCell}>
-                <Text style={styles.gridLabel}>{label}</Text>
-                <Text style={styles.gridValue}>{value}</Text>
+              <View
+                key={label}
+                style={styles.gridCell}
+              >
+                <Text style={styles.gridLabel}>
+                  {label}
+                </Text>
+
+                <Text style={styles.gridValue}>
+                  {value}
+                </Text>
               </View>
             ))}
           </View>
 
-          {highPerformer ? strengthBlock : causeBlock}
-          {highPerformer ? causeBlock : strengthBlock}
+          {highPerformer
+            ? strengthBlock
+            : causeBlock}
 
-          <Text style={styles.section}>SUBSCRIPTION</Text>
+          {highPerformer
+            ? causeBlock
+            : strengthBlock}
+
+          {/* SUBSCRIPTION */}
+          <Text style={styles.section}>
+            SUBSCRIPTION
+          </Text>
+
           <View style={styles.card}>
-            <View style={styles.rowBetween}><Text style={styles.rowLabel}>Plan</Text><Text style={styles.rowValue}>{sub ? `${sub.plan} · R${sub.monthlyFee}/month` : 'None yet'}</Text></View>
-            <View style={styles.rowBetween}><Text style={styles.rowLabel}>Paid up to</Text><Text style={styles.rowValue}>{sub?.coveredMonth ? monthLabel(sub.coveredMonth) : '-'}</Text></View>
-            <View style={styles.rowBetween}><Text style={styles.rowLabel}>Next payment due</Text><Text style={styles.rowValue}>{formatDay(state.dueDate)}</Text></View>
-            <View style={styles.rowBetween}><Text style={styles.rowLabel}>Cut-off if unpaid</Text><Text style={styles.rowValue}>{formatDay(state.accessUntil)}</Text></View>
-            <View style={styles.rowBetween}><Text style={styles.rowLabel}>Payment reference</Text><Text style={styles.rowValue} selectable>{paymentReference(storeId)}</Text></View>
-            {sub?.deactivatedReason ? <Text style={styles.findingDetail}>Reason: {sub.deactivatedReason}</Text> : null}
+            <View style={styles.rowBetween}>
+              <Text style={styles.rowLabel}>
+                Plan
+              </Text>
 
-            <Text style={[styles.rowLabel, { marginTop: 14 }]}>Record a payment</Text>
+              <Text style={styles.rowValue}>
+                {sub
+                  ? `${sub.plan} · R${sub.monthlyFee}/month`
+                  : 'None yet'}
+              </Text>
+            </View>
+
+            <View style={styles.rowBetween}>
+              <Text style={styles.rowLabel}>
+                Paid up to
+              </Text>
+
+              <Text style={styles.rowValue}>
+                {sub?.coveredMonth
+                  ? monthLabel(sub.coveredMonth)
+                  : '-'}
+              </Text>
+            </View>
+
+            <View style={styles.rowBetween}>
+              <Text style={styles.rowLabel}>
+                Next payment due
+              </Text>
+
+              <Text style={styles.rowValue}>
+                {formatDay(state.dueDate)}
+              </Text>
+            </View>
+
+            <View style={styles.rowBetween}>
+              <Text style={styles.rowLabel}>
+                Cut-off if unpaid
+              </Text>
+
+              <Text style={styles.rowValue}>
+                {formatDay(state.accessUntil)}
+              </Text>
+            </View>
+
+            <View style={styles.rowBetween}>
+              <Text style={styles.rowLabel}>
+                Payment reference
+              </Text>
+
+              <Text
+                style={styles.rowValue}
+                selectable
+              >
+                {paymentReference(storeId)}
+              </Text>
+            </View>
+
+            {sub?.deactivatedReason ? (
+              <Text style={styles.findingDetail}>
+                Reason: {sub.deactivatedReason}
+              </Text>
+            ) : null}
+
+            <Text
+              style={[
+                styles.rowLabel,
+                { marginTop: 14 },
+              ]}
+            >
+              Record a payment
+            </Text>
+
             <View style={styles.formRow}>
               <TextInput
-                style={[styles.input, { flex: 1 }]}
+                style={[
+                  styles.input,
+                  { flex: 1 },
+                ]}
                 value={amount}
-                onChangeText={(value) => setAmount(value.replace(/[^0-9.]/g, ''))}
+                onChangeText={(value) =>
+                  setAmount(
+                    value.replace(/[^0-9.]/g, '')
+                  )
+                }
                 keyboardType="decimal-pad"
                 placeholder="Amount (R)"
                 placeholderTextColor={colors.textMuted}
               />
+
               <View style={styles.stepper}>
-                <Pressable onPress={() => setMonth(shiftMonth(month, -1))} hitSlop={8}><Ionicons name="chevron-back" size={20} color={colors.primary} /></Pressable>
-                <Text style={styles.stepperText}>{monthLabel(month)}</Text>
-                <Pressable onPress={() => setMonth(shiftMonth(month, 1))} hitSlop={8}><Ionicons name="chevron-forward" size={20} color={colors.primary} /></Pressable>
+                <Pressable
+                  onPress={() =>
+                    setMonth(shiftMonth(month, -1))
+                  }
+                  hitSlop={8}
+                >
+                  <Ionicons
+                    name="chevron-back"
+                    size={20}
+                    color={colors.primary}
+                  />
+                </Pressable>
+
+                <Text style={styles.stepperText}>
+                  {monthLabel(month)}
+                </Text>
+
+                <Pressable
+                  onPress={() =>
+                    setMonth(shiftMonth(month, 1))
+                  }
+                  hitSlop={8}
+                >
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={colors.primary}
+                  />
+                </Pressable>
               </View>
             </View>
+
             <TextInput
               style={styles.input}
               value={note}
@@ -197,104 +543,488 @@ export default function AdminShopDetail({ shop, onClose, colors, adminUid, media
               placeholderTextColor={colors.textMuted}
               maxLength={200}
             />
+
             <Pressable
-              style={[styles.primaryBtn, busy && { opacity: 0.6 }]}
+              style={[
+                styles.primaryBtn,
+                busy && { opacity: 0.6 },
+              ]}
               disabled={busy}
-              onPress={() => run(() => recordPayment(storeId, { amount, coveredMonth: month, note, plan: sub?.plan, monthlyFee: sub?.monthlyFee }, adminUid, sub), `Payment recorded for ${monthLabel(month)}.`)}
+              onPress={() =>
+                run(
+                  () =>
+                    recordPayment(
+                      storeId,
+                      {
+                        amount,
+                        coveredMonth: month,
+                        note,
+                        plan: sub?.plan,
+                        monthlyFee: sub?.monthlyFee,
+                      },
+                      adminUid,
+                      sub
+                    ),
+                  `Payment recorded for ${monthLabel(month)}.`
+                )
+              }
             >
-              <Text style={styles.primaryBtnText}>Record payment for {monthLabel(month)}</Text>
+              <Text style={styles.primaryBtnText}>
+                Record payment for {monthLabel(month)}
+              </Text>
             </Pressable>
 
+            {/* SUBSCRIPTION ACTIONS */}
             <View style={styles.btnRow}>
               {!sub ? (
                 <Pressable
                   style={styles.outlineBtn}
                   disabled={busy}
-                  onPress={() => run(() => startSubscription(storeId, { plan: DEFAULT_PLAN, monthlyFee: Number(amount) || DEFAULT_FEE, coveredMonth: month }), 'Subscription started.')}
+                  onPress={() =>
+                    run(
+                      () =>
+                        startSubscription(
+                          storeId,
+                          {
+                            plan: DEFAULT_PLAN,
+                            monthlyFee:
+                              Number(amount) || DEFAULT_FEE,
+                            coveredMonth: month,
+                          }
+                        ),
+                      'Subscription started.'
+                    )
+                  }
                 >
-                  <Text style={styles.outlineBtnText}>Start without payment</Text>
+                  <Text style={styles.outlineBtnText}>
+                    Start without payment
+                  </Text>
                 </Pressable>
               ) : null}
+
               {state.key === 'deactivated' ? (
                 <Pressable
                   style={styles.outlineBtn}
                   disabled={busy}
-                  onPress={() => confirmAction('Reactivate this shop?', 'It gets 7 more days to pay before being cut off again.', () => run(() => reactivateShop(storeId, sub), 'Reactivated for 7 days.'))}
+                  onPress={() =>
+                    confirmAction(
+                      'Reactivate this shop?',
+                      'It gets 7 more days to pay before being cut off again.',
+                      () =>
+                        run(
+                          () =>
+                            reactivateShop(storeId, sub),
+                          'Reactivated for 7 days.'
+                        )
+                    )
+                  }
                 >
-                  <Text style={styles.outlineBtnText}>Reactivate (7 days)</Text>
+                  <Text style={styles.outlineBtnText}>
+                    Reactivate (7 days)
+                  </Text>
                 </Pressable>
               ) : (
                 <Pressable
-                  style={[styles.outlineBtn, { borderColor: colors.danger }]}
+                  style={[
+                    styles.outlineBtn,
+                    {
+                      borderColor: colors.danger,
+                    },
+                  ]}
                   disabled={busy}
-                  onPress={() => confirmAction('Deactivate this shop?', 'The shop will no longer be able to record new sales until it pays.', () => run(() => deactivateShop(storeId, 'Unpaid', sub), 'Shop deactivated.'))}
+                  onPress={() =>
+                    confirmAction(
+                      'Deactivate this shop?',
+                      'The shop will no longer be able to record new sales until it pays.',
+                      () =>
+                        run(
+                          () =>
+                            deactivateShop(
+                              storeId,
+                              'Unpaid',
+                              sub
+                            ),
+                          'Shop deactivated.'
+                        )
+                    )
+                  }
                 >
-                  <Text style={[styles.outlineBtnText, { color: colors.danger }]}>Deactivate</Text>
+                  <Text
+                    style={[
+                      styles.outlineBtnText,
+                      { color: colors.danger },
+                    ]}
+                  >
+                    Deactivate
+                  </Text>
                 </Pressable>
               )}
             </View>
-            {message ? <Text style={[styles.msg, { color: message.ok ? '#10B981' : colors.danger }]}>{message.text}</Text> : null}
+
+            {message ? (
+              <Text
+                style={[
+                  styles.msg,
+                  {
+                    color: message.ok
+                      ? '#10B981'
+                      : colors.danger,
+                  },
+                ]}
+              >
+                {message.text}
+              </Text>
+            ) : null}
           </View>
 
-          <Text style={styles.section}>PAYMENT HISTORY</Text>
+          {/* PAYMENT HISTORY */}
+          <Text style={styles.section}>
+            PAYMENT HISTORY
+          </Text>
+
           <View style={styles.card}>
             {payments.length === 0 ? (
-              <Text style={styles.findingDetail}>No payments recorded yet.</Text>
+              <Text style={styles.findingDetail}>
+                No payments recorded yet.
+              </Text>
             ) : (
               payments.map((payment, index) => (
-                <View key={payment.id} style={[styles.rowBetween, index > 0 && { marginTop: 8 }]}>
-                  <Text style={styles.rowLabel}>{monthLabel(payment.coveredMonth)}{payment.note ? `  ·  ${payment.note}` : ''}</Text>
-                  <Text style={styles.rowValue}>{formatRand(payment.amount)}</Text>
+                <View
+                  key={payment.id}
+                  style={[
+                    styles.rowBetween,
+                    index > 0 && { marginTop: 8 },
+                  ]}
+                >
+                  <Text style={styles.rowLabel}>
+                    {monthLabel(payment.coveredMonth)}
+                    {payment.note
+                      ? `  ·  ${payment.note}`
+                      : ''}
+                  </Text>
+
+                  <Text style={styles.rowValue}>
+                    {formatRand(payment.amount)}
+                  </Text>
                 </View>
               ))
             )}
           </View>
 
+          {/* PRIVACY NOTICE */}
           <Text style={styles.privacy}>
-            Admins see shop-level totals only. A shop's sales, customers and credit records can't be opened from the admin area,
-            and the Firestore security rules enforce this, not just the screens.
+            Admins see shop-level totals only. A shop's sales,
+            customers and credit records can't be opened from
+            the admin area, and the Firestore security rules
+            enforce this, not just the screens.
           </Text>
+
+          {/* DELETE SHOP */}
+          <Pressable
+            style={[
+              styles.deleteBtn,
+              busy && { opacity: 0.6 },
+            ]}
+            disabled={busy}
+            onPress={handleDeleteShop}
+          >
+            <Ionicons
+              name="trash-outline"
+              size={19}
+              color="#FFFFFF"
+            />
+
+            <Text style={styles.deleteBtnText}>
+              Delete Shop
+            </Text>
+          </Pressable>
+
+          <Text style={styles.deleteWarning}>
+            Permanently removes this shop's admin records.
+            This action cannot be undone.
+          </Text>
+
         </ScrollView>
       </SafeAreaView>
     </Modal>
   );
 }
 
+// STYLES
 const makeStyles = (colors) =>
   StyleSheet.create({
-    screen: { flex: 1, backgroundColor: colors.background },
-    topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, height: 56 },
-    topTitle: { flex: 1, fontSize: 18, fontWeight: '800', color: colors.textPrimary, marginRight: 12 },
-    content: { padding: 20, paddingTop: 4, paddingBottom: 48 },
-    headerRow: { flexDirection: 'row', gap: 8 },
-    score: { fontSize: 44, fontWeight: '800', color: colors.textPrimary, marginTop: 8 },
-    scoreOf: { fontSize: 16, fontWeight: '600', color: colors.textMuted },
-    contact: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-    section: { fontSize: 11, fontWeight: '800', color: colors.textMuted, letterSpacing: 0.8, marginTop: 20, marginBottom: 8 },
-    card: { backgroundColor: colors.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: colors.border },
-    rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 4 },
-    rowLabel: { fontSize: 13, color: colors.textMuted, fontWeight: '600', flexShrink: 1 },
-    rowValue: { fontSize: 13, color: colors.textPrimary, fontWeight: '700' },
-    grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    gridCell: { flexBasis: '47%', flexGrow: 1, backgroundColor: colors.card, borderRadius: 12, padding: 10, borderWidth: 1, borderColor: colors.border },
-    gridLabel: { fontSize: 10, color: colors.textMuted, fontWeight: '700' },
-    gridValue: { fontSize: 15, color: colors.textPrimary, fontWeight: '800', marginTop: 2 },
-    finding: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', paddingVertical: 8 },
-    findingDivider: { borderTopWidth: 1, borderTopColor: colors.border },
-    dot: { width: 10, height: 10, borderRadius: 5, marginTop: 5 },
-    findingTitle: { fontSize: 14, fontWeight: '700', color: colors.textPrimary },
-    findingDetail: { fontSize: 12, color: colors.textMuted, marginTop: 3, lineHeight: 17 },
-    findingAction: { fontSize: 12, color: colors.textPrimary, marginTop: 6, lineHeight: 17 },
-    findingTip: { fontSize: 12, color: colors.primary, marginTop: 3, lineHeight: 17 },
-    formRow: { flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 6 },
-    input: { height: 44, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background, paddingHorizontal: 12, fontSize: 14, color: colors.textPrimary, marginTop: 8 },
-    stepper: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 44, marginTop: 8 },
-    stepperText: { fontSize: 13, fontWeight: '700', color: colors.textPrimary, minWidth: 96, textAlign: 'center' },
-    primaryBtn: { height: 46, borderRadius: 12, backgroundColor: BRAND_GREEN, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
-    primaryBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
-    btnRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
-    outlineBtn: { height: 40, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-    outlineBtnText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
-    msg: { fontSize: 13, fontWeight: '600', marginTop: 10 },
-    privacy: { fontSize: 11, color: colors.textMuted, marginTop: 20, lineHeight: 16 },
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+
+    topBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 20,
+      height: 56,
+    },
+
+    topTitle: {
+      flex: 1,
+      fontSize: 18,
+      fontWeight: '800',
+      color: colors.textPrimary,
+      marginRight: 12,
+    },
+
+    content: {
+      padding: 20,
+      paddingTop: 4,
+      paddingBottom: 48,
+    },
+
+    headerRow: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+
+    score: {
+      fontSize: 44,
+      fontWeight: '800',
+      color: colors.textPrimary,
+      marginTop: 8,
+    },
+
+    scoreOf: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.textMuted,
+    },
+
+    contact: {
+      fontSize: 12,
+      color: colors.textMuted,
+      marginTop: 2,
+    },
+
+    section: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: colors.textMuted,
+      letterSpacing: 0.8,
+      marginTop: 20,
+      marginBottom: 8,
+    },
+
+    card: {
+      backgroundColor: colors.card,
+      borderRadius: 14,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+
+    rowBetween: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: 10,
+      marginBottom: 4,
+    },
+
+    rowLabel: {
+      fontSize: 13,
+      color: colors.textMuted,
+      fontWeight: '600',
+      flexShrink: 1,
+    },
+
+    rowValue: {
+      fontSize: 13,
+      color: colors.textPrimary,
+      fontWeight: '700',
+    },
+
+    grid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+
+    gridCell: {
+      flexBasis: '47%',
+      flexGrow: 1,
+      backgroundColor: colors.card,
+      borderRadius: 12,
+      padding: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+
+    gridLabel: {
+      fontSize: 10,
+      color: colors.textMuted,
+      fontWeight: '700',
+    },
+
+    gridValue: {
+      fontSize: 15,
+      color: colors.textPrimary,
+      fontWeight: '800',
+      marginTop: 2,
+    },
+
+    finding: {
+      flexDirection: 'row',
+      gap: 10,
+      alignItems: 'flex-start',
+      paddingVertical: 8,
+    },
+
+    findingDivider: {
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+
+    dot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      marginTop: 5,
+    },
+
+    findingTitle: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.textPrimary,
+    },
+
+    findingDetail: {
+      fontSize: 12,
+      color: colors.textMuted,
+      marginTop: 3,
+      lineHeight: 17,
+    },
+
+    findingAction: {
+      fontSize: 12,
+      color: colors.textPrimary,
+      marginTop: 6,
+      lineHeight: 17,
+    },
+
+    findingTip: {
+      fontSize: 12,
+      color: colors.primary,
+      marginTop: 3,
+      lineHeight: 17,
+    },
+
+    formRow: {
+      flexDirection: 'row',
+      gap: 8,
+      alignItems: 'center',
+      marginTop: 6,
+    },
+
+    input: {
+      height: 44,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+      paddingHorizontal: 12,
+      fontSize: 14,
+      color: colors.textPrimary,
+      marginTop: 8,
+    },
+
+    stepper: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      height: 44,
+      marginTop: 8,
+    },
+
+    stepperText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.textPrimary,
+      minWidth: 96,
+      textAlign: 'center',
+    },
+
+    primaryBtn: {
+      height: 46,
+      borderRadius: 12,
+      backgroundColor: BRAND_GREEN,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 10,
+    },
+
+    primaryBtnText: {
+      color: '#FFFFFF',
+      fontWeight: '800',
+      fontSize: 14,
+    },
+
+    btnRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 10,
+    },
+
+    outlineBtn: {
+      height: 40,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+
+    outlineBtnText: {
+      color: colors.primary,
+      fontWeight: '700',
+      fontSize: 13,
+    },
+
+    msg: {
+      fontSize: 13,
+      fontWeight: '600',
+      marginTop: 10,
+    },
+
+    privacy: {
+      fontSize: 11,
+      color: colors.textMuted,
+      marginTop: 20,
+      lineHeight: 16,
+    },
+
+    // DELETE BUTTON
+    deleteBtn: {
+      height: 50,
+      borderRadius: 12,
+      backgroundColor: '#DC2626',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      marginTop: 24,
+    },
+
+    deleteBtnText: {
+      color: '#FFFFFF',
+      fontWeight: '800',
+      fontSize: 14,
+    },
+
+    deleteWarning: {
+      fontSize: 11,
+      color: colors.textMuted,
+      textAlign: 'center',
+      marginTop: 8,
+    },
   });
