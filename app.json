@@ -12,12 +12,7 @@
         {
           "cameraPermission": "Allow the POS app to scan product QR codes."
         }
-      ],
-      "expo-asset",
-      "expo-image-picker",
-      "expo-font",
-      "@react-native-community/datetimepicker",
-      "expo-status-bar"
+      ]
     ],
     "ios": {
       "supportsTablet": true
