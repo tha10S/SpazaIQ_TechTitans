@@ -62,6 +62,24 @@ export function subscribeShopStats(onData, onError) {
   );
 }
 
+// Subscribe to the list of shops. `stores` is the source of truth for which shops exist:
+// a store is created together with the user's account at signup. Only the store document is read
+// (name and ids). Sales, customers and stock live in subcollections the admin cannot read.
+export function subscribeStores(onData, onError) {
+  return onSnapshot(
+    collection(db, 'stores'),
+    (snapshot) =>
+      onData(
+        snapshot.docs.map((item) => ({
+          storeId: item.id,
+          name: item.data().name || '',
+          createdAt: item.data().createdAt || null,
+        }))
+      ),
+    onError
+  );
+}
+
 // Subscribe to all shop subscriptions.
 export function subscribeSubscriptions(onData, onError) {
   return onSnapshot(

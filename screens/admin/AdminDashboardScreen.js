@@ -7,7 +7,7 @@ import { auth } from '../../services/firebase/firebaseConfig';
 import { useTheme } from '../../config/ThemeContext';
 import { Pill, SEVERITY_COLOR, StatCard, TIER_META, TONE_META, confirmAction } from './adminUi';
 import AdminShopDetail from './AdminShopDetail';
-import { deactivateMany, publishShopScores, subscribeShopStats, subscribeSubscriptions } from '../../services/admin/adminRepository';
+import { deactivateMany, publishShopScores, subscribeShopStats, subscribeStores, subscribeSubscriptions } from '../../services/admin/adminRepository';
 import { DEFAULT_FEE, formatDay, paymentReminderMessage, subscriptionState, toDate } from '../../services/admin/billing';
 import {
   formatRand,
@@ -31,11 +31,28 @@ const SORTS = [
 ];
 const BILLING_ORDER = { overdue: 0, deactivated: 1, 'due-soon': 2, none: 3, paid: 4 };
 
+// A shop that exists in `stores` but has not published any totals yet (brand-new, or never opened the
+// updated app). It still appears in the admin list with zeros so it can be given a subscription.
+const blankStats = (store) => ({
+  storeId: store.storeId,
+  shopName: store.name || 'Shop',
+  contactEmail: '',
+  contactPhone: '',
+  revenue30d: 0, revenuePrev30d: 0, profit30d: 0, salesCount30d: 0, itemsSold30d: 0,
+  activeDays30d: 0, creditSales30d: 0, lastSaleAt: null, firstSaleAt: null,
+  weekRevenue1: 0, weekRevenue2: 0, weekRevenue3: 0, weekRevenue4: 0,
+  productCount: 0, lowStockCount: 0, outOfStockCount: 0, stockCostValue: 0, stockGapSalesShare: 0,
+  expiredCount: 0, expiringSoonCount: 0, expiredValue: 0, expiringSoonValue: 0, expiryTrackedShare: 0,
+  creditCustomers: 0, creditOutstanding: 0, creditOverdue: 0,
+  creditDueCount90d: 0, creditOnTimeCount90d: 0, creditDueAmount90d: 0, creditOnTimeAmount90d: 0,
+});
+
 export default function AdminDashboardScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
-  const [shops, setShops] = useState([]);
+  const [statRows, setStatRows] = useState([]);
+  const [stores, setStores] = useState([]);
   const [subs, setSubs] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -55,17 +72,32 @@ export default function AdminDashboardScreen() {
           : err?.message || 'Could not load the admin data.'
       );
     };
-    const offShops = subscribeShopStats((rows) => {
-      setShops(rows);
+    const offStats = subscribeShopStats((rows) => {
+      setStatRows(rows);
+      setError('');
+    }, onError);
+    // `stores` decides which shops exist. Stats and subscriptions are looked up per store.
+    const offStores = subscribeStores((rows) => {
+      setStores(rows);
       setLoading(false);
       setError('');
     }, onError);
     const offSubs = subscribeSubscriptions(setSubs, onError);
     return () => {
-      offShops();
+      offStats();
+      offStores();
       offSubs();
     };
   }, []);
+
+  // One row per real store. Leftover shopStats/subscriptions of deleted accounts are ignored.
+  const shops = useMemo(() => {
+    const statsById = new Map(statRows.map((row) => [row.storeId, row]));
+    return stores.map((store) => {
+      const stats = statsById.get(store.storeId);
+      return stats ? { ...stats, shopName: stats.shopName || store.name } : blankStats(store);
+    });
+  }, [statRows, stores]);
 
   const now = useMemo(() => new Date(), [shops, subs]);
   const scored = useMemo(
@@ -246,7 +278,7 @@ export default function AdminDashboardScreen() {
         <View style={styles.card}>
           <Text style={styles.muted}>
             {scored.length === 0
-              ? 'No shops yet. A shop appears here after it opens the updated app once.'
+              ? 'No shops yet. A shop appears here as soon as its owner creates an account.'
               : 'No shops match this filter.'}
           </Text>
         </View>

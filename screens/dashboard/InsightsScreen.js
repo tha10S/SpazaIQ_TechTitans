@@ -20,6 +20,27 @@ const BRAND_GREEN = "#004B49"; // solid buttons keep brand green in both themes
 const BAR_GOOD = "#10B981";
 const BAR_AVERAGE = "#F59E0B";
 const BAR_BAD = "#DC2626";
+const BAR_PENDING = "#9CA3AF"; // today's bar while the day is still in progress
+
+// Bar colours come from fixed spaza benchmarks (research), not from the shop's own average,
+// so the shop sees where it really stands.
+//
+//   Weekly revenue   RED: under R3,000    YELLOW: R3,000 to R13,999    GREEN: R14,000 and above
+//
+// The research ranges leave two gaps (R2,500 to R3,500 and R12,500 to R15,000), so each gap is split
+// near its middle. Daily bars use the weekly limits divided by 7. To tune the colours, change only
+// these two numbers.
+const WEEKLY_RED_BELOW = 3000;
+const WEEKLY_GREEN_FROM = 14000;
+const perDay = (weekly) => Math.round(weekly / 7 / 10) * 10;
+const fullRand = (value) => `R${Math.round(Number(value) || 0).toLocaleString("en-ZA")}`;
+
+// The chart tabs. `id` is used in the code, `label` is what the owner sees.
+const PERIODS = [
+  { id: "Today", label: "Today" },
+  { id: "Week", label: "Week" },
+  { id: "Month", label: "4 Weeks" },
+];
 
 // Short rand amounts so the numbers fit above a thin bar: R850, R1.2k, R12k
 function shortRand(value) {
@@ -30,7 +51,8 @@ function shortRand(value) {
 
 function getPeriodData(sales, period) {
   const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const start = new Date(todayStart);
   let end = new Date(start);
   end.setDate(end.getDate() + 1);
 
@@ -39,8 +61,8 @@ function getPeriodData(sales, period) {
     end = new Date(start);
     end.setDate(end.getDate() + 7);
   } else if (period === "Month") {
-    start.setDate(1);
-    end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    // Last 4 weeks: today and the 27 days before it
+    start.setDate(start.getDate() - 27);
   }
 
   const filteredSales = sales.filter(
@@ -87,24 +109,28 @@ function getPeriodData(sales, period) {
     });
   }
 
+  const todayIndex = (now.getDay() + 6) % 7;
   const buckets = period === "Week"
     ? Array.from({ length: 7 }, (_, index) => ({
         day: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][index],
         value: 0,
+        isToday: index === todayIndex,
       }))
     : period === "Month"
-      ? Array.from({ length: Math.ceil(now.getDate() / 7) }, (_, index) => ({
-          day: `Week ${index + 1}`,
-          value: 0,
-        }))
-      : [{ day: "Today", value: 0 }];
+      ? ["3 wks ago", "2 wks ago", "Last wk", "This wk"].map((day) => ({ day, value: 0, isToday: false }))
+      : [{ day: "Today", value: 0, isToday: true }];
 
   filteredSales.forEach((sale) => {
     const date = new Date(sale.createdAt);
+    const daysAgo = Math.round(
+      (todayStart - new Date(date.getFullYear(), date.getMonth(), date.getDate())) / 86400000
+    );
     const index =
       period === "Week"
         ? (date.getDay() + 6) % 7
-        : Math.floor((date.getDate() - 1) / 7);
+        : period === "Month"
+          ? 3 - Math.floor(daysAgo / 7) // 0 = 3 weeks ago ... 3 = the last 7 days
+          : 0;
 
     if (buckets[index]) {
       buckets[index].value += Number(sale.total || 0);
@@ -262,19 +288,29 @@ export default function Insights({ route, navigation }) {
   // Scale chart bars so large rand values don't overflow the chart area
   const maxBarValue = Math.max(1, ...data.salesByDay.map((d) => d.value));
 
-  // Colour each bar against the average of the days (or weeks) that had sales:
-  // green is clearly above it, yellow is around it, red is well below it. Zero sales stays an empty bar.
-  const sellingBars = data.salesByDay.filter((d) => d.value > 0);
-  const barAverage = sellingBars.length
-    ? sellingBars.reduce((sum, d) => sum + d.value, 0) / sellingBars.length
-    : 0;
-  const barColor = (value) => {
-    if (!value || !barAverage) return colors.primary;
-    const ratio = value / barAverage;
-    if (ratio >= 1.1) return BAR_GOOD;
-    if (ratio >= 0.7) return BAR_AVERAGE;
-    return BAR_BAD;
+  // Bar colours use the fixed benchmark limits above. A week bar uses the weekly limits and a day bar uses
+  // the weekly limits divided by 7. Today's bar stays grey while the day is still going, unless it has
+  // already reached green. Zero sales stays an empty bar.
+  const limitFor = (weekly) => (period === "Week" ? perDay(weekly) : weekly);
+  const redBelow = limitFor(WEEKLY_RED_BELOW);
+  const greenFrom = limitFor(WEEKLY_GREEN_FROM);
+  const barColor = (day) => {
+    if (!day.value) return BAR_PENDING;
+    if (day.value >= greenFrom) return BAR_GOOD;
+    if (day.isToday) return BAR_PENDING;
+    return day.value >= redBelow ? BAR_AVERAGE : BAR_BAD;
   };
+  const legendItems = [
+    [BAR_GOOD, `Good · ${fullRand(greenFrom)} or more`],
+    [BAR_AVERAGE, `Average · ${fullRand(redBelow)} to ${fullRand(greenFrom - 1)}`],
+    [BAR_BAD, `Below average · under ${fullRand(redBelow)}`],
+  ];
+  const legendNote = `Each ${period === "Week" ? "day" : "week"} is compared with typical spaza sales`
+    + `${period === "Week" ? " (about a seventh of a week)" : ""}.`
+    + (period === "Week"
+      ? " Today stays grey until the day ends, unless it has already reached green."
+      : " Each bar is 7 days, ending today.")
+    + " No bar means no sales.";
 
   return (
     <ScrollView
@@ -287,16 +323,16 @@ export default function Insights({ route, navigation }) {
       ) : null}
 
       <View style={styles.segmentWrap}>
-        {["Today", "Week", "Month"].map((label) => (
+        {PERIODS.map(({ id, label }) => (
           <Pressable
-            key={label}
-            onPress={() => setPeriod(label)}
-            style={[styles.segment, period === label && styles.segmentActive]}
+            key={id}
+            onPress={() => setPeriod(id)}
+            style={[styles.segment, period === id && styles.segmentActive]}
           >
             <Text
               style={[
                 styles.segmentText,
-                period === label && styles.segmentTextActive,
+                period === id && styles.segmentTextActive,
               ]}
             >
               {label}
@@ -323,7 +359,7 @@ export default function Insights({ route, navigation }) {
       {period !== "Today" && (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>
-            {period === "Week" ? "Sales by Day" : "Sales by Week"}
+            {period === "Week" ? "Sales by Day" : "Sales by Week (last 4 weeks)"}
           </Text>
           <View style={styles.chartRow}>
             {data.salesByDay.map((day) => (
@@ -334,7 +370,7 @@ export default function Insights({ route, navigation }) {
                     styles.bar,
                     {
                       height: day.value ? Math.max(4, (day.value / maxBarValue) * 80) : 0,
-                      backgroundColor: barColor(day.value),
+                      backgroundColor: barColor(day),
                     },
                   ]}
                 />
@@ -344,16 +380,14 @@ export default function Insights({ route, navigation }) {
           </View>
 
           <View style={styles.legendRow}>
-            {[[BAR_GOOD, "Good"], [BAR_AVERAGE, "Average"], [BAR_BAD, "Below average"]].map(([color, label]) => (
+            {legendItems.map(([color, label]) => (
               <View key={label} style={styles.legendItem}>
                 <View style={[styles.legendDot, { backgroundColor: color }]} />
                 <Text style={styles.legendText}>{label}</Text>
               </View>
             ))}
           </View>
-          <Text style={styles.legendNote}>
-            Compared with your average {period === "Week" ? "day" : "week"} that had sales. No bar means no sales.
-          </Text>
+          <Text style={styles.legendNote}>{legendNote}</Text>
         </View>
       )}
 
@@ -466,7 +500,7 @@ export default function Insights({ route, navigation }) {
         })
       )}
 
-      <Text style={[styles.sectionLabel, styles.topLabel]}>{`TOP 3 BEST SELLERS · ${period.toUpperCase()}`}</Text>
+      <Text style={[styles.sectionLabel, styles.topLabel]}>{`TOP 3 BEST SELLERS · ${period === "Month" ? "LAST 4 WEEKS" : period.toUpperCase()}`}</Text>
       {data.topProducts.length === 0 && !loading ? (
         <Text style={styles.recentTime}>No products sold in this period.</Text>
       ) : data.topProducts.map((p, i) => (
