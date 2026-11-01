@@ -220,25 +220,25 @@ export default function HomeScreen({ navigation, route }) {
   const openScanner = () => navigation.navigate('Scanner', { returnTo: 'Sell' });
 
   // Start from the params passed at login, then follow the saved profile so edits show up immediately.
-const [userName, setUserName] = useState(route?.params?.userName);
-const [shopName, setShopName] = useState(route?.params?.shopName);
-useEffect(() => {
-  const userId = auth.currentUser?.uid;
-  if (!userId) return undefined; // offline demo: keep the params
-  try {
-    return subscribeUserProfile(
-      userId,
-      (data) => {
-        if (!data) return;
-        if (data.fullName || data.displayName) setUserName(data.fullName || data.displayName);
-        if (data.shopName) setShopName(data.shopName);
-      },
-      () => {}
-    );
-  } catch (error) {
-    return undefined;
-  }
-}, []);
+  const [userName, setUserName] = useState(route?.params?.userName);
+  const [shopName, setShopName] = useState(route?.params?.shopName);
+  useEffect(() => {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return undefined; // offline demo: keep the params
+    try {
+      return subscribeUserProfile(
+        userId,
+        (data) => {
+          if (!data) return;
+          if (data.fullName || data.displayName) setUserName(data.fullName || data.displayName);
+          if (data.shopName) setShopName(data.shopName);
+        },
+        () => {}
+      );
+    } catch (error) {
+      return undefined;
+    }
+  }, []);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

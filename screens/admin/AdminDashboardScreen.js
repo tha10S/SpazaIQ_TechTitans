@@ -18,6 +18,7 @@ import {
   scoreAll,
   tierComparison,
 } from '../../services/admin/performance';
+import LivePulseChart from './livePulseChart';
 
 const BRAND_GREEN = '#004B49';
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -164,6 +165,9 @@ export default function AdminDashboardScreen() {
         <StatCard colors={colors} label="SHOP REVENUE (30 DAYS)" value={formatRand(totals.revenue30d)} hint={`${totals.sales30d} sales, ${totals.items30d} items`} />
         <StatCard colors={colors} label="AVERAGE SCORE" value={String(totals.avgScore)} hint="out of 100" />
       </View>
+
+      <Text style={styles.section}>LIVE PLATFORM PULSE</Text>
+      <LivePulseChart shops={shops} />
 
       <Text style={styles.section}>PERFORMANCE</Text>
       <View style={styles.tierRow}>
