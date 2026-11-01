@@ -3,9 +3,8 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../config/ThemeContext';
-import { formatDay, paymentReference } from '../services/admin/billing';
-import { openWhatsApp } from '../services/whatsapp';
-import { PAYMENT_DETAILS, SUPPORT_WHATSAPP } from './SubscriptionBanner';
+import { formatDay } from '../services/admin/billing';
+import PayByCard from './PayByCard';
 
 // Same tabs and icons as the real bottom navigation, shown greyed out and not tappable
 const TABS = [
@@ -49,15 +48,7 @@ export default function DeactivatedScreen({ storeId, sub, state, shopName, onSig
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
-  const fee = Number(sub?.monthlyFee || 0);
-  const reference = paymentReference(storeId);
   const reason = String(sub?.deactivatedReason || '').trim();
-  const detailLines = [
-    ['Bank', PAYMENT_DETAILS.bank],
-    ['Account name', PAYMENT_DETAILS.accountName],
-    ['Account number', PAYMENT_DETAILS.accountNumber],
-    ['Branch code', PAYMENT_DETAILS.branchCode],
-  ].filter(([, value]) => value);
 
   const explanation = sub?.status === 'deactivated'
     ? 'Your shop has been deactivated, so you cannot record sales or use SpazaIQ until it is switched back on.'
@@ -76,31 +67,9 @@ export default function DeactivatedScreen({ storeId, sub, state, shopName, onSig
           <Text style={styles.message}>{explanation}</Text>
           {reason && sub?.status === 'deactivated' ? <Text style={styles.reason}>Reason: {reason}</Text> : null}
 
-          <View style={styles.payBox}>
-            <Text style={styles.payTitle}>How to switch your shop back on</Text>
-            <Text style={styles.payText}>
-              Pay {fee > 0 ? `R${fee.toFixed(2)}` : 'your subscription'} by EFT. Use this reference so we can match your payment to your shop:
-            </Text>
-            <Text style={styles.payRef} selectable>{reference}</Text>
-            {detailLines.map(([label, value]) => (
-              <Text key={label} style={styles.payText}>{label}: <Text style={styles.payValue} selectable>{value}</Text></Text>
-            ))}
-            <Text style={styles.payText}>
-              Once you have paid, send your proof of payment. Your shop is switched back on when we confirm it, and this screen goes away by itself.
-            </Text>
-            {SUPPORT_WHATSAPP ? (
-              <Pressable
-                style={styles.whatsappButton}
-                onPress={() => openWhatsApp(
-                  SUPPORT_WHATSAPP,
-                  `Hi, I've paid${fee > 0 ? ` R${fee.toFixed(2)}` : ''} for my SpazaIQ subscription. My payment reference is ${reference}.`
-                )}
-                accessibilityRole="button"
-              >
-                <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
-                <Text style={styles.whatsappText}>Send proof of payment on WhatsApp</Text>
-              </Pressable>
-            ) : null}
+          {/* Pay by card (simulated). When the payment saves, the subscription is active again and this screen goes away by itself. */}
+          <View style={styles.payWrap}>
+            <PayByCard storeId={storeId} />
           </View>
 
           <Pressable style={styles.signOutButton} onPress={onSignOut} accessibilityRole="button">
@@ -141,6 +110,7 @@ const makeStyles = (colors) =>
       maxWidth: 420,
     },
     reason: { fontSize: 13, fontWeight: '700', color: colors.danger, marginTop: 8 },
+    payWrap: { width: '100%', maxWidth: 420 },
     payBox: {
       width: '100%',
       maxWidth: 420,
