@@ -1,37 +1,42 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
-    function ownsStore(storeId) { return signedIn() && request.auth.uid == storeId; }
-
-    // ------------------------------------------------------------------------------------------
-    // ADMIN ACCESS
-    // An admin is a signed-in user who has a document at admins/{their uid}.
-    // That document can only be created in the Firebase console, never from the app (see below).
-    // There is NO rule anywhere that lets an admin read stores/{storeId}/... so an admin can never
-    // read a shop's sales, customers, credit or products. Admins see only the shop-level totals in
-    // shopStats and the billing records in subscriptions.
-    // ------------------------------------------------------------------------------------------
-    function isAdmin() {
-      return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    function signedIn() {
+      return request.auth != null;
     }
 
-    // A shop whose subscription is deactivated, or whose paid-up date has passed, cannot record new sales.
-    // A shop with no subscription document is NOT suspended, so existing shops keep working.
+    function ownsStore(storeId) {
+      return signedIn() && request.auth.uid == storeId;
+    }
+
+    // ADMIN ACCESS
+    // An admin is a signed-in user with a document at admins/{their uid}.
+    // Admin documents can only be created through the Firebase console.
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // Subscription suspension
     function subscriptionPath(storeId) {
       return /databases/$(database)/documents/subscriptions/$(storeId);
     }
+
     function isSuspended(storeId) {
       return exists(subscriptionPath(storeId))
-        && (get(subscriptionPath(storeId)).data.get('status', 'active') == 'deactivated'
-          || get(subscriptionPath(storeId)).data.get('accessUntil', request.time) < request.time);
+        && (
+          get(subscriptionPath(storeId)).data.get('status', 'active') == 'deactivated'
+          || get(subscriptionPath(storeId)).data.get('accessUntil', request.time) < request.time
+        );
     }
 
-    // ---- Validation helpers ----
+    // Validation helpers
     function numberField(d, key) {
-      return d.get(key, 0) is number && d.get(key, 0) >= 0;
+      return d.get(key, 0) is number
+        && d.get(key, 0) >= 0;
     }
 
+    // Shop-level totals
     function validShopStats(storeId, d) {
       return d.keys().hasOnly([
           'storeId', 'shopName', 'contactEmail', 'contactPhone',
@@ -39,29 +44,56 @@ service cloud.firestore {
           'activeDays30d', 'creditSales30d', 'lastSaleAt', 'firstSaleAt',
           'weekRevenue1', 'weekRevenue2', 'weekRevenue3', 'weekRevenue4',
           'productCount', 'lowStockCount', 'outOfStockCount', 'stockCostValue',
+          'stockGapSalesShare', 'expiryTrackedShare', 'expiredValue', 'expiringSoonValue',
           'expiryTrackedCount', 'expiredCount', 'expiringSoonCount',
-          'creditCustomers', 'creditOutstanding', 'creditOverdue', 'updatedAt'
+          'creditCustomers', 'creditOutstanding', 'creditOverdue',
+          'creditDueCount90d', 'creditOnTimeCount90d', 'creditDueAmount90d', 'creditOnTimeAmount90d',
+          'updatedAt'
         ])
         && d.keys().hasAll(['storeId', 'shopName', 'updatedAt'])
         && d.storeId == storeId
-        && d.shopName is string && d.shopName.size() <= 80
-        && d.get('contactEmail', '') is string && d.get('contactEmail', '').size() <= 120
-        && d.get('contactPhone', '') is string && d.get('contactPhone', '').size() <= 30
-        && numberField(d, 'revenue30d') && numberField(d, 'revenuePrev30d')
+        && d.shopName is string
+        && d.shopName.size() <= 80
+        && d.get('contactEmail', '') is string
+        && d.get('contactEmail', '').size() <= 120
+        && d.get('contactPhone', '') is string
+        && d.get('contactPhone', '').size() <= 30
+        && numberField(d, 'revenue30d')
+        && numberField(d, 'revenuePrev30d')
         && d.get('profit30d', 0) is number
-        && numberField(d, 'salesCount30d') && numberField(d, 'itemsSold30d')
-        && numberField(d, 'activeDays30d') && d.get('activeDays30d', 0) <= 31
+        && numberField(d, 'salesCount30d')
+        && numberField(d, 'itemsSold30d')
+        && numberField(d, 'activeDays30d')
+        && d.get('activeDays30d', 0) <= 31
         && numberField(d, 'creditSales30d')
         && (d.get('lastSaleAt', null) == null || d.get('lastSaleAt', null) is timestamp)
         && (d.get('firstSaleAt', null) == null || d.get('firstSaleAt', null) is timestamp)
-        && numberField(d, 'weekRevenue1') && numberField(d, 'weekRevenue2')
-        && numberField(d, 'weekRevenue3') && numberField(d, 'weekRevenue4')
-        && numberField(d, 'productCount') && numberField(d, 'lowStockCount')
-        && numberField(d, 'outOfStockCount') && numberField(d, 'stockCostValue')
-        && numberField(d, 'expiryTrackedCount') && numberField(d, 'expiredCount')
+        && numberField(d, 'weekRevenue1')
+        && numberField(d, 'weekRevenue2')
+        && numberField(d, 'weekRevenue3')
+        && numberField(d, 'weekRevenue4')
+        && numberField(d, 'productCount')
+        && numberField(d, 'lowStockCount')
+        && numberField(d, 'outOfStockCount')
+        && numberField(d, 'stockCostValue')
+        && numberField(d, 'stockGapSalesShare')
+        && d.get('stockGapSalesShare', 0) <= 1
+        && numberField(d, 'expiryTrackedShare')
+        && d.get('expiryTrackedShare', 0) <= 1
+        && numberField(d, 'expiredValue')
+        && numberField(d, 'expiringSoonValue')
+        && numberField(d, 'expiryTrackedCount')
+        && numberField(d, 'expiredCount')
         && numberField(d, 'expiringSoonCount')
-        && numberField(d, 'creditCustomers') && numberField(d, 'creditOutstanding')
+        && numberField(d, 'creditCustomers')
+        && numberField(d, 'creditOutstanding')
         && numberField(d, 'creditOverdue')
+        && numberField(d, 'creditDueCount90d')
+        && numberField(d, 'creditOnTimeCount90d')
+        && d.get('creditOnTimeCount90d', 0) <= d.get('creditDueCount90d', 0)
+        && numberField(d, 'creditDueAmount90d')
+        && numberField(d, 'creditOnTimeAmount90d')
+        && d.get('creditOnTimeAmount90d', 0) <= d.get('creditDueAmount90d', 0) + 1
         && d.updatedAt == request.time;
     }
 
@@ -72,46 +104,91 @@ service cloud.firestore {
         ])
         && d.keys().hasAll(['storeId', 'plan', 'monthlyFee', 'status', 'updatedAt'])
         && d.storeId == storeId
-        && d.plan is string && d.plan.size() <= 40
-        && d.monthlyFee is number && d.monthlyFee >= 0
+        && d.plan is string
+        && d.plan.size() <= 40
+        && d.monthlyFee is number
+        && d.monthlyFee >= 0
         && d.status in ['active', 'deactivated']
         && d.get('coveredMonth', '2000-01') is string
         && (d.get('dueDate', null) == null || d.get('dueDate', null) is timestamp)
         && (d.get('accessUntil', null) == null || d.get('accessUntil', null) is timestamp)
         && d.get('lastPaymentAmount', 0) is number
-        && d.get('deactivatedReason', '') is string && d.get('deactivatedReason', '').size() <= 120
+        && d.get('deactivatedReason', '') is string
+        && d.get('deactivatedReason', '').size() <= 120
         && d.updatedAt == request.time;
     }
 
     function validPayment(d) {
-      return d.keys().hasOnly(['amount', 'coveredMonth', 'paidAt', 'note', 'recordedBy'])
-        && d.keys().hasAll(['amount', 'coveredMonth', 'paidAt', 'recordedBy'])
-        && d.amount is number && d.amount >= 0
-        && d.coveredMonth is string && d.coveredMonth.size() == 7
-        && d.get('note', '') is string && d.get('note', '').size() <= 200
+      return d.keys().hasOnly([
+          'amount', 'coveredMonth', 'paidAt', 'note', 'recordedBy'
+        ])
+        && d.keys().hasAll([
+          'amount', 'coveredMonth', 'paidAt', 'recordedBy'
+        ])
+        && d.amount is number
+        && d.amount >= 0
+        && d.coveredMonth is string
+        && d.coveredMonth.size() == 7
+        && d.get('note', '') is string
+        && d.get('note', '').size() <= 200
         && d.recordedBy == request.auth.uid
         && d.paidAt == request.time;
     }
 
-    // ------------------------------------------------------------------------------------------
-    // NEW: admin, subscription and shop-total collections
-    // ------------------------------------------------------------------------------------------
+    // DEMO ONLY: SIMULATED SUBSCRIPTION PAYMENT
+    // There is no payment server yet, so the shop's own app marks its subscription as paid. This trusts the app.
+    // REMOVE these two functions and the matching `allow update` in /subscriptions before taking real money.
+    // Real payments must be confirmed by a server (for example a Paystack webhook) that writes with admin rights.
+    // Payment opens at the stored due date (the 28th), or at any time once the shop is overdue or deactivated.
+    function paymentWindowOpen(before) {
+      return before.get('status', 'active') == 'deactivated'
+        || (before.get('dueDate', null) != null && request.time >= before.dueDate)
+        || (before.get('accessUntil', null) != null && request.time >= before.accessUntil);
+    }
 
-    // Who is an admin. A signed-in user may check ONLY their own document (so the app can decide whether to show
-    // the Admin area). Nobody can list it, and nobody can write it from the app. Add admins in the console.
+    function validSimulatedPayment(before, after) {
+      return after.diff(before).affectedKeys().hasOnly([
+          'status', 'coveredMonth', 'dueDate', 'accessUntil',
+          'lastPaymentAt', 'lastPaymentAmount', 'deactivatedReason', 'updatedAt'
+        ])
+        && after.status == 'active'
+        && after.lastPaymentAmount == before.monthlyFee
+        && after.lastPaymentAt == request.time
+        && after.updatedAt == request.time
+        && after.get('deactivatedReason', 'x') == ''
+        && after.coveredMonth is string
+        && after.coveredMonth.size() == 7
+        && after.dueDate is timestamp
+        && after.accessUntil is timestamp
+        && after.dueDate > request.time
+        && after.dueDate <= request.time + duration.value(36, 'd')
+        && after.accessUntil > after.dueDate
+        && after.accessUntil <= request.time + duration.value(36, 'd');
+    }
+
+    // ADMIN DOCUMENTS
     match /admins/{adminId} {
       allow get: if signedIn() && request.auth.uid == adminId;
       allow list, create, update, delete: if false;
     }
 
-    // Billing status. Only an admin can write it. A shop can read its own, to show a "payment due" banner.
+    // SUBSCRIPTIONS AND BILLING
     match /subscriptions/{storeId} {
       allow get: if ownsStore(storeId) || isAdmin();
       allow list: if isAdmin();
-      allow create, update: if isAdmin() && validSubscription(storeId, request.resource.data);
+
+      allow create, update: if isAdmin()
+        && validSubscription(storeId, request.resource.data);
+
       allow delete: if isAdmin();
 
-      // Payment history is append-only: it can be added to, but never edited or deleted.
+      // DEMO ONLY: the shop pays its own subscription (simulated). See validSimulatedPayment above.
+      allow update: if ownsStore(storeId)
+        && paymentWindowOpen(resource.data)
+        && validSimulatedPayment(resource.data, request.resource.data);
+
+      // Payment history is append-only.
+      // It cannot be edited or deleted.
       match /payments/{paymentId} {
         allow read: if ownsStore(storeId) || isAdmin();
         allow create: if isAdmin() && validPayment(request.resource.data);
@@ -119,23 +196,30 @@ service cloud.firestore {
       }
     }
 
-    // Anonymous shop-level totals. The shop writes its own (and only numbers and its name and contact are accepted).
-    // An admin can read all of them. This is the ONLY shop data an admin can read.
+    // SHOP STATISTICS
     match /shopStats/{storeId} {
       allow get: if ownsStore(storeId) || isAdmin();
       allow list: if isAdmin();
-      allow create, update: if ownsStore(storeId) && validShopStats(storeId, request.resource.data);
-      allow delete: if ownsStore(storeId);
+
+      allow create, update: if ownsStore(storeId)
+        && validShopStats(storeId, request.resource.data);
+
+      // UPDATED: admins can now delete shop statistics.
+      allow delete: if ownsStore(storeId) || isAdmin();
     }
 
-    // ------------------------------------------------------------------------------------------
-    // A shop's FINISHED score. Only an admin can write it (the admin dashboard works it out, because only an admin can
-    // compare shops). A shop can read only its own, so it sees its final number and never another shop's figures.
+    // SHOP SCORES
     function validShopScore(storeId, d) {
-      return d.keys().hasOnly(['storeId', 'score', 'tier', 'updatedAt'])
-        && d.keys().hasAll(['storeId', 'score', 'tier', 'updatedAt'])
+      return d.keys().hasOnly([
+          'storeId', 'score', 'tier', 'updatedAt'
+        ])
+        && d.keys().hasAll([
+          'storeId', 'score', 'tier', 'updatedAt'
+        ])
         && d.storeId == storeId
-        && d.score is number && d.score >= 0 && d.score <= 100
+        && d.score is number
+        && d.score >= 0
+        && d.score <= 100
         && d.tier in ['high', 'mid', 'low']
         && d.updatedAt == request.time;
     }
@@ -143,28 +227,39 @@ service cloud.firestore {
     match /shopScores/{storeId} {
       allow get: if ownsStore(storeId) || isAdmin();
       allow list: if isAdmin();
-      allow create, update: if isAdmin() && validShopScore(storeId, request.resource.data);
+
+      allow create, update: if isAdmin()
+        && validShopScore(storeId, request.resource.data);
+
       allow delete: if isAdmin();
     }
 
-    // EXISTING RULES (unchanged, except for the one marked CHANGED below)
-    // ------------------------------------------------------------------------------------------
+    // TEST COLLECTION
     match /test/{documentId} {
-      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
-      allow read: if signedIn() && resource.data.ownerUid == request.auth.uid;
-      allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid;
+
+      allow read: if signedIn()
+        && resource.data.ownerUid == request.auth.uid;
+
+      allow delete: if signedIn()
+        && resource.data.ownerUid == request.auth.uid;
     }
 
+    // USERS
     match /users/{userId} {
-      allow read: if signedIn() && request.auth.uid == userId;
+      allow read: if signedIn()
+        && request.auth.uid == userId;
+
       allow create: if signedIn()
         && request.auth.uid == userId
         && request.resource.data.uid == userId
         && request.resource.data.defaultStoreId == userId
         && request.resource.data.keys().hasOnly([
           'uid', 'email', 'displayName', 'fullName', 'mobile', 'shopName',
-          'defaultStoreId', 'createdAt', 'updatedAt', 'location', 'shopRegistration'
+          'defaultStoreId', 'createdAt', 'updatedAt', 'location', 'shopRegistration', 'province'
         ]);
+
       allow update: if signedIn()
         && request.auth.uid == userId
         && request.resource.data.uid == userId
@@ -172,18 +267,23 @@ service cloud.firestore {
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.keys().hasOnly([
           'uid', 'email', 'displayName', 'fullName', 'mobile', 'shopName',
-          'defaultStoreId', 'createdAt', 'updatedAt', 'location', 'shopRegistration'
+          'defaultStoreId', 'createdAt', 'updatedAt', 'location', 'shopRegistration', 'province'
         ]);
-      allow delete: if signedIn() && request.auth.uid == userId;
+
+      allow delete: if signedIn()
+        && request.auth.uid == userId;
     }
 
+    // STORES
     match /stores/{storeId} {
-      allow read: if ownsStore(storeId);
+      allow read: if ownsStore(storeId) || isAdmin();
+
       allow create: if ownsStore(storeId)
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.keys().hasOnly([
           'ownerId', 'name', 'seedVersion', 'createdAt', 'updatedAt'
         ]);
+
       allow update: if ownsStore(storeId)
         && resource.data.ownerId == request.auth.uid
         && request.resource.data.ownerId == request.auth.uid
@@ -191,21 +291,25 @@ service cloud.firestore {
           'ownerId', 'name', 'seedVersion', 'createdAt', 'updatedAt'
         ])
         && request.resource.data.createdAt == resource.data.createdAt;
+
       allow delete: if ownsStore(storeId);
 
       match /{collectionName}/{documentId} {
         allow read: if ownsStore(storeId);
-        // CHANGED: a suspended (unpaid) shop cannot record new sales. Everything else is as before.
+
+        // Suspended shops cannot create new sales.
         allow create: if ownsStore(storeId)
           && request.resource.data.storeId == storeId
           && (collectionName != 'sales' || !isSuspended(storeId));
+
         allow update: if ownsStore(storeId)
           && resource.data.storeId == storeId
           && request.resource.data.storeId == storeId;
+
         allow delete: if ownsStore(storeId);
       }
 
-      // Nested subcollections at any depth: read and delete only
+      // Nested subcollections at any depth: read and delete only.
       match /{path=**} {
         allow read, delete: if ownsStore(storeId);
       }
