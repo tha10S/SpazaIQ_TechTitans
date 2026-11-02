@@ -11,7 +11,12 @@ import {
 import { db } from '../firebase/firebaseConfig';
 import { assertStoreId, storeCollectionPath } from './paths';
 import { mapSale } from './mappers';
-import { parseNonNegativeNumber, todayIsoDate, validateIsoDate } from '../validation';
+import {
+  assertMinimumCreditAmount,
+  parseNonNegativeNumber,
+  todayIsoDate,
+  validateIsoDate,
+} from '../validation';
 import { consumeStockBatches, getEarliestStockExpiry, normalizeStockBatches } from './stockBatches';
 import {
   enqueueOfflineOperation,
@@ -127,6 +132,7 @@ function validateSaleInput({ cart, total, creditAmount = 0, paidAmount = total, 
   });
   if (numericCredit > numericTotal || numericPaid > numericTotal) throw new Error('Payment amounts cannot exceed the sale total.');
   if (Math.abs(numericPaid + numericCredit - numericTotal) > 0.01) throw new Error('Payment amounts must equal the sale total.');
+  if (numericCredit > 0) assertMinimumCreditAmount(numericCredit);
   if (numericCredit > 0 && !customerId) throw new Error('Select a customer for credit payment.');
   if (numericCredit > 0) {
     validateIsoDate(dueDate, 'due date', { min: todayIsoDate() });

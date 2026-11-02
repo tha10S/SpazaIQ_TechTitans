@@ -1,4 +1,11 @@
 export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+export const MINIMUM_CREDIT_AMOUNT = 100;
+
+export function assertMinimumCreditAmount(amount) {
+  if (Math.round(Number(amount) * 100) < MINIMUM_CREDIT_AMOUNT * 100) {
+    throw new Error(`The credit portion must be at least R ${MINIMUM_CREDIT_AMOUNT.toFixed(2)}.`);
+  }
+}
 
 export function normalizeEmail(value) {
   return String(value ?? '').trim().toLowerCase();

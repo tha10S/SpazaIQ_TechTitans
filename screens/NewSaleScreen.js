@@ -20,7 +20,12 @@ import { fetchProducts } from '../services/salesService';
 import { getAuthenticatedStoreId } from '../services/firestore/paths';
 import { subscribeCustomers } from '../services/firestore/customersRepository';
 import { OfflineSyncNotice } from '../components/OfflineSyncNotice';
-import { isValidDecimalInput, parseNonNegativeNumber } from '../services/validation';
+import {
+  assertMinimumCreditAmount,
+  isValidDecimalInput,
+  MINIMUM_CREDIT_AMOUNT,
+  parseNonNegativeNumber,
+} from '../services/validation';
 
 const PAYMENT_METHODS = [
   { id: 'Cash', label: 'Cash', icon: 'cash-outline' },
@@ -138,6 +143,8 @@ export default function NewSaleScreen({ route, navigation }) {
       ? firstAmount
       : 0;
   const paidAmount = subtotal - creditAmount;
+  const creditMinimumError = creditAmount > 0
+    && Math.round(creditAmount * 100) < MINIMUM_CREDIT_AMOUNT * 100;
 
   const amountByMethod = { Cash: cashAmount, Card: cardAmount, Credit: creditAmount };
 
@@ -317,6 +324,15 @@ export default function NewSaleScreen({ route, navigation }) {
           type: 'error',
           text: `For a split payment, enter an amount for ${firstMethod.toLowerCase()} that is more than R 0.00 and less than the total.`,
         });
+        return;
+      }
+    }
+
+    if (creditAmount > 0) {
+      try {
+        assertMinimumCreditAmount(creditAmount);
+      } catch (error) {
+        setNotice({ type: 'error', text: error.message });
         return;
       }
     }
@@ -585,6 +601,7 @@ export default function NewSaleScreen({ route, navigation }) {
               <Ionicons name="wallet-outline" size={18} color={COLORS.primary} />
               <Text style={styles.infoText}>
                 {formatR(creditAmount)} goes on credit. You'll choose the customer and repayment plan on the Credit screen.
+                {creditMinimumError ? ` The credit portion must be at least R ${MINIMUM_CREDIT_AMOUNT.toFixed(2)}.` : ''}
               </Text>
             </View>
           </View>
@@ -675,7 +692,9 @@ export default function NewSaleScreen({ route, navigation }) {
                     color={COLORS.primary}
                   />
                   <Text style={styles.infoText}>
-                    {splitHasCard && isOffline
+                    {creditMinimumError
+                      ? `The credit portion must be at least R ${MINIMUM_CREDIT_AMOUNT.toFixed(2)}.`
+                      : splitHasCard && isOffline
                       ? 'Card payments need an internet connection. Pick cash and credit while offline.'
                       : `${splitHint}${splitHasCard ? ' Card payments are simulated. No real card is charged.' : ''}`}
                   </Text>
