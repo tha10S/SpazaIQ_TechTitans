@@ -664,7 +664,7 @@ function makeStyles(colors, typography, spacing, radius) {
     addButton: {
       position: 'absolute',
       right: 16,
-      bottom: 72,
+      bottom: 130,
       width: 48,
       height: 48,
       borderRadius: 24,
